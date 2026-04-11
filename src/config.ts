@@ -141,10 +141,12 @@ export type BlockType =
   | 'wheel'
   | 'archway'
   | 'stairs'
+  | 'gentlestairs'
   | 'column'
   | 'tree'
   | 'lamp'
   | 'ladder'
+  | 'bridge'
   | 'minifig';
 
 export type BlockCategory =
@@ -197,16 +199,21 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'cone', label: '콘', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
   // 부품
   { type: 'window', label: '창문', category: 'part', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 1 } },
-  { type: 'door', label: '문', category: 'part', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 3, d: 1 } },
+  { type: 'door', label: '문', category: 'part', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 4, d: 1 } },
   { type: 'fence', label: '울타리', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
   { type: 'wheel', label: '바퀴', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 2, d: 2 } },
   // 특수
   { type: 'archway', label: '아치 입구', category: 'special', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 6, d: 2 } },
   { type: 'stairs', label: '계단', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 2, d: 4 } },
+  { type: 'gentlestairs', label: '완만한 계단', category: 'special', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 6 } },
   { type: 'column', label: '기둥', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'tree', label: '나무', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'lamp', label: '가로등', category: 'special', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'ladder', label: '사다리', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  // 44 studs long — enough to span a 40-stud gap between two baseplates
+  // with 2 studs of overhang on each end for anchoring. Placement uses a
+  // relaxed bridge-specific check so the middle can hang over open water.
+  { type: 'bridge', label: '교량', category: 'special', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 44 } },
   // 캐릭터
   { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
 ];

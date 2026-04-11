@@ -107,9 +107,11 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 1.2, 0);
       break;
     case 'door':
-      // 3×1×6.0 — widened and raised so a minifig actually fits. Head-on
-      // view; camera pulled back far enough to fit the full 6-unit height.
-      camera!.position.set(0, 4.0, 13);
+      // 4×1×6.0 — widened to 4 studs so a 2-stud-wide minifig with
+      // generous collision can walk through without clipping the jambs.
+      // Head-on view; camera pulled back to fit both the 4-wide footprint
+      // and the 6-tall height.
+      camera!.position.set(0, 4.0, 14);
       camera!.lookAt(0, 3.0, 0);
       break;
     case 'fence':
@@ -141,6 +143,14 @@ export function renderBlockTypeThumbnail(
       obj.rotation.y = Math.PI;
       camera!.position.set(10, 5, 9);
       camera!.lookAt(0, 2.4, 0);
+      break;
+    case 'gentlestairs':
+      // 2×6×2.4 — longer but shallower than the regular staircase. Same
+      // camera treatment, but pulled back a touch to fit the longer
+      // 6-stud run and aimed lower since the total rise is only 2.4.
+      obj.rotation.y = Math.PI;
+      camera!.position.set(10, 3.5, 11);
+      camera!.lookAt(0, 1.2, 0);
       break;
     case 'column':
       // 1×1×4.8 — tall thin pillar.

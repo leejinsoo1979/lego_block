@@ -92,6 +92,9 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'stairs':
       group = createStairsBlock(spec);
       break;
+    case 'gentlestairs':
+      group = createGentleStairsBlock(spec);
+      break;
     case 'column':
       group = createColumnBlock(spec);
       break;
@@ -103,6 +106,9 @@ export function createBrick(spec: BlockSpec): THREE.Group {
       break;
     case 'ladder':
       group = createLadderBlock(spec);
+      break;
+    case 'bridge':
+      group = createBridgeBlock(spec);
       break;
     default:
       group = createBoxBlock(spec, 'brick');
@@ -818,7 +824,19 @@ function createArchwayBlock(spec: BlockSpec): THREE.Group {
 //  archway's walk-through direction, so both blocks "face forward" the
 //  same way when placed).
 // ------------------------------------------------------------------
-function createStairsBlock(spec: BlockSpec): THREE.Group {
+/**
+ * Shared stair builder — each step is 1 stud deep along Z, full width
+ * along X, and `stepRise` tall. Lowest step is at -Z (front), highest
+ * step is at +Z (back).
+ *
+ * `stepRise` controls the steepness:
+ *   - `3 * PLATE_HEIGHT` (1 brick) → the default steep Lego staircase
+ *   - `PLATE_HEIGHT`     (1 plate) → a gentle ramp-like staircase
+ */
+function createStairsBlockShared(
+  spec: BlockSpec,
+  stepRise: number
+): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w;
   const d = spec.d;
@@ -826,12 +844,9 @@ function createStairsBlock(spec: BlockSpec): THREE.Group {
 
   const width = w * GRID.X;
   const depth = d * GRID.Z;
-  const brickH = 3 * PLATE_HEIGHT; // each step is 1 brick tall
 
-  // Each step is a solid box from y=0 up to (i+1) * brickH, full w in x,
-  // 1 stud deep along z. Lowest step at -Z (front), highest at +Z (back).
   for (let i = 0; i < d; i++) {
-    const stepH = (i + 1) * brickH;
+    const stepH = (i + 1) * stepRise;
     const step = new THREE.Mesh(
       new THREE.BoxGeometry(width, stepH, 1 * GRID.Z),
       material
@@ -855,6 +870,17 @@ function createStairsBlock(spec: BlockSpec): THREE.Group {
   }
 
   return group;
+}
+
+/** Steep Lego staircase — each step is 1 brick (3 plates) tall. */
+function createStairsBlock(spec: BlockSpec): THREE.Group {
+  return createStairsBlockShared(spec, 3 * PLATE_HEIGHT);
+}
+
+/** Gentle staircase — each step is only 1 plate tall, producing a
+ *  low-rise ramp-like ascent over a longer footprint. */
+function createGentleStairsBlock(spec: BlockSpec): THREE.Group {
+  return createStairsBlockShared(spec, PLATE_HEIGHT);
 }
 
 // ------------------------------------------------------------------
@@ -1063,6 +1089,91 @@ function createLadderBlock(spec: BlockSpec): THREE.Group {
     rung.position.set(0, botY + t * (topY - botY), 0);
     rung.castShadow = true;
     group.add(rung);
+  }
+
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Bridge — long plank walkway with railings, designed to span a gap
+//  between two separated baseplate tiles. Fixed size 2 × 44 studs.
+// ------------------------------------------------------------------
+function createBridgeBlock(spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const w = spec.w;
+  const d = spec.d;
+  const material = studMaterial(spec.colorHex);
+
+  const width = w * GRID.X;
+  const depth = d * GRID.Z;
+
+  // --- Deck (flat plank walkway) ---
+  const deckH = PLATE_HEIGHT;
+  const deck = new THREE.Mesh(
+    new THREE.BoxGeometry(width, deckH, depth),
+    material
+  );
+  deck.position.y = deckH / 2;
+  deck.castShadow = true;
+  deck.receiveShadow = true;
+  group.add(deck);
+
+  // --- Chunky corner pillars at all four corners ---
+  const cornerThk = 0.45;
+  const cornerH = 2.0; // taller than the railing posts so they read as posts
+  const cornerGeom = new THREE.BoxGeometry(cornerThk, cornerH, cornerThk);
+  const cornerX = width / 2 - cornerThk / 2;
+  const cornerZ = depth / 2 - cornerThk / 2;
+  for (const sx of [-1, 1] as const) {
+    for (const sz of [-1, 1] as const) {
+      const pillar = new THREE.Mesh(cornerGeom, material);
+      pillar.position.set(sx * cornerX, deckH + cornerH / 2, sz * cornerZ);
+      pillar.castShadow = true;
+      pillar.receiveShadow = true;
+      group.add(pillar);
+    }
+  }
+
+  // --- Railing posts at regular intervals along both long sides ---
+  const postThk = 0.18;
+  const postH = 1.6;
+  const postGeom = new THREE.BoxGeometry(postThk, postH, postThk);
+  const postSpacing = 4; // one post every 4 studs
+  // Start one spacing in from the corners so the first post isn't jammed
+  // against a corner pillar.
+  const postStartZ = -depth / 2 + 1 + postSpacing / 2;
+  const innerPostZEnd = depth / 2 - 1 - postSpacing / 2;
+  for (let z = postStartZ; z <= innerPostZEnd + 1e-4; z += postSpacing) {
+    for (const sx of [-1, 1] as const) {
+      const post = new THREE.Mesh(postGeom, material);
+      post.position.set(
+        sx * (width / 2 - postThk / 2),
+        deckH + postH / 2,
+        z
+      );
+      post.castShadow = true;
+      group.add(post);
+    }
+  }
+
+  // --- Top rails + mid rails running the full length on both sides ---
+  const railThk = 0.16;
+  const railH = 0.12;
+  // Length runs between the inside edges of the corner pillars
+  const railLength = depth - cornerThk * 2 - 0.02;
+  const railGeom = new THREE.BoxGeometry(railThk, railH, railLength);
+  const topRailY = deckH + postH - railH / 2;
+  const midRailY = deckH + postH / 2;
+  for (const sx of [-1, 1] as const) {
+    const top = new THREE.Mesh(railGeom, material);
+    top.position.set(sx * (width / 2 - railThk / 2), topRailY, 0);
+    top.castShadow = true;
+    group.add(top);
+
+    const mid = new THREE.Mesh(railGeom, material);
+    mid.position.set(sx * (width / 2 - railThk / 2), midRailY, 0);
+    mid.castShadow = true;
+    group.add(mid);
   }
 
   return group;

@@ -34,6 +34,39 @@ import { SoundManager } from './sound';
 export type Mode = 'place' | 'remove';
 export type ViewMode = 'first' | 'third';
 
+/** Runtime state for a single NPC (a minifig placed in build mode that
+ *  is brought to life during play mode — wanders around, faces movement,
+ *  collides with the world, and can be talked to by pressing E nearby). */
+interface NpcState {
+  /** The minifig's root THREE.Group — position/rotation are mutated in
+   *  place each frame. Restored to `homePos`/`origRotY` on stopPlay. */
+  obj: THREE.Group;
+  homePos: THREE.Vector3;
+  origRotY: number;
+  target: THREE.Vector3;
+  /** Current facing direction in radians (smoothed toward move dir). */
+  yaw: number;
+  /** Phase accumulator for limb-swing animation. */
+  walkTime: number;
+  state: 'idle' | 'walking' | 'greeting';
+  /** Time remaining in the current state before transitioning. */
+  stateTimer: number;
+  /** The line shown in the chat bubble while state === 'greeting'. */
+  greeting: string;
+}
+
+/** Random greetings shown when the player presses E near an NPC. */
+const NPC_GREETINGS = [
+  '안녕하세요!',
+  '날씨 좋네요.',
+  '어디 가세요?',
+  '만나서 반갑습니다.',
+  '조심히 다니세요!',
+  '오늘 기분이 좋아요.',
+  '또 뵈어요!',
+  '멋진 집이네요.',
+];
+
 export class Game {
   private container: HTMLElement;
   private scene: THREE.Scene;
@@ -106,6 +139,16 @@ export class Game {
   private currentDoorHotspot: THREE.Object3D | null = null;
   private doorPromptEl: HTMLElement | null = null;
   private doorPromptLabelEl: HTMLElement | null = null;
+  /** Wandering NPCs built from every minifig placed during build mode.
+   *  Each entry holds the mutable runtime state (target, yaw, state
+   *  machine) and references the original group for position/rotation
+   *  updates. Rebuilt at every startPlay(); cleared at stopPlay(). */
+  private npcs: NpcState[] = [];
+  private currentNpcHotspot: NpcState | null = null;
+  private npcPromptEl: HTMLElement | null = null;
+  private npcPromptLabelEl: HTMLElement | null = null;
+  private npcBubbleEl: HTMLElement | null = null;
+  private npcBubbleTextEl: HTMLElement | null = null;
   private playerPos = new THREE.Vector3(0, 0, 15);
   private playerVel = new THREE.Vector3();
   private onGround = false;
@@ -653,12 +696,20 @@ export class Game {
       const tx = +txStr;
       const ty = +tyStr;
       const tz = +tzStr;
-      // Horizontal neighbors only — slots appear at the same Y as the tile
+      // Horizontal neighbors at distance 1 AND distance 2 (same Y) — lets
+      // the user drop a new tile touching an existing one OR leave a
+      // one-tile gap between them (visible as a separate ghost slot).
       const neighbors: [number, number, number][] = [
+        // distance 1 — directly adjacent
         [tx + 1, ty, tz],
         [tx - 1, ty, tz],
         [tx, ty, tz + 1],
         [tx, ty, tz - 1],
+        // distance 2 — skip one empty tile (creates a gap)
+        [tx + 2, ty, tz],
+        [tx - 2, ty, tz],
+        [tx, ty, tz + 2],
+        [tx, ty, tz - 2],
       ];
       for (const [nx, ny, nz] of neighbors) {
         const nkey = `${nx},${ny},${nz}`;
@@ -695,9 +746,12 @@ export class Game {
       depthWrite: false,
     });
 
-    // Slab (matches a real baseplate's dimensions, bottom-anchored)
-    const slabGeom = new THREE.BoxGeometry(size, 0.4, size);
-    slabGeom.translate(0, -0.2, 0);
+    // Slab (matches a real baseplate's dimensions, bottom-anchored).
+    // Thickness tracks the current environment so the island preset's
+    // tall cliff also previews correctly.
+    const thickness = this.environment.baseplateThickness ?? 0.4;
+    const slabGeom = new THREE.BoxGeometry(size, thickness, size);
+    slabGeom.translate(0, -thickness / 2, 0);
     const mesh = new THREE.Mesh(slabGeom, ghostMat);
     mesh.userData.ghostMat = ghostMat; // for hover-color tweaking
 
@@ -891,6 +945,42 @@ export class Game {
     return false;
   }
 
+  /** Bridge-specific placement check: the bridge is allowed to hang over
+   *  empty space (water / gap) as long as BOTH short-end regions rest on
+   *  a baseplate tile. The two anchor tiles don't have to be the same —
+   *  in fact the whole point is to span a gap between two islands. */
+  private isBridgeFootprintValid(
+    cx: number,
+    cz: number,
+    w: number,
+    d: number
+  ): boolean {
+    const longIsZ = d >= w;
+    const longHalf = (longIsZ ? d : w) / 2;
+    const shortHalf = (longIsZ ? w : d) / 2;
+    // Each end anchor is 2 studs along the long axis × full short width.
+    const overhang = 2;
+    const endHalfLong = overhang / 2;
+    const endHalfA = longIsZ ? shortHalf : endHalfLong;
+    const endHalfB = longIsZ ? endHalfLong : shortHalf;
+
+    // End A — low side of the long axis
+    const aCx = longIsZ ? cx : cx - longHalf + endHalfLong;
+    const aCz = longIsZ ? cz - longHalf + endHalfLong : cz;
+    if (!this.isFootprintOnBaseplate(aCx, aCz, endHalfA, endHalfB)) {
+      return false;
+    }
+
+    // End B — high side of the long axis
+    const bCx = longIsZ ? cx : cx + longHalf - endHalfLong;
+    const bCz = longIsZ ? cz + longHalf - endHalfLong : cz;
+    if (!this.isFootprintOnBaseplate(bCx, bCz, endHalfA, endHalfB)) {
+      return false;
+    }
+
+    return true;
+  }
+
   /** Returns the XZ-union AABB of every placed baseplate tile (Y is the
    *  range of tile slab tops). Useful for camera bounds and shadow frustums. */
   private getBaseplatesBounds(): THREE.Box3 {
@@ -1050,6 +1140,11 @@ export class Game {
           break;
         case 'KeyV':
           if (!e.repeat) this.toggleViewMode();
+          break;
+        case 'KeyE':
+          if (!e.repeat && this.currentDoorHotspot) {
+            this.toggleCurrentDoor();
+          }
           break;
         case 'Escape':
           this.stopPlay();
@@ -1301,9 +1396,17 @@ export class Game {
     // (or by the column of an existing brick — in that case the auto-stack
     // loop below handles it). For now, just require that the (x, z) center
     // sits over a baseplate tile.
+    //
+    // Bridges are the exception: they intentionally span empty space, so
+    // instead of the strict full-footprint check we only require that
+    // both short ends rest on a baseplate tile.
     const bw = w / 2;
     const bd = d / 2;
-    if (!this.isFootprintOnBaseplate(x, z, bw, bd)) return null;
+    if (this.blockType === 'bridge') {
+      if (!this.isBridgeFootprintValid(x, z, w, d)) return null;
+    } else {
+      if (!this.isFootprintOnBaseplate(x, z, bw, bd)) return null;
+    }
 
     // Auto-stack: if the placement footprint overlaps an existing block,
     // raise bottomY to sit on top of it. Loop until the candidate is clear,
@@ -1685,6 +1788,25 @@ export class Game {
 
   startPlay() {
     if (this.isPlaying) return;
+    try {
+      this.startPlayInternal();
+    } catch (err) {
+      // If anything in startup throws (e.g. character model not yet
+      // loaded, a node not yet in the scene, etc.) don't leave the game
+      // stuck in a half-started play state with no key handling and a
+      // disabled orbit camera.
+      console.error('[startPlay] failed:', err);
+      this.isPlaying = false;
+      this.controls.enabled = true;
+      if (this.playerAvatar) {
+        this.scene.remove(this.playerAvatar);
+        this.playerAvatar = null;
+      }
+      this.onPlayChange(false);
+    }
+  }
+
+  private startPlayInternal() {
     this.isPlaying = true;
 
     // Drop focus from any UI button so Space/WASD don't retrigger it
@@ -1711,13 +1833,37 @@ export class Game {
     // back to the closed position before snapshotting.
     this.doorAnimations.clear();
     this.currentDoorHotspot = null;
+    this.currentNpcHotspot = null;
     for (const child of this.brickGroup.children) {
       const hinge = findDoorHinge(child);
       if (hinge) hinge.rotation.y = 0;
     }
+
+    // Rebuild the NPC list from every placed minifig and skip minifigs
+    // when snapshotting collision AABBs — NPCs move each frame, so their
+    // collision is handled dynamically via `this.npcs`, not the static
+    // playAABBs snapshot.
+    this.npcs = [];
     for (const child of this.brickGroup.children) {
-      this.playAABBs.push(this.getBlockAABB(child));
       const spec = child.userData.spec as { type?: BlockType } | undefined;
+      if (spec?.type === 'minifig' || child.userData.isMinifig) {
+        const homePos = child.position.clone();
+        const initYaw = child.rotation.y;
+        this.npcs.push({
+          obj: child as THREE.Group,
+          homePos,
+          origRotY: initYaw,
+          target: homePos.clone(),
+          yaw: initYaw,
+          walkTime: 0,
+          state: 'idle',
+          // Stagger initial idle so NPCs don't all start moving on frame 1
+          stateTimer: 0.5 + Math.random() * 2.5,
+          greeting: '',
+        });
+        continue; // no static AABB for NPCs
+      }
+      this.playAABBs.push(this.getBlockAABB(child));
       this.playAABBDoorRefs.push(spec?.type === 'door' ? child : null);
     }
 
@@ -1727,10 +1873,13 @@ export class Game {
     this.playerVel.set(0, 0, 0);
     this.onGround = true;
 
-    // Add baseplate AABBs for collision so the player doesn't fall through
+    // Add baseplate AABBs for collision so the player doesn't fall through.
+    // Slab bottom is relative to the environment's plate thickness (0.4 for
+    // the standard plate, larger for island / other thicker environments).
+    const plateThickness = this.environment.baseplateThickness ?? 0.4;
     for (const tile of this.baseplates.values()) {
       const half = this.tileSize / 2;
-      const slabBottom = tile.position.y - 0.4;
+      const slabBottom = tile.position.y - plateThickness;
       const slabTop = tile.position.y;
       this.playAABBs.push(
         new THREE.Box3(
@@ -1846,6 +1995,19 @@ export class Game {
     this.currentDoorHotspot = null;
     this.getDoorPrompt()?.classList.add('hidden');
 
+    // Restore every NPC to its original placement position/rotation and
+    // reset its limbs to neutral — so re-entering build mode shows the
+    // minifigs exactly where the user put them.
+    for (const npc of this.npcs) {
+      npc.obj.position.copy(npc.homePos);
+      npc.obj.rotation.y = npc.origRotY;
+      applyNpcLimbs(npc.obj, 0);
+    }
+    this.npcs = [];
+    this.currentNpcHotspot = null;
+    this.getNpcPrompt()?.classList.add('hidden');
+    this.getNpcBubble()?.classList.add('hidden');
+
     // Restore build camera + orbit controls
     this.camera.position.copy(this.savedCam.position);
     this.controls.target.copy(this.savedCam.target);
@@ -1861,12 +2023,22 @@ export class Game {
     // player position, so ordering before movement is fine.
     this.updateDoorAnimations(dt);
     this.updateDoorHotspot();
+    // NPC AI (wandering / limb animation) also runs before player
+    // movement so the player's collision check sees up-to-date NPC
+    // positions.
+    this.updateNpcs(dt);
+    this.updateNpcHotspot();
 
     const RUN_MULT = 1.7;
     const SPEED = 6 * (this.moveKeys.run ? RUN_MULT : 1);
     const GRAVITY = -22;
     const JUMP = 9;
-    const BODY_W = 0.45; // minifig width ≈ 1 stud
+    // Minifig footprint is 2×1 studs — the visible mesh (torso, arms,
+    // shoulders) extends up to 1 unit from the player center. Using 0.45
+    // lets arms/shoulders clip into walls and doorframes. 1.0 half-width
+    // gives a 2×2 collision box that loosely bounds the minifig at any
+    // Y-rotation, so the mesh never overlaps block geometry.
+    const BODY_W = 1.0; // half-width (full 2.0, matches minifig width)
     // Both derived from the loaded GLB so they track its uniform scale.
     const BODY_H = getMinifigHeight() || 2.5;
     const EYE_HEIGHT = BODY_H * 0.92; // just below the top of the head/hat
@@ -2146,6 +2318,176 @@ export class Game {
   }
 
   // ------------------------------------------------------------------
+  //  Door interaction (play mode)
+  // ------------------------------------------------------------------
+
+  /** How far the player can be from a door and still see the "[E] 문 열기"
+   *  prompt / trigger the interaction. XZ-plane distance to the door's
+   *  center position. */
+  private static readonly DOOR_INTERACT_RANGE = 3.0;
+  /** Duration of the open/close swing animation in seconds. A linear
+   *  0.35s was uncomfortably fast — the slab smacked the player in the
+   *  face. 0.8s combined with the ease-in-out curve feels like a real
+   *  push-to-open door. */
+  private static readonly DOOR_ANIM_DURATION = 0.8;
+  /** Full-open rotation angle (radians) applied to the hinge group. -π/2
+   *  swings the slab to +Z, away from a player approaching from -Z. */
+  private static readonly DOOR_OPEN_ANGLE = -Math.PI / 2;
+
+  /** Cubic ease-in-out — slow start, accelerate through the middle, slow
+   *  deceleration at the end. Matches the physical feel of a real door
+   *  being pushed open and coming to rest. */
+  private static easeInOutCubic(t: number): number {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  /** Inverse of `easeInOutCubic`. Maps an eased progress value back to
+   *  linear time so that mid-animation reversals (player hitting E twice
+   *  quickly) resume from exactly the current visual position without a
+   *  jump. */
+  private static easeInOutCubicInverse(x: number): number {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    if (x < 0.5) {
+      // x = 4t³  →  t = (x/4)^(1/3)
+      return Math.cbrt(x / 4);
+    }
+    // x = 1 - ((-2t + 2)^3) / 2
+    // 2(1 - x) = (-2t + 2)^3
+    // (2(1 - x))^(1/3) = -2t + 2
+    // t = 1 - (2(1 - x))^(1/3) / 2
+    return 1 - Math.cbrt(2 * (1 - x)) / 2;
+  }
+
+  private updateDoorAnimations(dt: number) {
+    if (this.doorAnimations.size === 0) return;
+    const duration = Game.DOOR_ANIM_DURATION;
+    const openAngle = Game.DOOR_OPEN_ANGLE;
+    const finished: THREE.Object3D[] = [];
+    for (const [obj, anim] of this.doorAnimations) {
+      const hinge = findDoorHinge(obj);
+      if (!hinge) {
+        finished.push(obj);
+        continue;
+      }
+      if (anim.state === 'open') continue; // fully open, nothing to animate
+      anim.t += dt;
+      const uLinear = Math.min(1, anim.t / duration);
+      const u = Game.easeInOutCubic(uLinear);
+      if (anim.state === 'opening') {
+        hinge.rotation.y = u * openAngle;
+        if (uLinear >= 1) {
+          hinge.rotation.y = openAngle;
+          anim.state = 'open';
+          anim.t = duration;
+        }
+      } else {
+        // closing
+        hinge.rotation.y = (1 - u) * openAngle;
+        if (uLinear >= 1) {
+          hinge.rotation.y = 0;
+          finished.push(obj);
+        }
+      }
+    }
+    // Doors that finished closing leave the map → they're solid again.
+    for (const obj of finished) this.doorAnimations.delete(obj);
+  }
+
+  private updateDoorHotspot() {
+    const range = Game.DOOR_INTERACT_RANGE;
+    let nearest: { obj: THREE.Object3D; dist: number } | null = null;
+    for (const child of this.brickGroup.children) {
+      const spec = child.userData.spec as { type?: BlockType } | undefined;
+      if (spec?.type !== 'door') continue;
+      const dx = child.position.x - this.playerPos.x;
+      const dz = child.position.z - this.playerPos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < range && (!nearest || dist < nearest.dist)) {
+        nearest = { obj: child, dist };
+      }
+    }
+    const next = nearest?.obj ?? null;
+    // Only refresh the DOM when the hotspot identity or its state changes.
+    const prevState = this.currentDoorHotspot
+      ? this.doorAnimations.get(this.currentDoorHotspot)?.state ?? 'closed'
+      : null;
+    const nextState = next
+      ? this.doorAnimations.get(next)?.state ?? 'closed'
+      : null;
+    if (this.currentDoorHotspot !== next || prevState !== nextState) {
+      this.currentDoorHotspot = next;
+      this.renderDoorPrompt();
+    }
+  }
+
+  private renderDoorPrompt() {
+    const el = this.getDoorPrompt();
+    if (!el) return;
+    if (!this.currentDoorHotspot) {
+      el.classList.add('hidden');
+      return;
+    }
+    const anim = this.doorAnimations.get(this.currentDoorHotspot);
+    const isOpen = anim?.state === 'open';
+    if (this.doorPromptLabelEl) {
+      this.doorPromptLabelEl.textContent = isOpen ? '문 닫기' : '문 열기';
+    }
+    el.classList.remove('hidden');
+  }
+
+  private getDoorPrompt(): HTMLElement | null {
+    if (!this.doorPromptEl) {
+      this.doorPromptEl = document.getElementById('door-prompt');
+      this.doorPromptLabelEl = document.getElementById('door-prompt-label');
+    }
+    return this.doorPromptEl;
+  }
+
+  /** Toggles the nearest hotspot door between open and closed. Called by
+   *  the E key handler in play mode. Mid-animation reversals use the
+   *  easing inverse so the hinge resumes from its current EASED angle
+   *  without a visual jump. */
+  private toggleCurrentDoor() {
+    const obj = this.currentDoorHotspot;
+    if (!obj) return;
+    const existing = this.doorAnimations.get(obj);
+    if (!existing) {
+      this.doorAnimations.set(obj, { state: 'opening', t: 0 });
+    } else if (existing.state === 'open') {
+      this.doorAnimations.set(obj, { state: 'closing', t: 0 });
+    } else if (existing.state === 'opening') {
+      // Mid-open → reverse to closing. Current eased progress u = hinge/openAngle.
+      // Closing maps linear t to angle via (1 - ease(t/dur)) * openAngle.
+      // We want angle = u * openAngle at the new t=0, so (1 - ease(t/dur)) = u
+      // ⇒ ease(t/dur) = 1 - u ⇒ t = inv(1 - u) * dur.
+      const hinge = findDoorHinge(obj);
+      if (hinge) {
+        const uEased = hinge.rotation.y / Game.DOOR_OPEN_ANGLE;
+        const tLinear = Game.easeInOutCubicInverse(1 - uEased);
+        this.doorAnimations.set(obj, {
+          state: 'closing',
+          t: tLinear * Game.DOOR_ANIM_DURATION,
+        });
+      }
+    } else {
+      // Mid-close → reverse to opening. Opening maps linear t to angle
+      // via ease(t/dur) * openAngle. Want ease(t/dur) = u where u is
+      // the current eased progress ⇒ t = inv(u) * dur.
+      const hinge = findDoorHinge(obj);
+      if (hinge) {
+        const uEased = hinge.rotation.y / Game.DOOR_OPEN_ANGLE;
+        const tLinear = Game.easeInOutCubicInverse(uEased);
+        this.doorAnimations.set(obj, {
+          state: 'opening',
+          t: tLinear * Game.DOOR_ANIM_DURATION,
+        });
+      }
+    }
+    this.renderDoorPrompt();
+  }
+
+  // ------------------------------------------------------------------
   //  Render loop
   // ------------------------------------------------------------------
 
@@ -2170,4 +2512,15 @@ export class Game {
 
     this.renderer.render(this.scene, this.camera);
   };
+}
+
+/** Walks `obj`'s descendant tree and returns the first child tagged with
+ *  `userData.isDoorHinge` — that's the rotatable hinge group created by
+ *  createDoorBlock. Returns null for non-door objects. */
+function findDoorHinge(obj: THREE.Object3D): THREE.Object3D | null {
+  let result: THREE.Object3D | null = null;
+  obj.traverse((c) => {
+    if (!result && c.userData.isDoorHinge) result = c;
+  });
+  return result;
 }
