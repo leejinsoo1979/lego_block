@@ -54,6 +54,77 @@ export const BOARD_SIZES: BoardSizePreset[] = [
   { name: '160×160', size: 160 },
 ];
 
+// ------------------------------------------------------------------
+//  Environment presets — swaps the baseplate color and the "infinite"
+//  surround mesh around it. Used by Game.setEnvironment() to theme the
+//  scene for different builds (grass / island / desert / snow).
+// ------------------------------------------------------------------
+
+export type EnvironmentSurround = 'none' | 'water' | 'ground';
+
+export interface EnvironmentDef {
+  id: string;
+  name: string;
+  /** Baseplate top-face color. */
+  baseplateColor: number;
+  /** Baseplate body thickness in world units. Top stays at y=0; the body
+   *  extends downward from there. Default 0.4 (standard plate). Larger
+   *  values make the plate look like a thicker island / cliff. */
+  baseplateThickness?: number;
+  /** What fills the space outside the baseplate tiles. */
+  surroundType: EnvironmentSurround;
+  /** Color for 'ground' surround (ignored for 'water'/'none'). */
+  surroundColor?: number;
+  /** Roughness for 'ground' surround (0 = glossy, 1 = matte). */
+  surroundRoughness?: number;
+  /** Base color of the Water object, used only when surroundType='water'. */
+  waterColor?: number;
+  /** Distortion scale for the water normal map — higher = choppier. */
+  waterDistortion?: number;
+  /** Y level of the water surface. Default -0.05 (just below plate top).
+   *  Lower values make the plate appear to rise out of the water. */
+  waterLevel?: number;
+}
+
+export const ENVIRONMENTS: EnvironmentDef[] = [
+  {
+    id: 'grass',
+    name: '잔디밭',
+    baseplateColor: 0x4b974b,
+    surroundType: 'none',
+  },
+  {
+    id: 'island',
+    name: '섬',
+    baseplateColor: 0x4b974b,
+    // Thick cliff-like plate — extends 2.4 units below the top so the
+    // island visibly rises out of the water.
+    baseplateThickness: 2.4,
+    surroundType: 'water',
+    waterColor: 0x0a4466,
+    waterDistortion: 2.4,
+    // Water surface sits ~1.4 units below the plate top, which is roughly
+    // halfway down the cliff face — leaves plenty of visible island above.
+    waterLevel: -1.4,
+  },
+  {
+    id: 'desert',
+    name: '사막',
+    baseplateColor: 0xd4a870,
+    surroundType: 'ground',
+    surroundColor: 0xc08a52,
+    surroundRoughness: 0.95,
+  },
+  {
+    id: 'snow',
+    name: '눈밭',
+    baseplateColor: 0xeef1f5,
+    surroundType: 'ground',
+    surroundColor: 0xe0e6ec,
+    surroundRoughness: 0.85,
+  },
+];
+
 export type BlockType =
   | 'brick'
   | 'tallbrick'
@@ -126,12 +197,12 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'cone', label: '콘', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
   // 부품
   { type: 'window', label: '창문', category: 'part', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 1 } },
-  { type: 'door', label: '문', category: 'part', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 2, d: 1 } },
+  { type: 'door', label: '문', category: 'part', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 3, d: 1 } },
   { type: 'fence', label: '울타리', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
   { type: 'wheel', label: '바퀴', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 2, d: 2 } },
   // 특수
-  { type: 'archway', label: '아치 입구', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 6, d: 2 } },
-  { type: 'stairs', label: '계단', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 4, d: 2 } },
+  { type: 'archway', label: '아치 입구', category: 'special', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 6, d: 2 } },
+  { type: 'stairs', label: '계단', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 2, d: 4 } },
   { type: 'column', label: '기둥', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'tree', label: '나무', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'lamp', label: '가로등', category: 'special', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 1, d: 1 } },

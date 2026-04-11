@@ -87,6 +87,9 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 0.15, 0);
       break;
     case 'slope':
+      // Spin the slope 90° counter-clockwise (as seen from the camera) so
+      // the slope face reads naturally in the thumbnail.
+      obj.rotation.y = -Math.PI / 2;
       camera!.position.set(4.0, 3.0, 4.2);
       camera!.lookAt(0, 0.5, 0);
       break;
@@ -104,8 +107,10 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 1.2, 0);
       break;
     case 'door':
-      camera!.position.set(0, 2.8, 7.5);
-      camera!.lookAt(0, 1.7, 0);
+      // 3×1×6.0 — widened and raised so a minifig actually fits. Head-on
+      // view; camera pulled back far enough to fit the full 6-unit height.
+      camera!.position.set(0, 4.0, 13);
+      camera!.lookAt(0, 3.0, 0);
       break;
     case 'fence':
       camera!.position.set(3.5, 2.0, 5.5);
@@ -121,20 +126,20 @@ export function renderBlockTypeThumbnail(
     //  6.0-tall block needs distance ~14. All aim at the vertical center.
     // ------------------------------------------------------------------
     case 'archway':
-      // 6×2×4.8 — tallest AND widest; pull camera back far enough to fit
-      // the 6-wide footprint too.
-      camera!.position.set(9, 5, 10);
-      camera!.lookAt(0, 2.4, 0);
+      // 6×2×7.2 — now the tallest fixed block. Pull camera back so the
+      // 6-wide footprint AND the 7.2-tall opening both fit comfortably.
+      camera!.position.set(10, 6, 13);
+      camera!.lookAt(0, 3.6, 0);
       break;
     case 'stairs':
-      // 4×2×4.8 — the step profile only reads from a ±Z side view. A
-      // 3/4 view from +X/+Z compresses the step silhouette into a diagonal
-      // and stops looking like stairs. Camera sits on the -Z side with a
-      // small +X offset: world +X → screen right, so the staircase rises
-      // left-to-right (natural reading direction). The -Z face is nearest
-      // and shows every step's height clearly. Slight Y elevation also
-      // reveals the stud rows on each step's top.
-      camera!.position.set(2, 5, -11);
+      // 2×4×4.8 — climbs along +Z (unified with archway's walk-through
+      // direction). Step profile is now on the ±X face. Camera biased to
+      // +X so that face is dominantly visible. Slight +Z lets the back
+      // wall of the tallest step hint at depth. The thumbnail spins the
+      // stairs 180° around Y so the rise direction reads naturally
+      // (low step on the right, climbing toward the back-left).
+      obj.rotation.y = Math.PI;
+      camera!.position.set(10, 5, 9);
       camera!.lookAt(0, 2.4, 0);
       break;
     case 'column':

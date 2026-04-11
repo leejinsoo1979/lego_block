@@ -71,11 +71,16 @@
       </section>
 
       <section class="panel">
-        <div class="section-title"><span>맵 확장</span></div>
-        <button id="add-baseplate" class="add-tile-btn">＋ 맵 추가</button>
+        <div class="section-title"><span>스터드 추가</span></div>
+        <button id="add-baseplate" class="add-tile-btn">＋ 스터드 추가</button>
         <p class="add-tile-hint">
-          기존 베이스플레이트의 옆면·앞면·윗면을 클릭하면 그 방향으로 새 타일이 붙습니다.
+          베이스플레이트 옆에 빈 슬롯이 나타납니다. 원하는 슬롯을 클릭하면 그 자리에 새 스터드 바닥판이 생깁니다.
         </p>
+      </section>
+
+      <section class="panel">
+        <div class="section-title"><span>환경</span></div>
+        <div id="environments" class="row wrap"></div>
       </section>
 
       <footer class="sidebar-footer">
@@ -107,6 +112,9 @@
       <div class="view-toggle" id="view-toggle">
         <button id="view-toggle-first" class="view-toggle-btn active">1인칭</button>
         <button id="view-toggle-third" class="view-toggle-btn">3인칭</button>
+      </div>
+      <div id="door-prompt" class="door-prompt hidden">
+        <kbd>E</kbd> <span id="door-prompt-label">문 열기</span>
       </div>
       <div class="play-hint">
         <kbd>WASD</kbd> 이동 · <kbd>Shift</kbd> 달리기 · <kbd>Space</kbd> 점프 ·

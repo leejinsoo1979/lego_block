@@ -2,17 +2,25 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { Water } from 'three/addons/objects/Water.js';
 import {
   BLOCK_TYPES,
   BOARD_SIZE,
   COLORS,
+  ENVIRONMENTS,
   MINIFIG_PRESETS,
   PLATE_HEIGHT,
   SIZES,
   STUD_HEIGHT,
   STUD_RADIUS,
 } from './config';
-import type { BlockType, ColorDef, MinifigPreset, SizeDef } from './config';
+import type {
+  BlockType,
+  ColorDef,
+  EnvironmentDef,
+  MinifigPreset,
+  SizeDef,
+} from './config';
 import {
   createBrick,
   createBrickGhost,
@@ -60,12 +68,20 @@ export class Game {
   static readonly TILE_LEVEL_HEIGHT = 4.0;
   private baseplates = new Map<string, THREE.Group>();
   private sunLight: THREE.DirectionalLight | null = null;
-  // Map-extension mode (user clicks to add a baseplate tile next to an
-  // existing one — the cursor shows a translucent stud-board ghost)
+  /** Active environment preset (baseplate color + surround). */
+  environment: EnvironmentDef = ENVIRONMENTS[0];
+  /** Large plane or Water object that sits under/around the baseplate
+   *  tiles to give the illusion of an infinite environment. */
+  private surroundMesh: THREE.Object3D | null = null;
+  /** Cached water-normals texture — reused whenever we toggle back into
+   *  an environment with surroundType === 'water'. */
+  private waterNormalsTex: THREE.Texture | null = null;
+  // Map-extension mode — translucent tile-shaped "slots" appear at every
+  // empty horizontal neighbor of an existing baseplate. The user clicks a
+  // slot to add a real tile there.
   addBaseplateMode = false;
-  private baseplateGhost: THREE.Mesh | null = null;
-  private baseplateGhostTile: { tx: number; ty: number; tz: number } | null =
-    null;
+  private slotsGroup: THREE.Group | null = null;
+  private currentSlot: THREE.Mesh | null = null;
 
   // Line placement state (Shift + drag)
   private shiftLineStart: { x: number; y: number; z: number } | null = null;
@@ -75,6 +91,21 @@ export class Game {
   isPlaying = false;
   viewMode: ViewMode = 'first';
   private playAABBs: THREE.Box3[] = [];
+  /** Parallel array to playAABBs. Non-null entries mark a collider that
+   *  belongs to an interactable door — collision skips these while the
+   *  door is animating or open (see doorAnimations). */
+  private playAABBDoorRefs: (THREE.Object3D | null)[] = [];
+  /** Active door animations (closed doors are not in the map). Keyed on
+   *  the door's root group. */
+  private doorAnimations = new Map<
+    THREE.Object3D,
+    { state: 'opening' | 'open' | 'closing'; t: number }
+  >();
+  /** The door closest to the player within interaction range, or null.
+   *  Drives the on-screen "[E] 문 열기" prompt. */
+  private currentDoorHotspot: THREE.Object3D | null = null;
+  private doorPromptEl: HTMLElement | null = null;
+  private doorPromptLabelEl: HTMLElement | null = null;
   private playerPos = new THREE.Vector3(0, 0, 15);
   private playerVel = new THREE.Vector3();
   private onGround = false;
@@ -106,6 +137,7 @@ export class Game {
   onPlayChange: (playing: boolean) => void = () => {};
   onBoardSizeChange: (size: number) => void = () => {};
   onAddBaseplateModeChange: (active: boolean) => void = () => {};
+  onEnvironmentChange: (env: EnvironmentDef) => void = () => {};
   onViewModeChange: (mode: ViewMode) => void = () => {};
   /** Fires when the user clears the current selection (e.g. by pressing
    *  Escape). UI should remove the active highlight from all type buttons. */
@@ -357,17 +389,23 @@ export class Game {
   private buildBaseplateTileMesh(): THREE.Group {
     const group = new THREE.Group();
     const size = this.tileSize;
+    // Thickness defaults to 0.4 (standard plate) but environments can
+    // override it — e.g. "island" uses a tall cliff-like plate.
+    const thickness = this.environment.baseplateThickness ?? 0.4;
 
     const plateMat = new THREE.MeshStandardMaterial({
-      color: 0x4b974b,
+      color: this.environment.baseplateColor,
       roughness: 0.7,
     });
     const plate = new THREE.Mesh(
-      new THREE.BoxGeometry(size, 0.4, size),
+      new THREE.BoxGeometry(size, thickness, size),
       plateMat
     );
-    plate.position.y = -0.2;
+    // Top face always sits at y=0 regardless of thickness, so placement
+    // math and existing baseplate tile stacking stay unaffected.
+    plate.position.y = -thickness / 2;
     plate.receiveShadow = true;
+    plate.castShadow = true;
     group.add(plate);
 
     const studGeom = new THREE.CylinderGeometry(
@@ -420,128 +458,404 @@ export class Game {
     return group;
   }
 
-  /** Initial setup — places the first tile at origin. */
+  /** Initial setup — places the first tile at origin and the surround
+   *  mesh for the default environment. */
   private createBaseplate() {
     this.addBaseplateTile(0, 0, 0);
     // Keep the legacy `baseplate` field pointing at the origin tile so any
     // existing code that touches `this.baseplate` still works.
     this.baseplate = this.baseplates.get('0,0,0')!;
+    this.rebuildSurround();
+  }
+
+  // ------------------------------------------------------------------
+  //  Environment (baseplate color + surround)
+  // ------------------------------------------------------------------
+
+  /** Swap the active environment preset. Fully rebuilds every existing
+   *  baseplate tile (so thickness changes like the island preset take
+   *  effect) and rebuilds the surround mesh (water / ground / none). */
+  setEnvironment(env: EnvironmentDef) {
+    if (this.environment.id === env.id) return;
+
+    const prevThickness = this.environment.baseplateThickness ?? 0.4;
+    const nextThickness = env.baseplateThickness ?? 0.4;
+    this.environment = env;
+
+    if (prevThickness !== nextThickness) {
+      // Thickness changed — every tile mesh has the wrong box geometry.
+      // Destroy and rebuild each tile at the same grid coordinates.
+      const tileCoords: [number, number, number][] = [];
+      for (const key of this.baseplates.keys()) {
+        const [tx, ty, tz] = key.split(',').map(Number);
+        tileCoords.push([tx, ty, tz]);
+      }
+      for (const key of Array.from(this.baseplates.keys())) {
+        const tile = this.baseplates.get(key)!;
+        this.scene.remove(tile);
+        tile.traverse((c) => {
+          if (c instanceof THREE.Mesh || c instanceof THREE.InstancedMesh) {
+            c.geometry?.dispose?.();
+            const mat = c.material as THREE.Material | THREE.Material[];
+            if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+            else mat?.dispose?.();
+          }
+        });
+        this.baseplates.delete(key);
+      }
+      for (const [tx, ty, tz] of tileCoords) {
+        this.addBaseplateTile(tx, ty, tz);
+      }
+      // Refresh the legacy origin-tile pointer
+      this.baseplate =
+        this.baseplates.get('0,0,0') ?? this.baseplates.values().next().value!;
+    } else {
+      // Only color changed — fast path: update each tile material in place.
+      for (const tile of this.baseplates.values()) {
+        tile.traverse((c) => {
+          if (c instanceof THREE.Mesh || c instanceof THREE.InstancedMesh) {
+            const mat = c.material as THREE.MeshStandardMaterial | undefined;
+            if (mat && mat.color) mat.color.setHex(env.baseplateColor);
+          }
+        });
+      }
+    }
+
+    this.rebuildSurround();
+    this.onEnvironmentChange(env);
+  }
+
+  /** Dispose the current surround mesh (if any) and build a new one that
+   *  matches `this.environment.surroundType`. */
+  private rebuildSurround() {
+    // Remove and dispose the previous surround mesh
+    if (this.surroundMesh) {
+      this.scene.remove(this.surroundMesh);
+      this.surroundMesh.traverse((c) => {
+        if (c instanceof THREE.Mesh) {
+          c.geometry?.dispose?.();
+          const mat = c.material as THREE.Material | THREE.Material[];
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+          else mat?.dispose?.();
+        }
+      });
+      this.surroundMesh = null;
+    }
+
+    const env = this.environment;
+    if (env.surroundType === 'none') return;
+
+    if (env.surroundType === 'water') {
+      this.surroundMesh = this.createWaterSurround(env);
+    } else if (env.surroundType === 'ground') {
+      this.surroundMesh = this.createGroundSurround(env);
+    }
+    if (this.surroundMesh) this.scene.add(this.surroundMesh);
+  }
+
+  /** Large animated water plane (three.js Water addon) that extends
+   *  1000 units in each direction — far enough to read as infinite from
+   *  any reasonable camera distance. */
+  private createWaterSurround(env: EnvironmentDef): Water {
+    if (!this.waterNormalsTex) {
+      const loader = new THREE.TextureLoader();
+      this.waterNormalsTex = loader.load(
+        'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r164/examples/textures/waternormals.jpg',
+        (tex) => {
+          tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        }
+      );
+      // Pre-set wrap so it's correct even before the async load completes
+      this.waterNormalsTex.wrapS = this.waterNormalsTex.wrapT =
+        THREE.RepeatWrapping;
+    }
+
+    const geom = new THREE.PlaneGeometry(1000, 1000);
+    const water = new Water(geom, {
+      textureWidth: 512,
+      textureHeight: 512,
+      waterNormals: this.waterNormalsTex,
+      sunDirection: new THREE.Vector3(0.3, 0.8, 0.5).normalize(),
+      sunColor: 0xffffff,
+      waterColor: env.waterColor ?? 0x0a4466,
+      distortionScale: env.waterDistortion ?? 2.4,
+      fog: false,
+    });
+    water.rotation.x = -Math.PI / 2;
+    // Environment-controlled water level. Default -0.05 (just under the
+    // plate top). Island preset drops this to around -1.4 so the thick
+    // cliff-like baseplate visibly rises out of the water.
+    water.position.y = env.waterLevel ?? -0.05;
+    water.userData.isSurround = true;
+    return water;
+  }
+
+  /** Large flat ground plane (sand / snow / etc.) extending 1000 units. */
+  private createGroundSurround(env: EnvironmentDef): THREE.Mesh {
+    const geom = new THREE.PlaneGeometry(1000, 1000);
+    const mat = new THREE.MeshStandardMaterial({
+      color: env.surroundColor ?? 0xcccccc,
+      roughness: env.surroundRoughness ?? 0.9,
+      metalness: 0,
+    });
+    const ground = new THREE.Mesh(geom, mat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.05;
+    ground.receiveShadow = true;
+    ground.userData.isSurround = true;
+    return ground;
   }
 
   /** Toggle the "add baseplate" tile placement mode. When active, the cursor
-   *  previews a stud-board ghost adjacent to the highlighted face. */
+   *  shows tile-shaped slots at every empty horizontal neighbor. */
   setAddBaseplateMode(active: boolean) {
     if (this.addBaseplateMode === active) return;
     this.addBaseplateMode = active;
     if (active) {
-      if (!this.baseplateGhost) {
-        this.baseplateGhost = this.buildBaseplateGhostMesh();
-        this.scene.add(this.baseplateGhost);
-      }
-      this.baseplateGhost.visible = false;
+      this.rebuildBaseplateSlots();
       this.ghost.visible = false;
       this.hoverBox.visible = false;
     } else {
-      if (this.baseplateGhost) this.baseplateGhost.visible = false;
-      this.baseplateGhostTile = null;
+      this.disposeSlotsGroup();
+      this.currentSlot = null;
     }
     this.onAddBaseplateModeChange(active);
   }
 
-  /** Translucent stud-board ghost shown while in add-tile mode. */
-  private buildBaseplateGhostMesh(): THREE.Mesh {
+  private disposeSlotsGroup() {
+    if (!this.slotsGroup) return;
+    this.scene.remove(this.slotsGroup);
+    this.slotsGroup.traverse((c) => {
+      if (c instanceof THREE.Mesh) {
+        c.geometry?.dispose?.();
+        const mat = c.material as THREE.Material | THREE.Material[];
+        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+        else mat?.dispose();
+      } else if (c instanceof THREE.LineSegments) {
+        c.geometry?.dispose?.();
+        (c.material as THREE.Material).dispose?.();
+      }
+    });
+    this.slotsGroup = null;
+  }
+
+  /** Compute every empty grid position adjacent (face-connected) to an
+   *  existing tile and create a translucent tile-shaped marker for each. */
+  private rebuildBaseplateSlots() {
+    this.disposeSlotsGroup();
+    this.slotsGroup = new THREE.Group();
+    this.scene.add(this.slotsGroup);
+
+    const occupied = new Set(this.baseplates.keys());
+    const slotKeys = new Set<string>();
+    for (const key of occupied) {
+      const [txStr, tyStr, tzStr] = key.split(',');
+      const tx = +txStr;
+      const ty = +tyStr;
+      const tz = +tzStr;
+      // Horizontal neighbors only — slots appear at the same Y as the tile
+      const neighbors: [number, number, number][] = [
+        [tx + 1, ty, tz],
+        [tx - 1, ty, tz],
+        [tx, ty, tz + 1],
+        [tx, ty, tz - 1],
+      ];
+      for (const [nx, ny, nz] of neighbors) {
+        const nkey = `${nx},${ny},${nz}`;
+        if (!occupied.has(nkey)) slotKeys.add(nkey);
+      }
+    }
+
+    for (const key of slotKeys) {
+      const [tx, ty, tz] = key.split(',').map(Number);
+      const slot = this.buildSlotMesh();
+      slot.position.set(
+        tx * this.tileSize,
+        ty * Game.TILE_LEVEL_HEIGHT + 0.005, // slight offset, no z-fight
+        tz * this.tileSize
+      );
+      slot.userData.isSlot = true;
+      slot.userData.tileX = tx;
+      slot.userData.tileY = ty;
+      slot.userData.tileZ = tz;
+      this.slotsGroup.add(slot);
+    }
+  }
+
+  /** Builds one slot marker — a TRANSLUCENT FULL STUD-BOARD (slab + studs)
+   *  so the user sees a ghost preview of exactly what a baseplate tile will
+   *  look like in this position, with a small Feather-style FiPlusCircle
+   *  icon hovering over the center. */
+  private buildSlotMesh(): THREE.Mesh {
     const size = this.tileSize;
-    const geom = new THREE.BoxGeometry(size, 0.4, size);
-    geom.translate(0, -0.2, 0); // bottom-anchored to match real tiles
-    const mat = new THREE.MeshBasicMaterial({
+    const ghostMat = new THREE.MeshBasicMaterial({
       color: 0x6dc36d,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.34,
       depthWrite: false,
     });
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.userData.isBaseplateGhost = true;
 
-    // Bright white wireframe outline
-    const edges = new THREE.EdgesGeometry(geom);
+    // Slab (matches a real baseplate's dimensions, bottom-anchored)
+    const slabGeom = new THREE.BoxGeometry(size, 0.4, size);
+    slabGeom.translate(0, -0.2, 0);
+    const mesh = new THREE.Mesh(slabGeom, ghostMat);
+    mesh.userData.ghostMat = ghostMat; // for hover-color tweaking
+
+    // Translucent studs (instanced — share the slab material so a single
+    // opacity tweak in updateBaseplateGhost colors the whole tile)
+    const studGeom = new THREE.CylinderGeometry(
+      STUD_RADIUS,
+      STUD_RADIUS,
+      STUD_HEIGHT,
+      12
+    );
+    const total = size * size;
+    const instanced = new THREE.InstancedMesh(studGeom, ghostMat, total);
+    const dummy = new THREE.Object3D();
+    let i = 0;
+    for (let x = 0; x < size; x++) {
+      for (let z = 0; z < size; z++) {
+        dummy.position.set(
+          -size / 2 + 0.5 + x,
+          STUD_HEIGHT / 2,
+          -size / 2 + 0.5 + z
+        );
+        dummy.updateMatrix();
+        instanced.setMatrixAt(i++, dummy.matrix);
+      }
+    }
+    mesh.add(instanced);
+
+    // White outline edges around the slab
+    const edges = new THREE.EdgesGeometry(
+      new THREE.BoxGeometry(size, 0.4, size)
+    );
     const line = new THREE.LineSegments(
       edges,
       new THREE.LineBasicMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.95,
+        opacity: 0.85,
       })
     );
+    line.position.y = -0.2;
     mesh.add(line);
+
+    // FiPlusCircle-style icon hovering above the studs
+    const iconPlane = this.buildPlusCircleIcon();
+    iconPlane.position.y = STUD_HEIGHT + 0.3;
+    iconPlane.userData.isSlot = true;
+    mesh.add(iconPlane);
+
     return mesh;
   }
 
-  /** While in add-tile mode, snap a translucent ghost to the empty grid
-   *  position adjacent to whichever existing tile face the cursor is over. */
-  private updateBaseplateGhost() {
-    if (!this.addBaseplateMode || !this.baseplateGhost) return;
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const targets = Array.from(this.baseplates.values());
-    const hits = this.raycaster.intersectObjects(targets, true);
-    if (hits.length === 0) {
-      this.baseplateGhost.visible = false;
-      this.baseplateGhostTile = null;
-      return;
-    }
-    const hit = hits[0];
-    if (!hit.face) {
-      this.baseplateGhost.visible = false;
-      this.baseplateGhostTile = null;
-      return;
-    }
-    // Find which tile group was hit
-    let obj: THREE.Object3D | null = hit.object;
-    while (obj && !obj.userData.isBaseplate) obj = obj.parent;
-    if (!obj) {
-      this.baseplateGhost.visible = false;
-      this.baseplateGhostTile = null;
-      return;
-    }
-    const tx = obj.userData.tileX as number;
-    const ty = obj.userData.tileY as number;
-    const tz = obj.userData.tileZ as number;
-    // Direction from face normal (in world space)
-    const worldNormal = hit.face.normal
-      .clone()
-      .transformDirection(hit.object.matrixWorld);
-    let dx = 0;
-    let dy = 0;
-    let dz = 0;
-    if (Math.abs(worldNormal.y) > Math.max(Math.abs(worldNormal.x), Math.abs(worldNormal.z))) {
-      dy = worldNormal.y > 0 ? 1 : -1;
-    } else if (Math.abs(worldNormal.x) > Math.abs(worldNormal.z)) {
-      dx = worldNormal.x > 0 ? 1 : -1;
-    } else {
-      dz = worldNormal.z > 0 ? 1 : -1;
-    }
-    const next = { tx: tx + dx, ty: ty + dy, tz: tz + dz };
-    const key = `${next.tx},${next.ty},${next.tz}`;
-    if (this.baseplates.has(key)) {
-      // Already occupied — hide ghost
-      this.baseplateGhost.visible = false;
-      this.baseplateGhostTile = null;
-      return;
-    }
-    this.baseplateGhost.position.set(
-      next.tx * this.tileSize,
-      next.ty * Game.TILE_LEVEL_HEIGHT,
-      next.tz * this.tileSize
-    );
-    this.baseplateGhost.visible = true;
-    this.baseplateGhostTile = next;
+  /** A flat plane textured with a Feather-icon-style FiPlusCircle drawn on
+   *  a 2D canvas. Used as the slot's affordance — the white halo behind
+   *  the dark green stroke makes it pop against the translucent slot. */
+  private buildPlusCircleIcon(): THREE.Mesh {
+    const canvas = document.createElement('canvas');
+    const SIZE = 256;
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
+    const cx = SIZE / 2;
+    const cy = SIZE / 2;
+    const radius = SIZE * 0.36;
+    const stroke = SIZE * 0.05;
+
+    // White soft halo so the dark stroke pops against any background
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius + stroke * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Feather icon style: round caps, even stroke width, dark green
+    ctx.strokeStyle = '#0a4d0a';
+    ctx.lineWidth = stroke;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Outer circle
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Plus inside (matches react-icons/fi FiPlusCircle proportions)
+    const armLen = radius * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - armLen, cy);
+    ctx.lineTo(cx + armLen, cy);
+    ctx.moveTo(cx, cy - armLen);
+    ctx.lineTo(cx, cy + armLen);
+    ctx.stroke();
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.anisotropy = 8;
+    tex.needsUpdate = true;
+
+    // Render the icon as a flat plane facing UP (visible from above)
+    const iconWorldSize = Math.max(5, this.tileSize * 0.18);
+    const geom = new THREE.PlaneGeometry(iconWorldSize, iconWorldSize);
+    geom.rotateX(-Math.PI / 2);
+
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      depthWrite: false,
+    });
+    return new THREE.Mesh(geom, mat);
   }
 
-  /** Commit the current ghost position — adds a real baseplate tile. */
+  /** Raycasts against the slot markers and highlights whichever one is
+   *  under the cursor. The slab + studs share a single material, so a
+   *  single opacity/color tweak retints the whole tile. */
+  private updateBaseplateGhost() {
+    if (!this.addBaseplateMode || !this.slotsGroup) return;
+    // Reset every slot to its default appearance
+    for (const slot of this.slotsGroup.children) {
+      const mat =
+        (slot.userData.ghostMat as THREE.MeshBasicMaterial | undefined) ??
+        ((slot as THREE.Mesh).material as THREE.MeshBasicMaterial);
+      mat.opacity = 0.34;
+      mat.color.setHex(0x6dc36d);
+    }
+    this.currentSlot = null;
+
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hits = this.raycaster.intersectObjects(
+      this.slotsGroup.children,
+      true
+    );
+    if (hits.length === 0) return;
+    let obj: THREE.Object3D | null = hits[0].object;
+    while (obj && !obj.userData.isSlot) obj = obj.parent;
+    if (!obj) return;
+
+    const slotMesh = obj as THREE.Mesh;
+    const mat =
+      (slotMesh.userData.ghostMat as THREE.MeshBasicMaterial | undefined) ??
+      (slotMesh.material as THREE.MeshBasicMaterial);
+    mat.opacity = 0.6;
+    mat.color.setHex(0x4dca4d);
+    this.currentSlot = slotMesh;
+  }
+
+  /** Click commit — places a real tile at the highlighted slot. */
   private commitBaseplateGhost() {
-    if (!this.addBaseplateMode || !this.baseplateGhostTile) return;
-    const { tx, ty, tz } = this.baseplateGhostTile;
+    if (!this.addBaseplateMode || !this.currentSlot) return;
+    const tx = this.currentSlot.userData.tileX as number;
+    const ty = this.currentSlot.userData.tileY as number;
+    const tz = this.currentSlot.userData.tileZ as number;
     this.addBaseplateTile(tx, ty, tz);
-    // Re-run the preview so the ghost slides to the next valid neighbour
+    // Recompute slots so the new neighbours of the placed tile become
+    // available, and the just-filled slot is removed.
+    this.rebuildBaseplateSlots();
     this.updateBaseplateGhost();
   }
 
@@ -1388,10 +1702,23 @@ export class Game {
     // Disable orbit controls
     this.controls.enabled = false;
 
-    // Build collision AABBs (body-only, excluding studs) for every placed object
+    // Build collision AABBs (body-only, excluding studs) for every placed
+    // object. Each AABB has a parallel entry in playAABBDoorRefs — non-null
+    // for door root groups, so the collision loops can skip open doors.
     this.playAABBs = [];
+    this.playAABBDoorRefs = [];
+    // Reset any leftover door animations and put every door's hinge group
+    // back to the closed position before snapshotting.
+    this.doorAnimations.clear();
+    this.currentDoorHotspot = null;
+    for (const child of this.brickGroup.children) {
+      const hinge = findDoorHinge(child);
+      if (hinge) hinge.rotation.y = 0;
+    }
     for (const child of this.brickGroup.children) {
       this.playAABBs.push(this.getBlockAABB(child));
+      const spec = child.userData.spec as { type?: BlockType } | undefined;
+      this.playAABBDoorRefs.push(spec?.type === 'door' ? child : null);
     }
 
     // Spawn player on a clear spot near the +Z edge of the origin tile
@@ -1419,6 +1746,7 @@ export class Game {
           )
         )
       );
+      this.playAABBDoorRefs.push(null);
     }
     this.walkTime = 0;
     this.avatarYaw = Math.PI; // facing -Z (toward origin/baseplate center)
@@ -1508,6 +1836,16 @@ export class Game {
       this.playerAvatar = null;
     }
 
+    // Reset door hinges back to closed so the build-mode view shows them
+    // in their canonical state, and drop the interaction prompt.
+    for (const child of this.brickGroup.children) {
+      const hinge = findDoorHinge(child);
+      if (hinge) hinge.rotation.y = 0;
+    }
+    this.doorAnimations.clear();
+    this.currentDoorHotspot = null;
+    this.getDoorPrompt()?.classList.add('hidden');
+
     // Restore build camera + orbit controls
     this.camera.position.copy(this.savedCam.position);
     this.controls.target.copy(this.savedCam.target);
@@ -1518,6 +1856,12 @@ export class Game {
   }
 
   private updatePlayMode(dt: number) {
+    // Advance any active door animations and refresh the interactable
+    // hotspot at the start of each frame — both rely on the current
+    // player position, so ordering before movement is fine.
+    this.updateDoorAnimations(dt);
+    this.updateDoorHotspot();
+
     const RUN_MULT = 1.7;
     const SPEED = 6 * (this.moveKeys.run ? RUN_MULT : 1);
     const GRAVITY = -22;
@@ -1720,6 +2064,13 @@ export class Game {
     this.camera.lookAt(focus);
   }
 
+  /** True when the given door is currently passable — i.e. it's in any
+   *  active animation state (opening, open, or closing). Closed doors
+   *  aren't in doorAnimations at all. */
+  private isDoorPassable(door: THREE.Object3D): boolean {
+    return this.doorAnimations.has(door);
+  }
+
   private collides(
     x: number,
     y: number,
@@ -1735,15 +2086,20 @@ export class Game {
       new THREE.Vector3(x - bw + EPS, y + EPS, z - bw + EPS),
       new THREE.Vector3(x + bw - EPS, y + bh - EPS, z + bw - EPS)
     );
-    for (const b of this.playAABBs) {
-      if (box.intersectsBox(b)) return true;
+    for (let i = 0; i < this.playAABBs.length; i++) {
+      const door = this.playAABBDoorRefs[i];
+      if (door && this.isDoorPassable(door)) continue;
+      if (box.intersectsBox(this.playAABBs[i])) return true;
     }
     return false;
   }
 
   private findGroundY(x: number, y: number, z: number, bw: number): number {
     let maxTop = 0; // baseplate top
-    for (const b of this.playAABBs) {
+    for (let i = 0; i < this.playAABBs.length; i++) {
+      const door = this.playAABBDoorRefs[i];
+      if (door && this.isDoorPassable(door)) continue;
+      const b = this.playAABBs[i];
       if (
         x + bw > b.min.x &&
         x - bw < b.max.x &&
@@ -1770,7 +2126,10 @@ export class Game {
     maxStep: number
   ): number | null {
     let highestTop = currentY;
-    for (const b of this.playAABBs) {
+    for (let i = 0; i < this.playAABBs.length; i++) {
+      const door = this.playAABBDoorRefs[i];
+      if (door && this.isDoorPassable(door)) continue;
+      const b = this.playAABBs[i];
       // Must horizontally overlap the proposed footprint
       if (x + bw <= b.min.x || x - bw >= b.max.x) continue;
       if (z + bw <= b.min.z || z - bw >= b.max.z) continue;
@@ -1801,6 +2160,14 @@ export class Game {
     } else {
       this.controls.update();
     }
+
+    // Animate the water surround (if any) by advancing its time uniform
+    if (this.surroundMesh instanceof Water) {
+      (
+        this.surroundMesh.material as THREE.ShaderMaterial
+      ).uniforms['time'].value += dt;
+    }
+
     this.renderer.render(this.scene, this.camera);
   };
 }

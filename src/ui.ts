@@ -3,6 +3,7 @@ import {
   BOARD_SIZES,
   CATEGORIES,
   COLORS,
+  ENVIRONMENTS,
   MINIFIG_PRESETS,
   SIZES,
 } from './config';
@@ -302,6 +303,27 @@ export function buildUI(game: Game) {
     };
   }
 
+  // --- Environment selector (baseplate color + surround) ---
+  const envRow = document.getElementById('environments');
+  const envButtons: HTMLButtonElement[] = [];
+  if (envRow) {
+    ENVIRONMENTS.forEach((env) => {
+      const btn = document.createElement('button');
+      btn.className = 'size-btn';
+      btn.textContent = env.name;
+      btn.dataset.envId = env.id;
+      btn.addEventListener('click', () => game.setEnvironment(env));
+      if (env.id === game.environment.id) btn.classList.add('active');
+      envRow.appendChild(btn);
+      envButtons.push(btn);
+    });
+    game.onEnvironmentChange = (env) => {
+      envButtons.forEach((b) => {
+        b.classList.toggle('active', b.dataset.envId === env.id);
+      });
+    };
+  }
+
   // --- Add baseplate tile mode toggle ---
   const addTileBtn = document.getElementById(
     'add-baseplate'
@@ -314,8 +336,8 @@ export function buildUI(game: Game) {
     game.onAddBaseplateModeChange = (active) => {
       addTileBtn.classList.toggle('active', active);
       addTileBtn.textContent = active
-        ? '✕ 맵 추가 종료'
-        : '＋ 맵 추가';
+        ? '✕ 스터드 추가 종료'
+        : '＋ 스터드 추가';
     };
   }
 

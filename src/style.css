@@ -735,6 +735,52 @@ body.remove-mode #viewer canvas {
   margin: 0 2px;
 }
 
+/* Door interaction prompt — shown when the player is near an interactable
+   door in play mode. Fades in/out and sits just above the bottom hint. */
+#play-overlay .door-prompt {
+  position: absolute;
+  bottom: 110px;
+  left: 50%;
+  transform: translate(-50%, 0);
+  background: rgba(20, 22, 28, 0.88);
+  color: #fff;
+  padding: 11px 20px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: doorPromptIn 0.16s ease-out;
+}
+
+#play-overlay .door-prompt.hidden {
+  display: none;
+}
+
+#play-overlay .door-prompt kbd {
+  padding: 3px 8px;
+  font-size: 11.5px;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
+  margin-right: 4px;
+}
+
+@keyframes doorPromptIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 /* Play mode: hide the sidebar completely and let the viewer go full-screen */
 body.playing #sidebar {
   display: none;

@@ -470,7 +470,9 @@ function createDoorBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w;
   const d = spec.d;
-  const h = 9 * PLATE_HEIGHT;
+  // 15 plates (5 bricks, 6.0 units) — tall enough for a minifig to walk
+  // through. Keep in sync with bodyHeightPlates in config.ts.
+  const h = 15 * PLATE_HEIGHT;
   const frameMat = studMaterial(spec.colorHex);
   const slabMat = new THREE.MeshStandardMaterial({
     color: 0x6b4423,
@@ -526,20 +528,36 @@ function createDoorBlock(spec: BlockSpec): THREE.Group {
     jambR.position.set(width / 2 - t / 2, innerCenterY, 0);
     group.add(jambR);
 
+    // --- Hinge group (slab + knob pivot around the LEFT jamb inner edge).
+    // Play-mode door-open animation rotates this group around Y. Hinge is
+    // tagged with userData.isDoorHinge so game.ts can find and animate it.
+    const hingeGroup = new THREE.Group();
+    hingeGroup.position.set(-width / 2 + t, innerCenterY, 0);
+    hingeGroup.userData.isDoorHinge = true;
+
+    const slabW = width - 2 * t - 0.02;
     const slab = new THREE.Mesh(
-      new THREE.BoxGeometry(width - 2 * t - 0.02, innerH - 0.02, 0.08),
+      new THREE.BoxGeometry(slabW, innerH - 0.02, 0.08),
       slabMat
     );
-    slab.position.set(0, innerCenterY, 0);
+    // In hinge-local: slab center is slabW/2 + 0.01 along +X from the hinge
+    // pivot, so that in world space (with hinge at -w/2+t) the slab's
+    // closed position is centered at x = 0.
+    slab.position.set(slabW / 2 + 0.01, 0, 0);
     slab.castShadow = true;
-    group.add(slab);
+    hingeGroup.add(slab);
 
     const knob = new THREE.Mesh(
       new THREE.SphereGeometry(0.07, 12, 10),
       knobMat
     );
-    knob.position.set(width / 2 - t - 0.18, innerCenterY, 0.08);
-    group.add(knob);
+    // Knob sits near the slab's +X end (far from the hinge) and slightly
+    // +Z (visible front face). World x = width/2 - t - 0.18 — subtract the
+    // hinge world-x (-width/2 + t) to get hinge-local x.
+    knob.position.set(width - 2 * t - 0.18, 0, 0.08);
+    hingeGroup.add(knob);
+
+    group.add(hingeGroup);
   } else {
     const jambF = new THREE.Mesh(
       new THREE.BoxGeometry(width, innerH, t),
@@ -730,7 +748,10 @@ function createArchwayBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w;
   const d = spec.d;
-  const h = 12 * PLATE_HEIGHT; // 4 bricks tall (4.8)
+  // 18 plates (6 bricks, 7.2 units) — tall enough for a minifig to walk
+  // through under the arch crown. Keep in sync with bodyHeightPlates in
+  // config.ts.
+  const h = 18 * PLATE_HEIGHT;
   const material = studMaterial(spec.colorHex);
 
   const width = w * GRID.X;
@@ -793,7 +814,9 @@ function createArchwayBlock(spec: BlockSpec): THREE.Group {
 }
 
 // ------------------------------------------------------------------
-//  Stairs — one step per stud along the long axis
+//  Stairs — one step per stud along +Z (climbing direction matches the
+//  archway's walk-through direction, so both blocks "face forward" the
+//  same way when placed).
 // ------------------------------------------------------------------
 function createStairsBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
@@ -805,25 +828,26 @@ function createStairsBlock(spec: BlockSpec): THREE.Group {
   const depth = d * GRID.Z;
   const brickH = 3 * PLATE_HEIGHT; // each step is 1 brick tall
 
-  // Each step is a solid box from y=0 up to (i+1) * brickH, 1 stud wide
-  // along x, full d in z. Lowest step at -X, highest at +X.
-  for (let i = 0; i < w; i++) {
+  // Each step is a solid box from y=0 up to (i+1) * brickH, full w in x,
+  // 1 stud deep along z. Lowest step at -Z (front), highest at +Z (back).
+  for (let i = 0; i < d; i++) {
     const stepH = (i + 1) * brickH;
     const step = new THREE.Mesh(
-      new THREE.BoxGeometry(1 * GRID.X, stepH, depth),
+      new THREE.BoxGeometry(width, stepH, 1 * GRID.Z),
       material
     );
-    step.position.set(-width / 2 + 0.5 + i, stepH / 2, 0);
+    step.position.set(0, stepH / 2, -depth / 2 + 0.5 + i);
     step.castShadow = true;
     step.receiveShadow = true;
     group.add(step);
 
-    for (let iz = 0; iz < d; iz++) {
+    // Stud row on this step's top (w studs across x)
+    for (let ix = 0; ix < w; ix++) {
       const stud = new THREE.Mesh(STUD_GEOMETRY, material);
       stud.position.set(
-        -width / 2 + 0.5 + i,
+        -width / 2 + 0.5 + ix,
         stepH + 0.1,
-        -depth / 2 + 0.5 + iz
+        -depth / 2 + 0.5 + i
       );
       stud.castShadow = true;
       group.add(stud);
