@@ -52,8 +52,20 @@ export class Game {
   blockType: BlockType = 'brick';
   character: MinifigPreset = MINIFIG_PRESETS[0];
   mode: Mode = 'place';
-  boardSize: number = BOARD_SIZE;
+  /** Default tile size in studs. The map is now built from a grid of tiles
+   *  rather than a single resizable plate, so this is per-tile, not the
+   *  total board size. */
+  tileSize: number = BOARD_SIZE;
+  /** Vertical spacing between stacked tiles (one "floor"). */
+  static readonly TILE_LEVEL_HEIGHT = 4.0;
+  private baseplates = new Map<string, THREE.Group>();
   private sunLight: THREE.DirectionalLight | null = null;
+  // Map-extension mode (user clicks to add a baseplate tile next to an
+  // existing one — the cursor shows a translucent stud-board ghost)
+  addBaseplateMode = false;
+  private baseplateGhost: THREE.Mesh | null = null;
+  private baseplateGhostTile: { tx: number; ty: number; tz: number } | null =
+    null;
 
   // Line placement state (Shift + drag)
   private shiftLineStart: { x: number; y: number; z: number } | null = null;
@@ -93,6 +105,7 @@ export class Game {
   onModeChange: (mode: Mode) => void = () => {};
   onPlayChange: (playing: boolean) => void = () => {};
   onBoardSizeChange: (size: number) => void = () => {};
+  onAddBaseplateModeChange: (active: boolean) => void = () => {};
   onViewModeChange: (mode: ViewMode) => void = () => {};
   /** Fires when the user clears the current selection (e.g. by pressing
    *  Escape). UI should remove the active highlight from all type buttons. */
@@ -324,9 +337,11 @@ export class Game {
     cam.updateProjectionMatrix();
   }
 
-  private createBaseplate() {
+  /** Builds one stud-board tile group. The geometry is local to the tile —
+   *  position is set by addBaseplateTile based on tile coordinates. */
+  private buildBaseplateTileMesh(): THREE.Group {
     const group = new THREE.Group();
-    const size = this.boardSize;
+    const size = this.tileSize;
 
     const plateMat = new THREE.MeshStandardMaterial({
       color: 0x4b974b,
@@ -365,31 +380,162 @@ export class Game {
     group.add(instanced);
 
     group.userData.isBaseplate = true;
-    this.baseplate = group;
-    this.scene.add(group);
+    return group;
   }
 
-  /** Swap the current baseplate for a new one at the given stud size.
-   *  Existing bricks remain; anything now outside the new bounds keeps its
-   *  position (user can manually clear/remove). */
-  setBoardSize(size: number) {
-    if (size === this.boardSize) return;
-    this.boardSize = size;
+  /** Add a baseplate tile at the given grid coordinates (in tile units).
+   *  Returns the created Group, or null if a tile already exists there. */
+  addBaseplateTile(tx: number, ty: number, tz: number): THREE.Group | null {
+    const key = `${tx},${ty},${tz}`;
+    if (this.baseplates.has(key)) return null;
 
-    // Dispose old baseplate
-    if (this.baseplate) {
-      this.scene.remove(this.baseplate);
-      this.baseplate.traverse((obj) => {
-        if (obj instanceof THREE.Mesh || obj instanceof THREE.InstancedMesh) {
-          obj.geometry?.dispose?.();
-        }
-      });
-    }
-
-    this.createBaseplate();
+    const group = this.buildBaseplateTileMesh();
+    group.position.set(
+      tx * this.tileSize,
+      ty * Game.TILE_LEVEL_HEIGHT,
+      tz * this.tileSize
+    );
+    group.userData.tileX = tx;
+    group.userData.tileY = ty;
+    group.userData.tileZ = tz;
+    group.userData.tileKey = key;
+    this.scene.add(group);
+    this.baseplates.set(key, group);
     this.updateSunShadowBounds();
+    return group;
+  }
+
+  /** Initial setup — places the first tile at origin. */
+  private createBaseplate() {
+    this.addBaseplateTile(0, 0, 0);
+    // Keep the legacy `baseplate` field pointing at the origin tile so any
+    // existing code that touches `this.baseplate` still works.
+    this.baseplate = this.baseplates.get('0,0,0')!;
+  }
+
+  /** Toggle the "add baseplate" tile placement mode. When active, the cursor
+   *  previews a stud-board ghost adjacent to the highlighted face. */
+  setAddBaseplateMode(active: boolean) {
+    if (this.addBaseplateMode === active) return;
+    this.addBaseplateMode = active;
+    if (active) {
+      if (!this.baseplateGhost) {
+        this.baseplateGhost = this.buildBaseplateGhostMesh();
+        this.scene.add(this.baseplateGhost);
+      }
+      this.baseplateGhost.visible = false;
+      this.ghost.visible = false;
+      this.hoverBox.visible = false;
+    } else {
+      if (this.baseplateGhost) this.baseplateGhost.visible = false;
+      this.baseplateGhostTile = null;
+    }
+    this.onAddBaseplateModeChange(active);
+  }
+
+  /** Translucent stud-board ghost shown while in add-tile mode. */
+  private buildBaseplateGhostMesh(): THREE.Mesh {
+    const size = this.tileSize;
+    const geom = new THREE.BoxGeometry(size, 0.4, size);
+    geom.translate(0, -0.2, 0); // bottom-anchored to match real tiles
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x6dc36d,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.userData.isBaseplateGhost = true;
+
+    // Bright white wireframe outline
+    const edges = new THREE.EdgesGeometry(geom);
+    const line = new THREE.LineSegments(
+      edges,
+      new THREE.LineBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.95,
+      })
+    );
+    mesh.add(line);
+    return mesh;
+  }
+
+  /** While in add-tile mode, snap a translucent ghost to the empty grid
+   *  position adjacent to whichever existing tile face the cursor is over. */
+  private updateBaseplateGhost() {
+    if (!this.addBaseplateMode || !this.baseplateGhost) return;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const targets = Array.from(this.baseplates.values());
+    const hits = this.raycaster.intersectObjects(targets, true);
+    if (hits.length === 0) {
+      this.baseplateGhost.visible = false;
+      this.baseplateGhostTile = null;
+      return;
+    }
+    const hit = hits[0];
+    if (!hit.face) {
+      this.baseplateGhost.visible = false;
+      this.baseplateGhostTile = null;
+      return;
+    }
+    // Find which tile group was hit
+    let obj: THREE.Object3D | null = hit.object;
+    while (obj && !obj.userData.isBaseplate) obj = obj.parent;
+    if (!obj) {
+      this.baseplateGhost.visible = false;
+      this.baseplateGhostTile = null;
+      return;
+    }
+    const tx = obj.userData.tileX as number;
+    const ty = obj.userData.tileY as number;
+    const tz = obj.userData.tileZ as number;
+    // Direction from face normal (in world space)
+    const worldNormal = hit.face.normal
+      .clone()
+      .transformDirection(hit.object.matrixWorld);
+    let dx = 0;
+    let dy = 0;
+    let dz = 0;
+    if (Math.abs(worldNormal.y) > Math.max(Math.abs(worldNormal.x), Math.abs(worldNormal.z))) {
+      dy = worldNormal.y > 0 ? 1 : -1;
+    } else if (Math.abs(worldNormal.x) > Math.abs(worldNormal.z)) {
+      dx = worldNormal.x > 0 ? 1 : -1;
+    } else {
+      dz = worldNormal.z > 0 ? 1 : -1;
+    }
+    const next = { tx: tx + dx, ty: ty + dy, tz: tz + dz };
+    const key = `${next.tx},${next.ty},${next.tz}`;
+    if (this.baseplates.has(key)) {
+      // Already occupied — hide ghost
+      this.baseplateGhost.visible = false;
+      this.baseplateGhostTile = null;
+      return;
+    }
+    this.baseplateGhost.position.set(
+      next.tx * this.tileSize,
+      next.ty * Game.TILE_LEVEL_HEIGHT,
+      next.tz * this.tileSize
+    );
+    this.baseplateGhost.visible = true;
+    this.baseplateGhostTile = next;
+  }
+
+  /** Commit the current ghost position — adds a real baseplate tile. */
+  private commitBaseplateGhost() {
+    if (!this.addBaseplateMode || !this.baseplateGhostTile) return;
+    const { tx, ty, tz } = this.baseplateGhostTile;
+    this.addBaseplateTile(tx, ty, tz);
+    // Re-run the preview so the ghost slides to the next valid neighbour
+    this.updateBaseplateGhost();
+  }
+
+  /** Legacy compat for the old "맵 크기" preset UI — resizes future tiles
+   *  but does not modify already-placed tiles. */
+  setBoardSize(size: number) {
+    if (size === this.tileSize) return;
+    this.tileSize = size;
     this.onBoardSizeChange(size);
-    this.updatePreview();
   }
 
   // ------------------------------------------------------------------
@@ -1410,22 +1556,34 @@ export class Game {
       }
       this.playerAvatar.rotation.y = this.avatarYaw;
 
-      // Walking animation: leg swing + subtle body bob
+      // Walking animation: hip-pivoted leg swing + opposite-phase arm swing.
+      // Pivots are created in createMinifigure (blocks.ts) so rotations
+      // happen at the hip / shoulder rather than the mesh center.
       if (isWalking && this.onGround) {
-        this.walkTime += dt * (this.moveKeys.run ? 14 : 10);
+        this.walkTime += dt * (this.moveKeys.run ? 13 : 9);
       }
-      const swing = isWalking && this.onGround ? Math.sin(this.walkTime) * 0.5 : 0;
+      const swing =
+        isWalking && this.onGround ? Math.sin(this.walkTime) * 0.32 : 0;
       const parts = this.playerAvatar.userData.parts as
-        | { legs?: THREE.Mesh[] }
+        | {
+            rightLeg?: THREE.Group | null;
+            leftLeg?: THREE.Group | null;
+            rightArm?: THREE.Group | null;
+            leftArm?: THREE.Group | null;
+          }
         | undefined;
-      if (parts?.legs && parts.legs.length >= 2) {
-        parts.legs[0].rotation.x = swing;
-        parts.legs[1].rotation.x = -swing;
+      if (parts) {
+        // Right leg forward ↔ left leg back
+        if (parts.rightLeg) parts.rightLeg.rotation.x = swing;
+        if (parts.leftLeg) parts.leftLeg.rotation.x = -swing;
+        // Arms swing opposite to legs (right arm back when right leg forward)
+        if (parts.rightArm) parts.rightArm.rotation.x = -swing * 0.85;
+        if (parts.leftArm) parts.leftArm.rotation.x = swing * 0.85;
       }
       // Subtle body bounce
       const bob =
         isWalking && this.onGround
-          ? Math.abs(Math.sin(this.walkTime)) * 0.06
+          ? Math.abs(Math.sin(this.walkTime)) * 0.05
           : 0;
       this.playerAvatar.position.y += bob;
     }

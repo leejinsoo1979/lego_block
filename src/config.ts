@@ -68,9 +68,20 @@ export type BlockType =
   | 'door'
   | 'fence'
   | 'wheel'
+  | 'archway'
+  | 'stairs'
+  | 'column'
+  | 'tree'
+  | 'lamp'
+  | 'ladder'
   | 'minifig';
 
-export type BlockCategory = 'basic' | 'shape' | 'part' | 'character';
+export type BlockCategory =
+  | 'basic'
+  | 'shape'
+  | 'part'
+  | 'special'
+  | 'character';
 
 export interface CategoryDef {
   id: BlockCategory;
@@ -82,6 +93,7 @@ export const CATEGORIES: CategoryDef[] = [
   { id: 'basic', label: '블록' },
   { id: 'shape', label: '모양' },
   { id: 'part', label: '부품' },
+  { id: 'special', label: '특수' },
   { id: 'character', label: '캐릭터' },
 ];
 
@@ -117,6 +129,13 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'door', label: '문', category: 'part', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 2, d: 1 } },
   { type: 'fence', label: '울타리', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
   { type: 'wheel', label: '바퀴', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 2, d: 2 } },
+  // 특수
+  { type: 'archway', label: '아치 입구', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 6, d: 2 } },
+  { type: 'stairs', label: '계단', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 4, d: 2 } },
+  { type: 'column', label: '기둥', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'tree', label: '나무', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'lamp', label: '가로등', category: 'special', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'ladder', label: '사다리', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   // 캐릭터
   { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
 ];

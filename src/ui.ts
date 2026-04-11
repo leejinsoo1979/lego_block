@@ -197,9 +197,12 @@ export function buildUI(game: Game) {
     const def = BLOCK_TYPES.find((t) => t.type === type);
     const isMinifig = type === 'minifig';
     const fixedSize = !!def?.fixedSize;
+    // Blocks with hard-coded natural colors (tree, lamp) ignore the color
+    // picker — disable the panel so users don't get confused.
+    const isColorless = isMinifig || type === 'tree' || type === 'lamp';
     document
       .getElementById('color-panel')!
-      .classList.toggle('disabled', isMinifig);
+      .classList.toggle('disabled', isColorless);
     document
       .getElementById('size-panel')!
       .classList.toggle('disabled', isMinifig || fixedSize);

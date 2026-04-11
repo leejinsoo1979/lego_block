@@ -85,3 +85,79 @@ A second offscreen `WebGLRenderer` generates `data:image/png` URLs for the type 
 - **Korean UI strings** in `index.html` and the `label` fields in `config.ts` — preserve the language when editing.
 - **TypeScript is strict** (`strict`, `noUnusedLocals`, `noUnusedParameters`). Removing a parameter needs `_` prefix or full removal — `tsc` will fail otherwise.
 - **Debug hook**: `main.ts` exposes the `Game` instance at `window.__game__` for browser-console poking.
+
+## 레고 블록 기본 규격
+
+Reference sheet for the real-world Lego dimensions the constants in `src/config.ts` are derived from. The engine runs in stud-pitch units (1 unit = 1 stud pitch = 8.0 mm), so every mm value below divided by 8.0 gives the value used in code. Consult this when adding new block geometry, sizing studs/tubes, or deciding body heights.
+
+**1. 스터드 중심 간격 (Pitch)**
+- 8.0 mm
+
+**2. 스터드 지름**
+- 4.8 mm
+
+**3. 스터드 높이**
+- 1.8 mm
+
+**4. 기본 브릭 높이 (1 brick)**
+- 9.6 mm
+
+**5. 플레이트 높이 (1 plate)**
+- 3.2 mm
+
+**6. 타일 높이**
+- 3.2 mm
+- 단, 타일은 스터드가 없음
+
+**7. 브릭 벽 두께**
+- 약 1.5 mm ~ 1.6 mm
+
+**8. 브릭 하부 튜브 외경**
+- 약 6.51 mm
+
+**9. 브릭 하부 튜브 내경**
+- 약 4.8 mm
+
+**10. 1 × 1 브릭 외형 크기**
+- 가로 8.0 mm
+- 세로 8.0 mm
+- 높이 9.6 mm
+
+**11. 1 × 2 브릭 외형 크기**
+- 가로 8.0 mm
+- 세로 16.0 mm
+- 높이 9.6 mm
+
+**12. 2 × 2 브릭 외형 크기**
+- 가로 16.0 mm
+- 세로 16.0 mm
+- 높이 9.6 mm
+
+**13. 2 × 4 브릭 외형 크기**
+- 가로 16.0 mm
+- 세로 32.0 mm
+- 높이 9.6 mm
+
+**14. 1 × 1 플레이트 외형 크기**
+- 가로 8.0 mm
+- 세로 8.0 mm
+- 높이 3.2 mm
+
+**15. 1 × 2 플레이트 외형 크기**
+- 가로 8.0 mm
+- 세로 16.0 mm
+- 높이 3.2 mm
+
+**16. 2 × 2 플레이트 외형 크기**
+- 가로 16.0 mm
+- 세로 16.0 mm
+- 높이 3.2 mm
+
+**17. 2 × 4 플레이트 외형 크기**
+- 가로 16.0 mm
+- 세로 32.0 mm
+- 높이 3.2 mm
+
+**18. 높이 환산**
+- 1 brick = 3 plates = 9.6 mm
+- 1 plate = 3.2 mm

@@ -115,6 +115,42 @@ export function renderBlockTypeThumbnail(
       camera!.position.set(3.6, 2.4, 4.0);
       camera!.lookAt(0, 0.5, 0);
       break;
+    // ------------------------------------------------------------------
+    //  Special blocks: all 4.8–6.0 units tall. The thumbnail camera uses
+    //  a 28° FOV, so fitting a 4.8-tall block needs distance ~11 and a
+    //  6.0-tall block needs distance ~14. All aim at the vertical center.
+    // ------------------------------------------------------------------
+    case 'archway':
+      // 6×2×4.8 — tallest AND widest; pull camera back far enough to fit
+      // the 6-wide footprint too.
+      camera!.position.set(9, 5, 10);
+      camera!.lookAt(0, 2.4, 0);
+      break;
+    case 'stairs':
+      // 4×2×4.8 — 3/4 view angled so the step profile is visible.
+      camera!.position.set(8, 5.5, 8);
+      camera!.lookAt(0, 2.4, 0);
+      break;
+    case 'column':
+      // 1×1×4.8 — tall thin pillar.
+      camera!.position.set(7.5, 5, 7.5);
+      camera!.lookAt(0, 2.4, 0);
+      break;
+    case 'tree':
+      // 1×1×4.8 with foliage spreading ~0.9 unit radius.
+      camera!.position.set(8, 4.8, 8);
+      camera!.lookAt(0, 2.4, 0);
+      break;
+    case 'lamp':
+      // 1×1×6.0 — the tallest block; needs the largest distance.
+      camera!.position.set(9.5, 5.5, 9.5);
+      camera!.lookAt(0, 3.0, 0);
+      break;
+    case 'ladder':
+      // 1×1×4.8 — thin front-facing piece.
+      camera!.position.set(7, 5, 7);
+      camera!.lookAt(0, 2.4, 0);
+      break;
     default:
       camera!.position.set(3.8, 3.2, 3.8);
       camera!.lookAt(0, 0.5, 0);
