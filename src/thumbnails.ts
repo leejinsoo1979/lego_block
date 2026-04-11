@@ -236,22 +236,22 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 4.8, 0);
       break;
     case 'seesaw':
-      // 10×3×2.4 — long horizontal toy. 3/4 view from above shows
-      // the tilted plank, curved fulcrum, and both seats together.
-      camera!.position.set(13, 8, 11);
-      camera!.lookAt(0, 1.0, 0);
+      // 12×4×3.6 — long horizontal toy. 3/4 view from above shows the
+      // tilted plank, axle stand, and both seats together.
+      camera!.position.set(15, 9, 13);
+      camera!.lookAt(0, 1.4, 0);
       break;
     case 'junglegym':
-      // 5×5×9.6 — big cube-shaped climbing frame with 8 levels of
-      // rungs and a top platform. 3/4 view at distance.
-      camera!.position.set(13, 9, 14);
+      // 6×6×9.6 — big cube-shaped climbing frame with a yellow climbing
+      // wall, top platform, and flag. Pulled back to fit it all.
+      camera!.position.set(15, 10, 16);
       camera!.lookAt(0, 4.8, 0);
       break;
     case 'merrygoround':
-      // 6×6×3.6 — round disc with central pole and 4 seats. Elevated
-      // 3/4 view to read the disc top, pole, and seats together.
-      camera!.position.set(11, 9, 11);
-      camera!.lookAt(0, 1.6, 0);
+      // 8×8×4.8 — round disc with central pole, conical canopy, and
+      // 4 seats. Elevated 3/4 view to read the disc + canopy together.
+      camera!.position.set(14, 11, 14);
+      camera!.lookAt(0, 2.2, 0);
       break;
     default:
       camera!.position.set(3.8, 3.2, 3.8);

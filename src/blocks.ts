@@ -1364,49 +1364,47 @@ function createSwingBlock(spec: BlockSpec): THREE.Group {
   topBeam.castShadow = true;
   group.add(topBeam);
 
-  // ----- Three hanging swings — twin chains + seat + backrest each -----
+  // ----- Three hanging swings -----
+  // The minifig sits on the seat facing PERPENDICULAR to the beam, i.e.
+  // facing +Z. So the seat is wide along X (matching the minifig's
+  // 2-stud-wide side) and deep along Z (matching the minifig's 1-stud
+  // depth). The TWO chains attach at the LEFT and RIGHT edges of the
+  // seat (at X = ±seatW/2, both at Z = 0) — same Z as the seat center,
+  // separated only along X. The minifig swings forward/back along Z.
   const chainLen = h * 0.62;
   const seatY = apexY - chainLen;
-  // Spread along X. Avoid the very ends near the side panels.
-  const usableW = beamLen - 1.6;
-  const seatXs = [
-    -usableW / 2 + usableW * 0.0,
-    -usableW / 2 + usableW * 0.5,
-    -usableW / 2 + usableW * 1.0,
-  ];
-  const chainCz = depth / 2 - 0.55; // chain z-offsets (front + back)
-  const seatW = 1.1;
-  const seatD = chainCz * 2 + 0.3;
+  const numSwings = 3;
+  const swingSpacing = beamLen / (numSwings + 1);
+  const seatXs: number[] = [];
+  for (let i = 1; i <= numSwings; i++) {
+    seatXs.push(-beamLen / 2 + i * swingSpacing);
+  }
+  const seatW = 1.6; // X = wide enough for the 2-stud minifig
+  const seatD = 0.9; // Z = matches minifig's 1-stud depth
+  const chainXOffset = seatW / 2 - 0.08; // chains near the seat's X edges
 
   for (const sx of seatXs) {
-    // Twin chains (front + back of seat)
-    for (const cz of [-chainCz, chainCz]) {
+    // Two chains, one at the LEFT edge of the seat and one at the
+    // RIGHT edge (both at Z=0). They hang straight down from the beam.
+    for (const cx of [-chainXOffset, chainXOffset]) {
       const chain = new THREE.Mesh(
         new THREE.BoxGeometry(0.08, chainLen, 0.08),
         chainMat
       );
-      chain.position.set(sx, apexY - chainLen / 2 - 0.16, cz);
+      chain.position.set(sx + cx, apexY - chainLen / 2 - 0.16, 0);
       chain.castShadow = true;
       group.add(chain);
     }
 
-    // Seat with backrest + side arms
+    // Flat seat — the minifig sits on this facing +Z
     const seat = new THREE.Mesh(
-      new THREE.BoxGeometry(seatW, 0.16, seatD),
+      new THREE.BoxGeometry(seatW, 0.18, seatD),
       seatMat
     );
-    seat.position.set(sx, seatY - 0.08, 0);
+    seat.position.set(sx, seatY - 0.09, 0);
     seat.castShadow = true;
     seat.receiveShadow = true;
     group.add(seat);
-
-    const backrest = new THREE.Mesh(
-      new THREE.BoxGeometry(seatW, 0.75, 0.12),
-      seatMat
-    );
-    backrest.position.set(sx, seatY + 0.3, seatD / 2 - 0.06);
-    backrest.castShadow = true;
-    group.add(backrest);
   }
 
   return group;
@@ -1423,8 +1421,8 @@ function createSwingBlock(spec: BlockSpec): THREE.Group {
 // ------------------------------------------------------------------
 function createSeesawBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
-  const w = spec.w; // 10
-  const d = spec.d; // 3
+  const w = spec.w; // 12
+  const d = spec.d; // 4
   const material = studMaterial(spec.colorHex);
   const plankMat = new THREE.MeshStandardMaterial({
     color: 0xc4281c, // bright red plank
@@ -1439,12 +1437,13 @@ function createSeesawBlock(spec: BlockSpec): THREE.Group {
   const depth = d * GRID.Z;
 
   // ----- Two A-frame side posts holding the axle -----
-  // Each "post" is a small triangular wedge prism standing at z = ±zPost,
-  // tapering up to support the axle bar.
-  const postZ = depth / 2 - 0.4;
-  const postBaseW = 0.7;
-  const postH = 1.4;
-  const postT = 0.3;
+  // Each "post" is a triangular wedge prism standing at z = ±zPost,
+  // tapering up to support the axle bar. Bumped to 2.0u tall + wider
+  // base for the bigger 12×4×9p seesaw.
+  const postZ = depth / 2 - 0.5;
+  const postBaseW = 1.0;
+  const postH = 2.0;
+  const postT = 0.4;
 
   // Triangle (base wide, apex narrow at top) in shape XY
   const postShape = new THREE.Shape();

@@ -59,6 +59,35 @@ interface NpcState {
   isDog: boolean;
   /** Countdown to the next bark while following (dogs only). */
   nextBarkIn?: number;
+  /** Seconds remaining in an initial "sprint to player" burst right after
+   *  a whistle. While >0 the dog runs at sprint speed; when it ticks to 0
+   *  the dog settles back into a normal follow trot. Dogs only. */
+  followSprintTime?: number;
+}
+
+/** Playground module subtypes the player can ride. */
+type PlaygroundType =
+  | 'slide'
+  | 'swing'
+  | 'seesaw'
+  | 'junglegym'
+  | 'merrygoround';
+
+/** Runtime state for an active playground ride. The block + type are
+ *  required; the rest is per-type animation data. `t` is a generic
+ *  accumulator (seconds since the ride started). */
+interface PlaygroundRideState {
+  obj: THREE.Object3D;
+  type: PlaygroundType;
+  t: number;
+  /** Slide: current local Z position along the slide deck. */
+  slideZ?: number;
+  /** Swing: local X of the seat the player picked. */
+  swingSeatX?: number;
+  /** Seesaw: which side of the plank the player sits on (-1 or +1). */
+  seesawSide?: number;
+  /** Merry-go-round: which seat (0..3) the player sits on. */
+  merrySeatIdx?: number;
 }
 
 /** Random greetings shown when the player presses E near an NPC. */
@@ -163,13 +192,19 @@ export class Game {
   private npcPromptLabelEl: HTMLElement | null = null;
   private npcBubbleEl: HTMLElement | null = null;
   private npcBubbleTextEl: HTMLElement | null = null;
-  /** When the player is currently riding a slide, this holds the slide's
-   *  root group + the player's progress along the slide's local Z axis.
-   *  Null when not on a slide. The slide ride mechanic locks the player
-   *  to the slide curve and overrides normal physics until they reach
-   *  the slide's exit. */
-  private slideRideObj: THREE.Object3D | null = null;
-  private slideRideLocalZ = 0;
+  /** When the player is riding a playground module, this holds the
+   *  block + ride type + per-type animation state. The ride locks the
+   *  player to the equipment surface and overrides normal physics
+   *  until they dismount (E) or the ride finishes (slide reaches exit). */
+  private playgroundRide: PlaygroundRideState | null = null;
+  /** Nearest playground module within interaction range. Drives the
+   *  on-screen "[E] 타기" prompt. Null when nothing is in range or the
+   *  player is already riding. */
+  private playgroundHotspot:
+    | { obj: THREE.Object3D; type: PlaygroundType }
+    | null = null;
+  private playgroundPromptEl: HTMLElement | null = null;
+  private playgroundPromptLabelEl: HTMLElement | null = null;
   private playerPos = new THREE.Vector3(0, 0, 15);
   private playerVel = new THREE.Vector3();
   private onGround = false;
@@ -1080,15 +1115,18 @@ export class Game {
   }
 
   private updatePointer(e: PointerEvent) {
+    // Touch: aim from the screen center reticle regardless of where the
+    // finger is — the user orbits the camera (1-finger drag) to move the
+    // ghost around the world, then taps anywhere to commit. This avoids
+    // finger occlusion entirely and matches Minecraft PE classic.
+    if (e.pointerType === 'touch') {
+      this.pointer.x = 0;
+      this.pointer.y = 0;
+      return;
+    }
     const rect = this.renderer.domElement.getBoundingClientRect();
-    // Raise the raycast target ~70 screen pixels above the finger on
-    // touch devices so the finger doesn't occlude the ghost or the cell
-    // the user is trying to target. The ghost visually floats just above
-    // the fingertip — users adapt to this within a few taps.
-    const offsetY = e.pointerType === 'touch' ? -70 : 0;
     this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y =
-      -((e.clientY - rect.top + offsetY) / rect.height) * 2 + 1;
+    this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
   }
 
   private onPointerMove(e: PointerEvent) {
@@ -1206,16 +1244,13 @@ export class Game {
       return;
     }
 
-    // Touch uses drag-and-drop placement: the finger drags the ghost to
-    // the desired spot and releasing commits. So on touch we IGNORE the
-    // wasDrag guard — any release places (or taps the current slot in
-    // add-baseplate mode). Mouse drags are still camera rotation.
-    const isTouch = e.pointerType === 'touch';
-    if (!isTouch && this.wasDrag) return;
+    // Drag (mouse or touch) is camera rotation — skip placement. Touch
+    // tap-to-place works because the ghost is always at the screen-center
+    // reticle (see updatePointer), so the tap location doesn't matter.
+    if (this.wasDrag) return;
 
-    // Add-baseplate mode handles its own clicks — drag-and-drop works the
-    // same way since the ghost highlights the slot under the finger and
-    // commitBaseplateGhost uses that highlighted slot.
+    // Add-baseplate mode handles its own clicks — the ghost slot under
+    // the screen-center reticle is whatever commitBaseplateGhost picks.
     if (this.addBaseplateMode) {
       if (e.button === 0) this.commitBaseplateGhost();
       else if (e.button === 2) this.setAddBaseplateMode(false);
@@ -2550,6 +2585,15 @@ export class Game {
     this.getNpcPrompt()?.classList.add('hidden');
     this.getNpcBubble()?.classList.add('hidden');
 
+    // Drop any active playground ride and reset the avatar pose so the
+    // build-mode preview shows the minifig in a neutral stance.
+    if (this.playgroundRide) {
+      this.playgroundRide = null;
+      if (this.playerAvatar) this.applySitPose(false);
+    }
+    this.playgroundHotspot = null;
+    this.getPlaygroundPrompt()?.classList.add('hidden');
+
     // Restore build camera + orbit controls
     this.camera.position.copy(this.savedCam.position);
     this.controls.target.copy(this.savedCam.target);
@@ -2584,6 +2628,11 @@ export class Game {
         // Stagger first barks so multiple dogs don't all fire on the
         // same frame as the whistle.
         dog.nextBarkIn = 0.15 + Math.random() * 0.35;
+        // Initial sprint burst — the dog dashes toward the player at
+        // close to top speed for the first ~2.2 seconds after the
+        // whistle, then naturally drops to a steady follow trot. Long
+        // enough that even a dog 30+ studs away visibly sprints in.
+        dog.followSprintTime = 2.2;
       }
       // A single immediate bark for instant acknowledgement.
       this.sound.playBark();
@@ -2610,6 +2659,40 @@ export class Game {
     // positions.
     this.updateNpcs(dt);
     this.updateNpcHotspot();
+
+    // Playground ride: when active, the ride update positions the
+    // player on the equipment surface and overrides normal physics +
+    // collision. WASD/jump are ignored while riding. Camera still
+    // follows the player position via the existing 1st/3rd-person logic
+    // at the bottom of the function.
+    if (this.playgroundRide) {
+      this.updatePlaygroundRide(dt);
+      // Camera positioning still happens (1st-person eye / 3rd-person orbit)
+      const BODY_H_RIDE = getMinifigHeight() || 2.5;
+      const EYE_HEIGHT_RIDE = BODY_H_RIDE * 0.92;
+      if (this.viewMode === 'first') {
+        this.camera.position.set(
+          this.playerPos.x,
+          this.playerPos.y + EYE_HEIGHT_RIDE,
+          this.playerPos.z
+        );
+      } else {
+        this.updateThirdPersonCamera();
+      }
+      // Avatar visible during ride
+      if (this.playerAvatar) {
+        this.playerAvatar.position.set(
+          this.playerPos.x,
+          this.playerPos.y,
+          this.playerPos.z
+        );
+        this.playerAvatar.rotation.y = this.avatarYaw;
+      }
+      return;
+    }
+
+    // Refresh the playground hotspot once per frame (skipped during a ride)
+    this.updatePlaygroundHotspot();
 
     // Real Roblox-style run: significantly faster than walk. The walk
     // cycle amplitude + body lean changes below make it *feel* like a
@@ -3144,19 +3227,43 @@ export class Game {
           npc.nextBarkIn = 1.6 + Math.random() * 2.0;
         }
 
-        // Stand next to the player, not on top
+        // Tick down the post-whistle initial-sprint timer
+        if ((npc.followSprintTime ?? 0) > 0) {
+          npc.followSprintTime = (npc.followSprintTime ?? 0) - dt;
+          if (npc.followSprintTime < 0) npc.followSprintTime = 0;
+        }
+        const initialSprint = (npc.followSprintTime ?? 0) > 0;
+        // The dog also breaks into a run whenever the PLAYER is running
+        // (Shift held). This way "내가 달려가면 강아지도 달려서 따라온다."
+        // The post-whistle initial sprint just kicks the dog into the
+        // same fast gait without needing the player to also be running.
+        const playerRunning = this.moveKeys.run;
+        const isSprinting = initialSprint || playerRunning;
+
+        // Stand next to the player, not on top. Cancel the initial sprint
+        // as soon as we're in personal-space range so the dog doesn't
+        // overshoot or hover at full sprint speed right next to you.
+        // (We do NOT clear the player-running sprint here — it's purely
+        // a function of the player's input each frame.)
         const FOLLOW_STOP = 2.2;
         if (distSq < FOLLOW_STOP * FOLLOW_STOP) {
           this.faceNpcToward(npc, this.playerPos.x, this.playerPos.z, dt * 6);
           applyNpcLimbs(npc.obj, 0);
+          npc.followSprintTime = 0;
           continue;
         }
 
         const inv = 1 / Math.sqrt(distSq);
         const dirX = tx * inv;
         const dirZ = tz * inv;
-        // Dogs run a bit faster than a wandering NPC so they can catch up
-        const speed = Game.NPC_SPEED * 1.8;
+        // Speed selection:
+        //   - player running:        7.5× NPC_SPEED ≈ 16.5 (player run is
+        //                            14.4, so the dog catches up over time)
+        //   - post-whistle sprint:   3.2× NPC_SPEED ≈ 7.0 (visible sprint
+        //                            even when player is standing still)
+        //   - normal follow trot:    1.8× NPC_SPEED ≈ 4.0
+        const speedMult = playerRunning ? 7.5 : initialSprint ? 3.2 : 1.8;
+        const speed = Game.NPC_SPEED * speedMult;
         const step = speed * dt;
         const nextX = npc.obj.position.x + dirX * step;
         const nextZ = npc.obj.position.z + dirZ * step;
@@ -3168,10 +3275,12 @@ export class Game {
             npc,
             this.playerPos.x,
             this.playerPos.z,
-            dt * 8
+            dt * (isSprinting ? 12 : 8)
           );
-          npc.walkTime += dt * 9;
-          const swing = Math.sin(npc.walkTime) * 0.35;
+          // Faster, bigger limb swing while sprinting so it visibly
+          // *reads* as a sprint, not just a slightly faster walk.
+          npc.walkTime += dt * (isSprinting ? 16 : 9);
+          const swing = Math.sin(npc.walkTime) * (isSprinting ? 0.55 : 0.35);
           applyNpcLimbs(npc.obj, swing);
         } else {
           // Blocked by terrain — idle the limbs and retry next frame

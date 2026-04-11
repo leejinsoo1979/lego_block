@@ -668,6 +668,37 @@ body.remove-mode #viewer canvas {
   display: none;
 }
 
+/* ==================  Build-mode reticle (touch only)  ================== */
+
+.build-reticle {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 34px;
+  height: 34px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4),
+    inset 0 0 6px rgba(0, 0, 0, 0.2);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 300;
+  line-height: 30px;
+  text-align: center;
+  pointer-events: none;
+  display: none;
+  z-index: 50;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.7);
+}
+
+/* Only visible on touch devices, only in build mode (not play mode),
+   and only when the main viewer is actually focused (not during
+   modals / overlays). */
+body.touch-device:not(.playing) #build-reticle {
+  display: block;
+}
+
 #play-overlay .view-toggle {
   position: absolute;
   top: 24px;

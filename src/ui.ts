@@ -19,6 +19,16 @@ const THUMBNAIL_COLOR = 0xd4534a;
 export function buildUI(game: Game) {
   const sidebar = document.getElementById('sidebar')!;
 
+  // Touch-device detection. If ANY touch input is available we enable the
+  // screen-center reticle + tap-anywhere-to-place flow in build mode.
+  // matchMedia('(pointer: coarse)') catches fingers/styluses; the
+  // maxTouchPoints fallback handles hybrid laptops with touchscreens.
+  const hasTouch =
+    (typeof matchMedia === 'function' &&
+      matchMedia('(pointer: coarse)').matches) ||
+    (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+  if (hasTouch) document.body.classList.add('touch-device');
+
   // --- Play buttons (PC sidebar + mobile drawer handle) ---
   const playButtons = Array.from(
     document.querySelectorAll<HTMLButtonElement>('#play, #play-mobile')
