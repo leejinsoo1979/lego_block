@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>레고 블록 빌더</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <aside id="sidebar">
+      <header class="sidebar-header">
+        <h1>🧱 레고 블록 빌더</h1>
+        <p class="hint">
+          좌클릭: 설치/제거 · 우클릭: 블록 회전<br />
+          Shift + 드래그: 한 줄 연속 배치<br />
+          드래그/휠버튼 드래그: 카메라 · 휠: 줌<br />
+          회전: Tab · 우클릭 · 모드: X
+        </p>
+      </header>
+
+      <button id="play" class="play-btn">▶ Play</button>
+
+      <section class="panel">
+        <h2>모드</h2>
+        <div class="row mode-row">
+          <button id="mode-place" class="mode-btn">설치</button>
+          <button id="mode-remove" class="mode-btn">제거</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>종류</h2>
+        <div id="types" class="type-grid"></div>
+      </section>
+
+      <section class="panel hidden" id="characters-panel">
+        <h2>인물</h2>
+        <div id="characters" class="character-grid"></div>
+      </section>
+
+      <section class="panel" id="color-panel">
+        <h2>색상</h2>
+        <div id="colors" class="row wrap"></div>
+      </section>
+
+      <section class="panel" id="size-panel">
+        <h2>
+          크기
+          <button id="rotate" title="블록 회전 (Tab / 우클릭)">
+            ↻ <span id="rot-label">0°</span>
+          </button>
+        </h2>
+        <div id="sizes" class="row wrap"></div>
+      </section>
+
+      <section class="panel">
+        <h2>맵 크기</h2>
+        <div id="board-sizes" class="row wrap"></div>
+      </section>
+
+      <section class="panel actions">
+        <button id="clear">전체 지우기</button>
+        <span id="count">블록: 0</span>
+      </section>
+    </aside>
+
+    <main id="viewer"></main>
+
+    <div id="play-overlay">
+      <div class="crosshair">+</div>
+      <div class="play-hint">
+        <kbd>WASD</kbd> 이동 · <kbd>마우스</kbd> 시점 · <kbd>Space</kbd> 점프 ·
+        <kbd>ESC</kbd> 종료
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
