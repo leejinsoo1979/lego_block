@@ -553,6 +553,50 @@ export class Game {
     this.onBoardSizeChange(size);
   }
 
+  /** True if a footprint (cx ± bw, cz ± bd) is contained inside any
+   *  baseplate tile's XZ extent (ignoring Y). */
+  private isFootprintOnBaseplate(
+    cx: number,
+    cz: number,
+    bw: number,
+    bd: number
+  ): boolean {
+    const half = this.tileSize / 2;
+    for (const tile of this.baseplates.values()) {
+      const tx = tile.position.x;
+      const tz = tile.position.z;
+      if (
+        cx - bw >= tx - half &&
+        cx + bw <= tx + half &&
+        cz - bd >= tz - half &&
+        cz + bd <= tz + half
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Returns the XZ-union AABB of every placed baseplate tile (Y is the
+   *  range of tile slab tops). Useful for camera bounds and shadow frustums. */
+  private getBaseplatesBounds(): THREE.Box3 {
+    const box = new THREE.Box3();
+    if (this.baseplates.size === 0) {
+      box.min.set(-1, 0, -1);
+      box.max.set(1, 0, 1);
+      return box;
+    }
+    for (const tile of this.baseplates.values()) {
+      const half = this.tileSize / 2;
+      const cx = tile.position.x;
+      const cy = tile.position.y;
+      const cz = tile.position.z;
+      box.expandByPoint(new THREE.Vector3(cx - half, cy, cz - half));
+      box.expandByPoint(new THREE.Vector3(cx + half, cy, cz + half));
+    }
+    return box;
+  }
+
   // ------------------------------------------------------------------
   //  Event handlers
   // ------------------------------------------------------------------
@@ -579,6 +623,10 @@ export class Game {
       const dx = e.clientX - this.pointerDownPos.x;
       const dy = e.clientY - this.pointerDownPos.y;
       if (dx * dx + dy * dy > 25) this.wasDrag = true;
+    }
+    if (this.addBaseplateMode) {
+      this.updateBaseplateGhost();
+      return;
     }
     if (this.shiftLineStart) {
       this.updateShiftLine();
@@ -631,6 +679,14 @@ export class Game {
     }
 
     if (this.wasDrag) return;
+
+    // Add-baseplate mode handles its own clicks
+    if (this.addBaseplateMode) {
+      if (e.button === 0) this.commitBaseplateGhost();
+      else if (e.button === 2) this.setAddBaseplateMode(false);
+      return;
+    }
+
     if (e.button === 0) {
       if (this.placementSuspended) return; // selection cleared by Escape
       if (this.mode === 'remove') {
@@ -702,10 +758,12 @@ export class Game {
     } else if (e.key === 'x' || e.key === 'X') {
       this.setMode(this.mode === 'remove' ? 'place' : 'remove');
     } else if (e.key === 'Escape') {
-      // Clear the current selection: hide the ghost AND suspend
-      // placement so the next pointermove doesn't bring it back.
-      // The user re-activates by clicking a block type button or
-      // switching mode.
+      // Esc cancels add-baseplate mode first; otherwise clears the
+      // current block selection.
+      if (this.addBaseplateMode) {
+        this.setAddBaseplateMode(false);
+        return;
+      }
       this.placementSuspended = true;
       this.ghost.visible = false;
       this.hoverBox.visible = false;
@@ -1274,7 +1332,6 @@ export class Game {
     const signX = useX ? Math.sign(dx) : 0;
     const signZ = useX ? 0 : Math.sign(dz);
 
-    const half = this.boardSize / 2;
     for (let i = 0; i <= steps; i++) {
       const pos = {
         x: start.x + signX * stepSize * i,
@@ -1283,8 +1340,8 @@ export class Game {
       };
       const key = this.posKey(pos);
       if (this.shiftLinePlaced.has(key)) continue;
-      if (pos.x - eff.w / 2 < -half || pos.x + eff.w / 2 > half) continue;
-      if (pos.z - eff.d / 2 < -half || pos.z + eff.d / 2 > half) continue;
+      if (!this.isFootprintOnBaseplate(pos.x, pos.z, eff.w / 2, eff.d / 2))
+        continue;
       if (this.wouldOverlap(pos.x, pos.y, pos.z)) continue;
       this.placeAtPosition(pos);
       this.shiftLinePlaced.add(key);
@@ -1337,11 +1394,32 @@ export class Game {
       this.playAABBs.push(this.getBlockAABB(child));
     }
 
-    // Spawn player on a clear spot near the +Z edge of the baseplate
-    const spawnZ = Math.min(15, this.boardSize / 2 - 5);
+    // Spawn player on a clear spot near the +Z edge of the origin tile
+    const spawnZ = Math.min(15, this.tileSize / 2 - 5);
     this.playerPos.set(0, 0, spawnZ);
     this.playerVel.set(0, 0, 0);
     this.onGround = true;
+
+    // Add baseplate AABBs for collision so the player doesn't fall through
+    for (const tile of this.baseplates.values()) {
+      const half = this.tileSize / 2;
+      const slabBottom = tile.position.y - 0.4;
+      const slabTop = tile.position.y;
+      this.playAABBs.push(
+        new THREE.Box3(
+          new THREE.Vector3(
+            tile.position.x - half,
+            slabBottom,
+            tile.position.z - half
+          ),
+          new THREE.Vector3(
+            tile.position.x + half,
+            slabTop,
+            tile.position.z + half
+          )
+        )
+      );
+    }
     this.walkTime = 0;
     this.avatarYaw = Math.PI; // facing -Z (toward origin/baseplate center)
 
@@ -1364,14 +1442,14 @@ export class Game {
       this.fpsControls.maxPolarAngle = Math.PI - 0.25;
       // Only exit play mode if user actually unlocks AFTER having locked
       // (e.g., pressed ESC). Failed lock attempts never reach 'lock' event.
+      // three.js's EventDispatcher has no { once: true } option, so we
+      // remove the unlock listener manually inside its handler.
       this.fpsControls.addEventListener('lock', () => {
-        this.fpsControls!.addEventListener(
-          'unlock',
-          () => {
-            if (this.isPlaying) this.stopPlay();
-          },
-          { once: true }
-        );
+        const onUnlock = () => {
+          this.fpsControls!.removeEventListener('unlock', onUnlock);
+          if (this.isPlaying) this.stopPlay();
+        };
+        this.fpsControls!.addEventListener('unlock', onUnlock);
       });
     }
 
@@ -1537,14 +1615,13 @@ export class Game {
       this.playerVel.y = 0;
     }
 
-    // Clamp inside the baseplate so the player can't walk off into the void
-    const half = this.boardSize / 2 - BODY_W;
-    this.playerPos.x = Math.max(-half, Math.min(half, this.playerPos.x));
-    this.playerPos.z = Math.max(-half, Math.min(half, this.playerPos.z));
+    // No XZ clamp now that the map can be extended in any direction with
+    // tiles — the player can walk off the edge and fall. The respawn safety
+    // net catches them.
 
     // Safety net: if something goes sideways and we fall forever, respawn
     if (this.playerPos.y < -20) {
-      const spawnZ = Math.min(15, this.boardSize / 2 - 5);
+      const spawnZ = Math.min(15, this.tileSize / 2 - 5);
       this.playerPos.set(0, 0, spawnZ);
       this.playerVel.set(0, 0, 0);
     }

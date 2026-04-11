@@ -428,6 +428,41 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ==================  Add-baseplate button  ================== */
+
+.add-tile-btn {
+  width: 100%;
+  padding: 11px 14px;
+  background: #f6f7f9;
+  border: 1px dashed #b8bcc4;
+  border-radius: 8px;
+  color: #1c1d22;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.add-tile-btn:hover {
+  background: #eef0f3;
+  border-color: #8a8e96;
+}
+
+.add-tile-btn.active {
+  background: #1c1d22;
+  border-color: #1c1d22;
+  border-style: solid;
+  color: #ffffff;
+}
+
+.add-tile-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #8a8e96;
+}
+
 /* ==================  Properties (color / size labels)  ================== */
 
 .property {

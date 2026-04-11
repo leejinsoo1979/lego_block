@@ -281,24 +281,43 @@ export function buildUI(game: Game) {
   game.onRotationChange = syncRotation;
   syncRotation(game.rotationStep);
 
-  // --- Board size selector ---
-  const boardRow = document.getElementById('board-sizes')!;
+  // --- Board size selector (per-tile size) ---
+  const boardRow = document.getElementById('board-sizes');
   const boardButtons: HTMLButtonElement[] = [];
-  BOARD_SIZES.forEach((preset) => {
-    const btn = document.createElement('button');
-    btn.className = 'size-btn';
-    btn.textContent = preset.name;
-    btn.dataset.boardSize = String(preset.size);
-    btn.addEventListener('click', () => game.setBoardSize(preset.size));
-    if (preset.size === game.boardSize) btn.classList.add('active');
-    boardRow.appendChild(btn);
-    boardButtons.push(btn);
-  });
-  game.onBoardSizeChange = (size) => {
-    boardButtons.forEach((b) => {
-      b.classList.toggle('active', Number(b.dataset.boardSize) === size);
+  if (boardRow) {
+    BOARD_SIZES.forEach((preset) => {
+      const btn = document.createElement('button');
+      btn.className = 'size-btn';
+      btn.textContent = preset.name;
+      btn.dataset.boardSize = String(preset.size);
+      btn.addEventListener('click', () => game.setBoardSize(preset.size));
+      if (preset.size === game.tileSize) btn.classList.add('active');
+      boardRow.appendChild(btn);
+      boardButtons.push(btn);
     });
-  };
+    game.onBoardSizeChange = (size) => {
+      boardButtons.forEach((b) => {
+        b.classList.toggle('active', Number(b.dataset.boardSize) === size);
+      });
+    };
+  }
+
+  // --- Add baseplate tile mode toggle ---
+  const addTileBtn = document.getElementById(
+    'add-baseplate'
+  ) as HTMLButtonElement | null;
+  if (addTileBtn) {
+    addTileBtn.addEventListener('click', () => {
+      game.setAddBaseplateMode(!game.addBaseplateMode);
+      addTileBtn.blur();
+    });
+    game.onAddBaseplateModeChange = (active) => {
+      addTileBtn.classList.toggle('active', active);
+      addTileBtn.textContent = active
+        ? '✕ 맵 추가 종료'
+        : '＋ 맵 추가';
+    };
+  }
 
   // --- Clear / count ---
   const clearBtn = document.getElementById('clear') as HTMLButtonElement;
