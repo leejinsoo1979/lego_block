@@ -74,10 +74,19 @@ export function renderBlockTypeThumbnail(
     return render(dog);
   }
 
-  // Pick a representative footprint
+  // Pick a representative footprint. Most usesSize blocks fall back to
+  // 2×2, but a few need a bigger default so the thumbnail reads right —
+  // e.g. ramps only look gentle with a longer run.
   const def = BLOCK_TYPES.find((t) => t.type === type);
-  const w = def?.fixedSize?.w ?? 2;
-  const d = def?.fixedSize?.d ?? 2;
+  let w = def?.fixedSize?.w ?? 2;
+  let d = def?.fixedSize?.d ?? 2;
+  if (type === 'ramp') {
+    w = 1;
+    d = 4; // 1×4 @ 1 brick rise ≈ 17° — clearly "gentle"
+  } else if (type === 'ramptall') {
+    w = 1;
+    d = 4; // 1×4 @ 2 brick rise ≈ 31° — taller but still a ramp
+  }
   const obj = createBrick({ w, d, colorHex, type });
 
   switch (type) {
@@ -116,6 +125,17 @@ export function renderBlockTypeThumbnail(
       obj.rotation.y = -Math.PI / 2;
       camera!.position.set(4.0, 3.0, 4.2);
       camera!.lookAt(0, 0.5, 0);
+      break;
+    case 'ramp':
+      // 1×4 ramp (1 brick rise) — pull the camera back to fit the
+      // length and aim just above the slope center.
+      camera!.position.set(5.0, 2.8, 5.4);
+      camera!.lookAt(0, 0.45, 0);
+      break;
+    case 'ramptall':
+      // 1×4 ramptall (2 brick rise) — taller peak, same length.
+      camera!.position.set(5.2, 3.6, 5.6);
+      camera!.lookAt(0, 0.9, 0);
       break;
     case 'arch':
       camera!.position.set(0, 2.6, 6.5);
@@ -230,9 +250,9 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 3.4, 0);
       break;
     case 'swing':
-      // 8×3×9.6 — wide A-frame with 3 swings. Head-on view, pulled
-      // way back to fit the 8-stud width and the 9.6u height.
-      camera!.position.set(0, 7, 22);
+      // 12×3×9.6 — wide A-frame with 2 swings. Head-on view, pulled
+      // back to fit the 12-stud width and the 9.6u height.
+      camera!.position.set(0, 7, 26);
       camera!.lookAt(0, 4.8, 0);
       break;
     case 'seesaw':
@@ -248,10 +268,10 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 4.8, 0);
       break;
     case 'merrygoround':
-      // 8×8×4.8 — round disc with central pole, conical canopy, and
-      // 4 seats. Elevated 3/4 view to read the disc + canopy together.
-      camera!.position.set(14, 11, 14);
-      camera!.lookAt(0, 2.2, 0);
+      // 10×10×7.2 — round disc with central pole, tall conical canopy,
+      // and 4 seats. Pulled back to fit the taller canopy in frame.
+      camera!.position.set(18, 14, 18);
+      camera!.lookAt(0, 3.2, 0);
       break;
     default:
       camera!.position.set(3.8, 3.2, 3.8);

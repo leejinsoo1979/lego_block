@@ -8,6 +8,7 @@ import {
   BOARD_SIZE,
   COLORS,
   ENVIRONMENTS,
+  GRID,
   MINIFIG_PRESETS,
   PLATE_HEIGHT,
   SIZES,
@@ -82,8 +83,14 @@ interface PlaygroundRideState {
   t: number;
   /** Slide: current local Z position along the slide deck. */
   slideZ?: number;
+  /** Slide: which phase the ride is in. The ride starts in 'climbing'
+   *  (walking up the rear staircase) and switches to 'sliding' once
+   *  the avatar reaches the top platform. */
+  slidePhase?: 'climbing' | 'sliding';
   /** Swing: local X of the seat the player picked. */
   swingSeatX?: number;
+  /** Swing: index of the seat (matches userData.parts.swingPivots[i]). */
+  swingSeatIdx?: number;
   /** Seesaw: which side of the plank the player sits on (-1 or +1). */
   seesawSide?: number;
   /** Merry-go-round: which seat (0..3) the player sits on. */
@@ -1316,9 +1323,17 @@ export class Game {
           break;
         case 'KeyE':
           if (!e.repeat) {
-            // Doors take priority over NPCs (they share the E key).
-            if (this.currentDoorHotspot) {
+            // Priority order:
+            //   1. If currently riding a playground module → dismount
+            //   2. Door hotspot → toggle door
+            //   3. Playground hotspot → start ride
+            //   4. NPC hotspot → talk
+            if (this.playgroundRide) {
+              this.dismountPlayground();
+            } else if (this.currentDoorHotspot) {
               this.toggleCurrentDoor();
+            } else if (this.playgroundHotspot) {
+              this.startPlaygroundRide();
             } else if (this.currentNpcHotspot) {
               this.interactWithCurrentNpc();
             }
@@ -1974,6 +1989,62 @@ export class Game {
     return boxes;
   }
 
+  /** Returns per-stud "step" AABBs for a pure-wedge ramp block, so
+   *  auto step-up can carry the player up the slope one cell at a
+   *  time. The cells are defined in LOCAL space (matching the
+   *  orientation baked into createRampBlock's geometry) and then
+   *  transformed by obj.matrixWorld, so rotated placements work. */
+  private rampCollisionBoxes(
+    obj: THREE.Object3D,
+    spec: { w: number; d: number; type?: BlockType }
+  ): THREE.Box3[] {
+    const totalRise =
+      spec.type === 'ramptall' ? 6 * PLATE_HEIGHT : 3 * PLATE_HEIGHT;
+
+    // Recover base (pre-rotation) dims from the effective footprint.
+    // At 90° / 270° placements spec.w / spec.d are swapped relative to
+    // the dims that were handed to createBrick (and therefore to the
+    // geometry's local axes).
+    const k = Math.round(-obj.rotation.y / (Math.PI / 2));
+    const rotSwap = ((k % 2) + 2) % 2 === 1;
+    const baseW = rotSwap ? spec.d : spec.w;
+    const baseD = rotSwap ? spec.w : spec.d;
+
+    // createRampBlock uses `useX = w >= d` to decide whether the wedge
+    // runs along local X (no extra rotateY) or local Z (extra +90°
+    // rotateY baked into the geometry). Mirror that here so our cell
+    // AABBs line up with the actual mesh.
+    const useX = baseW >= baseD;
+    const run = useX ? baseW : baseD;
+    const cross = useX ? baseD : baseW;
+    const cellRise = totalRise / run;
+
+    obj.updateMatrixWorld(true);
+    const boxes: THREE.Box3[] = [];
+    for (let i = 0; i < run; i++) {
+      const stepTop = (i + 1) * cellRise;
+      let local: THREE.Box3;
+      if (useX) {
+        // Cells march along +X from low (-run/2) to high (+run/2).
+        local = new THREE.Box3(
+          new THREE.Vector3(-run / 2 + i, 0, -cross / 2),
+          new THREE.Vector3(-run / 2 + i + 1, stepTop, cross / 2)
+        );
+      } else {
+        // After the rotateY(+π/2) bake, the geometry's low end sits at
+        // +Z and the high end at -Z. Cells march along -Z from low to
+        // high, so cell 0 = [baseD/2 - 1, baseD/2].
+        local = new THREE.Box3(
+          new THREE.Vector3(-cross / 2, 0, run / 2 - i - 1),
+          new THREE.Vector3(cross / 2, stepTop, run / 2 - i)
+        );
+      }
+      local.applyMatrix4(obj.matrixWorld);
+      boxes.push(local);
+    }
+    return boxes;
+  }
+
   // ------------------------------------------------------------------
   //  Preview
   // ------------------------------------------------------------------
@@ -2419,6 +2490,17 @@ export class Game {
       // is only ~0.8 unit tall — well below head height).
       if (spec?.type === 'arch') {
         for (const box of this.archCollisionBoxes(child, spec)) {
+          this.playAABBs.push(box);
+          this.playAABBDoorRefs.push(null);
+        }
+        continue;
+      }
+      // Full-length wedge ramps: decompose into per-stud "steps" whose
+      // heights grow linearly. The player auto-step-ups one cell at a
+      // time, so a long 1x6 ramp feels like a smooth climb instead of
+      // an impenetrable sloped wall.
+      if (spec?.type === 'ramp' || spec?.type === 'ramptall') {
+        for (const box of this.rampCollisionBoxes(child, spec)) {
           this.playAABBs.push(box);
           this.playAABBDoorRefs.push(null);
         }
@@ -3510,6 +3592,530 @@ export class Game {
       this.npcBubbleTextEl = document.getElementById('npc-bubble-text');
     }
     return this.npcBubbleEl;
+  }
+
+  // ------------------------------------------------------------------
+  //  Playground rides (play mode)
+  // ------------------------------------------------------------------
+
+  /** Range at which "[E] 타기" prompt appears for any playground module. */
+  private static readonly PLAYGROUND_INTERACT_RANGE = 4.5;
+
+  /** When the minifig is in sit pose, its legs rotate forward at the
+   *  hip — so the BUTT (where the seat surface should be) is roughly
+   *  this many units above the avatar's playerPos.y (which is the
+   *  feet/standing position). To make the minifig look like it's
+   *  actually sitting on a seat at world Y = seatY, we set
+   *  playerPos.y = seatY - SIT_HIP_OFFSET. */
+  private static readonly SIT_HIP_OFFSET = 1.6;
+
+  private isPlaygroundType(t: BlockType | undefined): t is PlaygroundType {
+    return (
+      t === 'slide' ||
+      t === 'swing' ||
+      t === 'seesaw' ||
+      t === 'junglegym' ||
+      t === 'merrygoround'
+    );
+  }
+
+  private updatePlaygroundHotspot() {
+    const range = Game.PLAYGROUND_INTERACT_RANGE;
+    let nearest:
+      | { obj: THREE.Object3D; type: PlaygroundType; dist: number }
+      | null = null;
+    for (const child of this.brickGroup.children) {
+      const spec = child.userData.spec as { type?: BlockType } | undefined;
+      if (!this.isPlaygroundType(spec?.type)) continue;
+      const dx = child.position.x - this.playerPos.x;
+      const dz = child.position.z - this.playerPos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < range && (!nearest || dist < nearest.dist)) {
+        nearest = { obj: child, type: spec!.type as PlaygroundType, dist };
+      }
+    }
+    const next = nearest ? { obj: nearest.obj, type: nearest.type } : null;
+    if (
+      this.playgroundHotspot?.obj !== next?.obj ||
+      this.playgroundHotspot?.type !== next?.type
+    ) {
+      this.playgroundHotspot = next;
+      this.renderPlaygroundPrompt();
+    }
+  }
+
+  private renderPlaygroundPrompt() {
+    const el = this.getPlaygroundPrompt();
+    if (!el) return;
+    if (this.playgroundRide) {
+      if (this.playgroundPromptLabelEl) {
+        this.playgroundPromptLabelEl.textContent = '내리기';
+      }
+      el.classList.remove('hidden');
+      return;
+    }
+    if (!this.playgroundHotspot) {
+      el.classList.add('hidden');
+      return;
+    }
+    if (this.playgroundPromptLabelEl) {
+      this.playgroundPromptLabelEl.textContent = '타기';
+    }
+    el.classList.remove('hidden');
+  }
+
+  private getPlaygroundPrompt(): HTMLElement | null {
+    if (!this.playgroundPromptEl) {
+      this.playgroundPromptEl = document.getElementById('playground-prompt');
+      this.playgroundPromptLabelEl = document.getElementById(
+        'playground-prompt-label'
+      );
+    }
+    return this.playgroundPromptEl;
+  }
+
+  /** Sit pose: rotates the leg pivots forward so the minifig looks
+   *  like it's sitting. Pass `false` to reset to a standing pose. */
+  private applySitPose(sit = true) {
+    if (!this.playerAvatar) return;
+    const parts = this.playerAvatar.userData.parts as
+      | {
+          rightLeg?: THREE.Group | null;
+          leftLeg?: THREE.Group | null;
+          rightArm?: THREE.Group | null;
+          leftArm?: THREE.Group | null;
+        }
+      | undefined;
+    if (!parts) return;
+    if (sit) {
+      // Both legs forward (-π/2 around X tilts the leg's local -Y to +Z)
+      if (parts.rightLeg) parts.rightLeg.rotation.x = -Math.PI / 2;
+      if (parts.leftLeg) parts.leftLeg.rotation.x = -Math.PI / 2;
+      if (parts.rightArm) parts.rightArm.rotation.x = -0.5;
+      if (parts.leftArm) parts.leftArm.rotation.x = -0.5;
+    } else {
+      if (parts.rightLeg) parts.rightLeg.rotation.x = 0;
+      if (parts.leftLeg) parts.leftLeg.rotation.x = 0;
+      if (parts.rightArm) parts.rightArm.rotation.x = 0;
+      if (parts.leftArm) parts.leftArm.rotation.x = 0;
+    }
+  }
+
+  /** Convert (localX, localY, localZ) in a block's local frame to world
+   *  coordinates, accounting for the block's position and Y rotation. */
+  private localToWorld(
+    obj: THREE.Object3D,
+    localX: number,
+    localY: number,
+    localZ: number
+  ): { x: number; y: number; z: number } {
+    const cosY = Math.cos(obj.rotation.y);
+    const sinY = Math.sin(obj.rotation.y);
+    return {
+      x: obj.position.x + localX * cosY + localZ * sinY,
+      y: obj.position.y + localY,
+      z: obj.position.z - localX * sinY + localZ * cosY,
+    };
+  }
+
+  /** Begins a playground ride for the current hotspot. The minifig is
+   *  teleported to the equipment's "use position" and the per-type
+   *  update loop takes over. */
+  private startPlaygroundRide() {
+    const hotspot = this.playgroundHotspot;
+    if (!hotspot) return;
+    const obj = hotspot.obj;
+    const ride: PlaygroundRideState = { obj, type: hotspot.type, t: 0 };
+
+    switch (hotspot.type) {
+      case 'slide': {
+        const params = obj.userData.slideParams as
+          | {
+              z0: number;
+              z2: number;
+              z3: number;
+              height: number;
+              slideExitY: number;
+              numSteps: number;
+            }
+          | undefined;
+        if (!params) return;
+        // Start at the BACK of the stairs (z = z0) standing on the
+        // first step. updateSlideRide will walk the avatar up the
+        // staircase, then switch to the sliding phase at the platform
+        // top.
+        ride.slidePhase = 'climbing';
+        ride.slideZ = params.z0;
+        const stepRise = params.height / params.numSteps;
+        const wp = this.localToWorld(obj, 0, stepRise, params.z0);
+        this.playerPos.set(wp.x, wp.y, wp.z);
+        this.avatarYaw = obj.rotation.y;
+        break;
+      }
+      case 'swing': {
+        const w = (obj.userData.spec as { w: number }).w;
+        const swingParams = obj.userData.swingParams as
+          | { apexY: number; chainLen: number; numSwings: number }
+          | undefined;
+        if (!swingParams) return;
+        const panelT = 0.28;
+        const beamLen = w * GRID.X - panelT - 0.04;
+        const numSwings = swingParams.numSwings;
+        const swingSpacing = beamLen / (numSwings + 1);
+        const seatXs: number[] = [];
+        for (let i = 1; i <= numSwings; i++) {
+          seatXs.push(-beamLen / 2 + i * swingSpacing);
+        }
+        const dx = this.playerPos.x - obj.position.x;
+        const dz = this.playerPos.z - obj.position.z;
+        const cosY = Math.cos(-obj.rotation.y);
+        const sinY = Math.sin(-obj.rotation.y);
+        const localX = dx * cosY + dz * sinY;
+        let bestX = seatXs[0];
+        let bestIdx = 0;
+        let bestD = Math.abs(seatXs[0] - localX);
+        for (let i = 0; i < seatXs.length; i++) {
+          const d = Math.abs(seatXs[i] - localX);
+          if (d < bestD) {
+            bestD = d;
+            bestX = seatXs[i];
+            bestIdx = i;
+          }
+        }
+        ride.swingSeatX = bestX;
+        ride.swingSeatIdx = bestIdx;
+        const apexY = swingParams.apexY;
+        const chainLen = swingParams.chainLen;
+        const seatSurfaceY = apexY - chainLen; // top of the seat slab
+        const wp = this.localToWorld(
+          obj,
+          bestX,
+          seatSurfaceY - Game.SIT_HIP_OFFSET,
+          0
+        );
+        this.playerPos.set(wp.x, wp.y, wp.z);
+        this.avatarYaw = obj.rotation.y;
+        break;
+      }
+      case 'seesaw': {
+        const w = (obj.userData.spec as { w: number }).w;
+        const dx = this.playerPos.x - obj.position.x;
+        const dz = this.playerPos.z - obj.position.z;
+        const cosY = Math.cos(-obj.rotation.y);
+        const sinY = Math.sin(-obj.rotation.y);
+        const localX = dx * cosY + dz * sinY;
+        const side = localX >= 0 ? 1 : -1;
+        ride.seesawSide = side;
+        // Match the seesaw factory dimensions exactly:
+        //   plankLen     = w*GRID.X - 0.5
+        //   seatPadW     = 1.4 (X axis along plank)
+        //   plankT       = 0.32, seatPadH = 0.2
+        // Seat surface in world Y = pivotY + plankT + seatPadH.
+        const plankLen = w * GRID.X - 0.5;
+        const seatPadW = 1.4;
+        const endX = side * (plankLen / 2 - seatPadW / 2 - 0.1);
+        const postH = 2.0;
+        const axleR = 0.14;
+        const pivotY = postH + axleR;
+        const seatSurfaceY = pivotY + 0.32 + 0.2;
+        const wp = this.localToWorld(
+          obj,
+          endX,
+          seatSurfaceY - Game.SIT_HIP_OFFSET,
+          0
+        );
+        this.playerPos.set(wp.x, wp.y, wp.z);
+        // Face the PIVOT (the center of the plank), so the two riders
+        // look at each other across the seesaw. At local +X end face
+        // -X (yaw -π/2 on top of obj.rotation.y); at local -X end face
+        // +X (yaw +π/2). Three.js avatar yaw 0 = facing +Z, so:
+        //   facing +X → yaw = +π/2,  facing -X → yaw = -π/2.
+        this.avatarYaw = obj.rotation.y - side * (Math.PI / 2);
+        break;
+      }
+      case 'junglegym': {
+        const h = 24 * PLATE_HEIGHT;
+        const wp = this.localToWorld(obj, 0, h + 0.1, 0);
+        this.playerPos.set(wp.x, wp.y, wp.z);
+        this.avatarYaw = obj.rotation.y;
+        break;
+      }
+      case 'merrygoround': {
+        const w = (obj.userData.spec as { w: number }).w;
+        const radius = w * 0.5 - 0.15 - 0.55;
+        const dx = this.playerPos.x - obj.position.x;
+        const dz = this.playerPos.z - obj.position.z;
+        const cosY = Math.cos(-obj.rotation.y);
+        const sinY = Math.sin(-obj.rotation.y);
+        const localX = dx * cosY + dz * sinY;
+        const localZ = -dx * sinY + dz * cosY;
+        const angle = Math.atan2(localZ, localX);
+        const idx = ((Math.round((angle / (Math.PI * 2)) * 4) % 4) + 4) % 4;
+        ride.merrySeatIdx = idx;
+        const seatAngle = (idx / 4) * Math.PI * 2;
+        const sx = Math.cos(seatAngle) * radius;
+        const sz = Math.sin(seatAngle) * radius;
+        // Seat pad surface = baseH + ~0.32 + padHeight ≈ 0.78
+        const seatSurfaceY = 0.32 + 0.32 + 0.14;
+        const wp = this.localToWorld(
+          obj,
+          sx,
+          seatSurfaceY - Game.SIT_HIP_OFFSET,
+          sz
+        );
+        this.playerPos.set(wp.x, wp.y, wp.z);
+        this.avatarYaw = obj.rotation.y - seatAngle;
+        break;
+      }
+    }
+
+    this.playgroundRide = ride;
+    // Junglegym: stand pose (player just stands on the platform).
+    // Slide: stand pose for the climbing phase — updateSlideRide will
+    //        switch to sit pose at the platform top before the descent.
+    // Other rides: sit pose.
+    if (hotspot.type === 'junglegym' || hotspot.type === 'slide') {
+      this.applySitPose(false);
+    } else {
+      this.applySitPose(true);
+    }
+    this.renderPlaygroundPrompt();
+  }
+
+  private dismountPlayground() {
+    if (!this.playgroundRide) return;
+    // Reset any animated parts on the equipment back to their resting
+    // pose so the next rider doesn't inherit a frozen mid-swing or
+    // mid-rock state.
+    const ride = this.playgroundRide;
+    const parts = ride.obj.userData.parts as
+      | { swingPivots?: THREE.Group[]; plankGroup?: THREE.Group }
+      | undefined;
+    if (ride.type === 'swing' && parts?.swingPivots) {
+      for (const p of parts.swingPivots) p.rotation.x = 0;
+    } else if (ride.type === 'seesaw' && parts?.plankGroup) {
+      parts.plankGroup.rotation.z = -0.14; // resting tilt baked in factory
+    }
+
+    // Drop player back to the ground at their current XZ
+    this.playerPos.y = Math.max(
+      0,
+      this.findGroundY(this.playerPos.x, this.playerPos.y, this.playerPos.z, 1.0)
+    );
+    this.playgroundRide = null;
+    this.applySitPose(false);
+    this.renderPlaygroundPrompt();
+  }
+
+  private updatePlaygroundRide(dt: number) {
+    const ride = this.playgroundRide;
+    if (!ride) return;
+    ride.t += dt;
+    switch (ride.type) {
+      case 'slide':
+        this.updateSlideRide(dt);
+        break;
+      case 'swing':
+        this.updateSwingRide(dt);
+        break;
+      case 'seesaw':
+        this.updateSeesawRide(dt);
+        break;
+      case 'junglegym':
+        // Static — player stays where they were placed.
+        break;
+      case 'merrygoround':
+        this.updateMerryGoRoundRide(dt);
+        break;
+    }
+  }
+
+  private updateSlideRide(dt: number) {
+    const ride = this.playgroundRide;
+    if (!ride || ride.type !== 'slide') return;
+    const obj = ride.obj;
+    const params = obj.userData.slideParams as
+      | {
+          z0: number;
+          z1: number;
+          z2: number;
+          z3: number;
+          height: number;
+          slideExitY: number;
+          numSteps: number;
+        }
+      | undefined;
+    if (!params) {
+      this.dismountPlayground();
+      return;
+    }
+
+    // ----- Phase 1: walking up the rear staircase -----
+    if (ride.slidePhase === 'climbing') {
+      const climbSpeed = 2.6; // u/s walking pace up the stairs
+      ride.slideZ = (ride.slideZ ?? params.z0) + climbSpeed * dt;
+      const localZ = ride.slideZ;
+      const stepRise = params.height / params.numSteps;
+      // Stair tops: each step occupies z ∈ [z0+i, z0+i+1] with top at
+      // y = (i+1)*stepRise. Past the staircase (z >= z1) the avatar is
+      // standing on the platform at y = h.
+      let surfaceY: number;
+      if (localZ >= params.z1) {
+        surfaceY = params.height;
+      } else {
+        const i = Math.max(
+          0,
+          Math.min(params.numSteps - 1, Math.floor(localZ - params.z0))
+        );
+        surfaceY = (i + 1) * stepRise;
+      }
+      const wp = this.localToWorld(obj, 0, surfaceY, localZ);
+      this.playerPos.set(wp.x, wp.y, wp.z);
+      this.avatarYaw = obj.rotation.y;
+
+      // Reached the platform front edge → flip to sliding pose + phase.
+      if (localZ >= params.z2) {
+        ride.slidePhase = 'sliding';
+        ride.slideZ = params.z2;
+        this.applySitPose(true);
+      }
+      return;
+    }
+
+    // ----- Phase 2: sliding down the curved deck -----
+    const slideSpeed = 5.5;
+    ride.slideZ = (ride.slideZ ?? params.z2) + slideSpeed * dt;
+    const localZ = ride.slideZ;
+    let surfaceY: number;
+    if (localZ <= params.z2) {
+      surfaceY = params.height;
+    } else if (localZ >= params.z3) {
+      surfaceY = params.slideExitY;
+    } else {
+      const t = (localZ - params.z2) / (params.z3 - params.z2);
+      const eased = t * t * (3 - 2 * t);
+      surfaceY =
+        params.height + (params.slideExitY - params.height) * eased;
+    }
+    // Lower the avatar by SIT_HIP_OFFSET so the BUTT (not the feet)
+    // sits on the slide surface.
+    const wp = this.localToWorld(
+      obj,
+      0,
+      surfaceY - Game.SIT_HIP_OFFSET,
+      localZ
+    );
+    this.playerPos.set(wp.x, wp.y, wp.z);
+    this.avatarYaw = obj.rotation.y;
+    if (localZ > params.z3 + 0.5) {
+      this.dismountPlayground();
+    }
+  }
+
+  private updateSwingRide(dt: number) {
+    void dt;
+    const ride = this.playgroundRide;
+    if (!ride || ride.type !== 'swing') return;
+    const obj = ride.obj;
+    const swingParams = obj.userData.swingParams as
+      | { apexY: number; chainLen: number; numSwings: number }
+      | undefined;
+    if (!swingParams) return;
+    const maxAngle = 0.7;
+    const omega = 1.6;
+    const angle = maxAngle * Math.sin(omega * ride.t);
+    const apexY = swingParams.apexY;
+    const chainLen = swingParams.chainLen;
+
+    // Drive the visual swing assembly: rotate the matching pivot group
+    // around its X axis so the chains and seat actually swing through
+    // the air. The pivot is positioned at (sx, apexY, 0); rotating by
+    // -angle around X moves the seat (initially at local y=-chainLen)
+    // forward to z = +chainLen·sin(angle), matching the player Z below.
+    const parts = obj.userData.parts as
+      | { swingPivots?: THREE.Group[] }
+      | undefined;
+    const pivot = parts?.swingPivots?.[ride.swingSeatIdx ?? 0];
+    if (pivot) pivot.rotation.x = -angle;
+
+    // Seat surface Y in swing local: where the chain bottom is, less
+    // SIT_HIP_OFFSET so the minifig's butt sits on the seat.
+    const seatSurfaceY = apexY - chainLen * Math.cos(angle);
+    const localZ = chainLen * Math.sin(angle);
+    const wp = this.localToWorld(
+      obj,
+      ride.swingSeatX ?? 0,
+      seatSurfaceY - Game.SIT_HIP_OFFSET,
+      localZ
+    );
+    this.playerPos.set(wp.x, wp.y, wp.z);
+    this.avatarYaw = obj.rotation.y;
+  }
+
+  private updateSeesawRide(dt: number) {
+    void dt;
+    const ride = this.playgroundRide;
+    if (!ride || ride.type !== 'seesaw') return;
+    const obj = ride.obj;
+    const w = (obj.userData.spec as { w: number }).w;
+    const plankLen = w * GRID.X - 0.5;
+    const seatPadW = 1.4;
+    const side = ride.seesawSide ?? 1;
+    const endX = side * (plankLen / 2 - seatPadW / 2 - 0.1);
+    const maxTilt = 0.32;
+    const omega = 1.4;
+    // Sine wave around the resting tilt baked into the plank group
+    // (-0.14 in createSeesawBlock). Drive the visual plank by writing
+    // back to plankGroup.rotation.z so it actually rocks while ridden.
+    const tilt = maxTilt * Math.sin(omega * ride.t);
+    const parts = obj.userData.parts as
+      | { plankGroup?: THREE.Group }
+      | undefined;
+    if (parts?.plankGroup) parts.plankGroup.rotation.z = tilt;
+
+    const postH = 2.0;
+    const axleR = 0.14;
+    const pivotY = postH + axleR;
+    // Seat-top offset from the pivot, in plank-local space:
+    //   plank top      = pivotY + plankT  = pivotY + 0.32
+    //   seat pad top   = plankT + seatPadH = 0.32 + 0.2 = 0.52
+    // Subtract SIT_HIP_OFFSET so the BUTT lands on the pad surface.
+    const offX = endX;
+    const offY = 0.52 - Game.SIT_HIP_OFFSET;
+    // Rotate (offX, offY) around the plank-group's local origin (= the
+    // pivot at pivotY in world Y), since the plank tilts via plankGroup.rotation.z.
+    const rotX = offX * Math.cos(tilt) - offY * Math.sin(tilt);
+    const rotY = offX * Math.sin(tilt) + offY * Math.cos(tilt);
+    const wp = this.localToWorld(obj, rotX, pivotY + rotY, 0);
+    this.playerPos.set(wp.x, wp.y, wp.z);
+    // Face the pivot — same calculation as in startPlaygroundRide.
+    this.avatarYaw = obj.rotation.y - side * (Math.PI / 2);
+  }
+
+  private updateMerryGoRoundRide(dt: number) {
+    void dt;
+    const ride = this.playgroundRide;
+    if (!ride || ride.type !== 'merrygoround') return;
+    const obj = ride.obj;
+    const w = (obj.userData.spec as { w: number }).w;
+    const radius = w * 0.5 - 0.15 - 0.55;
+    const rotSpeed = 1.0;
+    const angle =
+      ((ride.merrySeatIdx ?? 0) / 4) * Math.PI * 2 + rotSpeed * ride.t;
+    const sx = Math.cos(angle) * radius;
+    const sz = Math.sin(angle) * radius;
+    // Seat pad surface ≈ baseH (0.32) + raised support (0.06) + pad
+    // half-thickness (0.07) = ~0.45 above the merry-go-round origin.
+    const seatSurfaceY = 0.32 + 0.32 + 0.14;
+    const wp = this.localToWorld(
+      obj,
+      sx,
+      seatSurfaceY - Game.SIT_HIP_OFFSET,
+      sz
+    );
+    this.playerPos.set(wp.x, wp.y, wp.z);
+    // Face outward from center (radial direction)
+    this.avatarYaw = obj.rotation.y - angle - Math.PI / 2;
   }
 
   // ------------------------------------------------------------------

@@ -138,6 +138,8 @@ export type BlockType =
   | 'plate'
   | 'tile'
   | 'slope'
+  | 'ramp'
+  | 'ramptall'
   | 'arch'
   | 'round'
   | 'cone'
@@ -212,6 +214,11 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'tile', label: '타일', category: 'basic', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: true },
   // 모양
   { type: 'slope', label: '경사', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: true },
+  // Pure-wedge ramps: the entire footprint length is a slope. Pick a
+  // longer size (1x4, 1x6, 2x8, …) for a gentler angle. `ramp` rises
+  // one brick; `ramptall` rises two.
+  { type: 'ramp', label: '완만한 경사', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: true },
+  { type: 'ramptall', label: '긴 경사', category: 'shape', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: true },
   { type: 'arch', label: '아치', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
   { type: 'round', label: '원형', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'cone', label: '콘', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
@@ -238,10 +245,10 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'bridge', label: '교량', category: 'special', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 6, d: 44 } },
   // 놀이터 — sizes scaled to ~2× minifig height (minifig is 4.8 units tall)
   { type: 'slide', label: '미끄럼틀', category: 'playground', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 4, d: 16 } },
-  { type: 'swing', label: '그네', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 8, d: 3 } },
+  { type: 'swing', label: '그네', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 12, d: 3 } },
   { type: 'seesaw', label: '시소', category: 'playground', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 12, d: 4 } },
   { type: 'junglegym', label: '정글짐', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 6, d: 6 } },
-  { type: 'merrygoround', label: '회전무대', category: 'playground', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  { type: 'merrygoround', label: '회전무대', category: 'playground', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 10, d: 10 } },
   // 캐릭터
   { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
   { type: 'dog', label: '강아지', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 1, d: 2 } },

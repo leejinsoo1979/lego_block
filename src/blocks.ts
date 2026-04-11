@@ -67,6 +67,15 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'slope':
       group = createSlopeBlock(spec);
       break;
+    case 'ramp':
+      // 1-brick rise, full-length wedge (gentler as the size grows).
+      group = createRampBlock(spec, 3 * PLATE_HEIGHT);
+      break;
+    case 'ramptall':
+      // 2-brick rise, full-length wedge. Needs at least a 2-stud run
+      // so the per-step rise (= 2.4 / run) stays within STEP_MAX.
+      group = createRampBlock(spec, 6 * PLATE_HEIGHT);
+      break;
     case 'arch':
       group = createArchBlock(spec);
       break;
@@ -284,6 +293,54 @@ function createSlopeBlock(spec: BlockSpec): THREE.Group {
     }
   }
 
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Ramp — pure wedge that slopes up across the ENTIRE footprint length.
+//
+//  Unlike the regular `slope` (a steep 1-stud wedge + flat top), a ramp
+//  rises continuously from one end to the other. The longer the
+//  footprint, the gentler the angle. Used for gradual climbs that a
+//  minifig or car can actually drive up.
+// ------------------------------------------------------------------
+function createRampBlock(spec: BlockSpec, totalRise: number): THREE.Group {
+  const group = new THREE.Group();
+  const w = spec.w;
+  const d = spec.d;
+  const material = studMaterial(spec.colorHex);
+
+  // The wedge runs along the LONGER of the two footprint axes. The
+  // shorter axis becomes the cross-section (how wide the ramp is).
+  const useX = w >= d;
+  const run = useX ? w : d;
+  const cross = useX ? d : w;
+
+  // Side profile in the XY plane: triangle from (0, 0) to (run, rise)
+  // to (run, 0). Extruded along Z by `cross` to give the full wedge.
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.lineTo(run, totalRise);
+  shape.lineTo(run, 0);
+  shape.closePath();
+
+  const geom = new THREE.ExtrudeGeometry(shape, {
+    depth: cross,
+    bevelEnabled: false,
+  });
+  // Center on origin (extrude starts at (0, 0, 0)).
+  geom.translate(-run / 2, 0, -cross / 2);
+  // If the run is the Z axis, rotate the geometry so +X becomes +Z.
+  // Same convention as createSlopeBlock.
+  if (!useX) geom.rotateY(Math.PI / 2);
+  geom.computeVertexNormals();
+
+  const wedge = new THREE.Mesh(geom, material);
+  wedge.castShadow = true;
+  wedge.receiveShadow = true;
+  group.add(wedge);
+
+  // No studs — the wedge has no flat surface to plant them on.
   return group;
 }
 
@@ -1364,48 +1421,83 @@ function createSwingBlock(spec: BlockSpec): THREE.Group {
   topBeam.castShadow = true;
   group.add(topBeam);
 
-  // ----- Three hanging swings -----
+  // ----- Two hanging swings -----
   // The minifig sits on the seat facing PERPENDICULAR to the beam, i.e.
   // facing +Z. So the seat is wide along X (matching the minifig's
   // 2-stud-wide side) and deep along Z (matching the minifig's 1-stud
-  // depth). The TWO chains attach at the LEFT and RIGHT edges of the
-  // seat (at X = ±seatW/2, both at Z = 0) — same Z as the seat center,
-  // separated only along X. The minifig swings forward/back along Z.
-  const chainLen = h * 0.62;
-  const seatY = apexY - chainLen;
-  const numSwings = 3;
+  // depth). The two chains attach at the X positions that match the
+  // minifig's HAND grip width — that way the seated rider visually
+  // grips the chains with both hands.
+  //
+  // Each swing (chains + seat) is wrapped in its own PIVOT GROUP placed
+  // at (sx, apexY, 0) — the point on the beam where the chains hang
+  // from. Rotating that pivot around its X axis swings the whole
+  // assembly forward/back along Z, which is what updateSwingRide drives
+  // when the player is riding.
+  //
+  // Chain length is 78% of the swing height so the seat hangs LOW
+  // enough for a Lego minifig to actually sit on it (the previous 62%
+  // hung the seat well above the rider's hips).
+  const chainLen = h * 0.78;
+  const numSwings = 2;
   const swingSpacing = beamLen / (numSwings + 1);
   const seatXs: number[] = [];
   for (let i = 1; i <= numSwings; i++) {
     seatXs.push(-beamLen / 2 + i * swingSpacing);
   }
-  const seatW = 1.6; // X = wide enough for the 2-stud minifig
-  const seatD = 0.9; // Z = matches minifig's 1-stud depth
-  const chainXOffset = seatW / 2 - 0.08; // chains near the seat's X edges
+  // Chain X spacing = ACTUAL minifig hand grip half-width, measured off
+  // the rigged GLB at load time (see loadCharacterModel). This way the
+  // chains hang exactly under the rider's hands, no eyeballing.
+  // Fall back to ~1.0 if the GLB hasn't loaded for any reason.
+  const handX = characterHandX > 0 ? characterHandX : 1.0;
+  const chainXOffset = handX;
+  // Seat width is the chain span plus generous padding on each side so
+  // the rider sits comfortably between the chains, and depth fits the
+  // sit-pose minifig (legs forward, arms slightly forward).
+  const seatW = chainXOffset * 2 + 0.6;
+  const seatD = 1.4;
 
+  const swingPivots: THREE.Group[] = [];
   for (const sx of seatXs) {
-    // Two chains, one at the LEFT edge of the seat and one at the
-    // RIGHT edge (both at Z=0). They hang straight down from the beam.
+    const pivot = new THREE.Group();
+    pivot.position.set(sx, apexY, 0);
+    group.add(pivot);
+    swingPivots.push(pivot);
+
+    // Two chains hanging straight down from the pivot point. In pivot-
+    // local space the pivot is the origin and the chain extends down
+    // from y=0 to y=-chainLen.
     for (const cx of [-chainXOffset, chainXOffset]) {
       const chain = new THREE.Mesh(
         new THREE.BoxGeometry(0.08, chainLen, 0.08),
         chainMat
       );
-      chain.position.set(sx + cx, apexY - chainLen / 2 - 0.16, 0);
+      chain.position.set(cx, -chainLen / 2, 0);
       chain.castShadow = true;
-      group.add(chain);
+      pivot.add(chain);
     }
 
-    // Flat seat — the minifig sits on this facing +Z
+    // Flat seat — minifig sits facing +Z. Seat top is at pivot-local
+    // y = -chainLen, so the seat box (0.18 thick) centers at y = -chainLen - 0.09.
     const seat = new THREE.Mesh(
       new THREE.BoxGeometry(seatW, 0.18, seatD),
       seatMat
     );
-    seat.position.set(sx, seatY - 0.09, 0);
+    seat.position.set(0, -chainLen - 0.09, 0);
     seat.castShadow = true;
     seat.receiveShadow = true;
-    group.add(seat);
+    pivot.add(seat);
   }
+
+  // Expose the pivots so updateSwingRide can rotate them while the
+  // player is riding. The ride loop computes a swing angle and sets
+  // pivot.rotation.x = -angle to match its physics.
+  group.userData.parts = { swingPivots };
+  // Mirror the geometric constants the ride loop needs so it doesn't
+  // have to re-derive them (and so they stay in sync if we tweak the
+  // factory). apexY is the Y of the beam, chainLen is the chain
+  // length used by the pivot rotation calculation.
+  group.userData.swingParams = { apexY, chainLen, numSwings };
 
   return group;
 }
@@ -1479,15 +1571,18 @@ function createSeesawBlock(spec: BlockSpec): THREE.Group {
   group.add(axle);
 
   // ----- Plank assembly (rotates around Z as a unit, balanced on the axle) -----
+  // The whole plank+seats live in this group so updateSeesawRide can
+  // rock the visual seesaw by setting plankGroup.rotation.z while the
+  // player is riding. Resting tilt is a gentle ~8°.
   const plankGroup = new THREE.Group();
   plankGroup.position.set(0, postH + axleR, 0);
-  plankGroup.rotation.z = -0.14; // gentle tilt (~8°)
+  plankGroup.rotation.z = -0.14;
   group.add(plankGroup);
 
-  // Long red plank
+  // Long red plank — wider so a minifig can sit on it sideways
   const plankLen = width - 0.5;
-  const plankD = 1.4;
-  const plankT = 0.3;
+  const plankD = 2.4; // wide enough that a minifig (1 stud deep) fits
+  const plankT = 0.32;
   const plank = new THREE.Mesh(
     new THREE.BoxGeometry(plankLen, plankT, plankD),
     plankMat
@@ -1500,64 +1595,75 @@ function createSeesawBlock(spec: BlockSpec): THREE.Group {
   // ----- Saddle (small block under the plank center, hugs the axle so
   // the visual reads as "plank attached to axle") -----
   const saddle = new THREE.Mesh(
-    new THREE.BoxGeometry(0.55, 0.25, plankD - 0.1),
+    new THREE.BoxGeometry(0.6, 0.28, plankD - 0.2),
     material
   );
-  saddle.position.y = -0.12;
+  saddle.position.y = -0.14;
   plankGroup.add(saddle);
 
-  // ----- Seats with backrests at each end of the plank -----
+  // ----- Proper seats at each end of the plank.
+  // On a real seesaw the two riders sit FACING EACH OTHER across the
+  // pivot. So at the +X end the minifig faces -X, and at the -X end
+  // they face +X. The minifig's 2-stud width then runs along Z and the
+  // 1-stud depth runs along X. The backrest sits at the OUTER side of
+  // each seat (away from the pivot) — that's where the rider's back
+  // leans while looking inward. -----
+  const seatPadW = 1.4; // X (along plank, = minifig depth + clearance)
+  const seatPadH = 0.2;
+  const seatPadD = 2.2; // Z (perpendicular to plank, fits 2-stud width)
+  const backrestH = 1.3;
+  const backrestT = 0.2;
+
   for (const sx of [-1, 1]) {
-    const endX = sx * (plankLen / 2 - 0.85);
+    const endX = sx * (plankLen / 2 - seatPadW / 2 - 0.1);
 
     // Seat pad (blue)
     const pad = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 0.16, 1.1),
+      new THREE.BoxGeometry(seatPadW, seatPadH, seatPadD),
       seatMat
     );
-    pad.position.set(endX, plankT + 0.08, 0);
+    pad.position.set(endX, plankT + seatPadH / 2, 0);
     pad.castShadow = true;
+    pad.receiveShadow = true;
     plankGroup.add(pad);
 
-    // Backrest at the END of the plank (the outermost side)
+    // Backrest at the OUTER end of the seat (the sx side, away from
+    // the pivot) — the rider's back rests against it while facing the
+    // pivot. Long along Z, thin along X.
     const backrest = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.95, 1.1),
+      new THREE.BoxGeometry(backrestT, backrestH, seatPadD),
       seatMat
     );
     backrest.position.set(
-      endX + sx * 0.65,
-      plankT + 0.16 + 0.475,
+      endX + sx * (seatPadW / 2 - backrestT / 2),
+      plankT + seatPadH + backrestH / 2,
       0
     );
     backrest.castShadow = true;
     plankGroup.add(backrest);
 
-    // Vertical handle post at the seat (between minifig's hands)
-    const handlePost = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 1.1, 0.16),
-      material
-    );
-    handlePost.position.set(
-      endX - sx * 0.65,
-      plankT + 0.16 + 0.55,
-      0
-    );
-    handlePost.castShadow = true;
-    plankGroup.add(handlePost);
-
-    // Horizontal grip bar at the top of the post
-    const handleGrip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 0.16, 0.85),
-      material
-    );
-    handleGrip.position.set(
-      endX - sx * 0.65,
-      plankT + 0.16 + 1.05,
-      0
-    );
-    handleGrip.castShadow = true;
-    plankGroup.add(handleGrip);
+    // Two side arms on the rider's left and right (= ±Z), running along
+    // the seat depth (X). Slight forward shift toward the pivot so the
+    // rider can climb in from the side.
+    for (const az of [-1, 1]) {
+      const arm = new THREE.Mesh(
+        new THREE.BoxGeometry(seatPadW * 0.85, 0.5, 0.18),
+        seatMat
+      );
+      arm.position.set(
+        endX - sx * 0.05,
+        plankT + seatPadH + 0.25,
+        az * (seatPadD / 2 - 0.09)
+      );
+      arm.castShadow = true;
+      plankGroup.add(arm);
+    }
   }
+
+  // Expose the plank pivot so updateSeesawRide can rock it while the
+  // player rides. The ride loop sets plankGroup.rotation.z to a sine
+  // wave; the player position is computed against the same tilt.
+  group.userData.parts = { plankGroup };
 
   return group;
 }
@@ -1760,9 +1866,12 @@ function createJungleGymBlock(spec: BlockSpec): THREE.Group {
 // ------------------------------------------------------------------
 function createMerryGoRoundBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
-  const w = spec.w; // 6
-  const d = spec.d; // 6
-  const h = 9 * PLATE_HEIGHT; // 3.6 units (chest-high on a minifig)
+  const w = spec.w; // 10
+  const d = spec.d; // 10
+  // 18 plates (= 7.2 units) tall — 1.5× minifig so the canopy actually
+  // towers above seated riders. The visual is taller still because the
+  // conical canopy extends above the bodyHeightPlates (collision box).
+  const h = 18 * PLATE_HEIGHT;
   const material = studMaterial(spec.colorHex);
   const seatMat = new THREE.MeshStandardMaterial({
     color: 0xf5cd30, // yellow seats
@@ -2159,6 +2268,11 @@ function createHat(style: HatStyle, color: number): THREE.Group | null {
 let characterTemplate: THREE.Group | null = null;
 /** Top Y of the loaded character (after scale + recenter), in world units. */
 let characterTopY = 0;
+/** X distance from the body center to a HAND CENTER, in world units. This
+ *  is the actual hand-grip half-width measured off the rigged GLB. The
+ *  swing factory uses this so its chain spacing equals the rider's hand
+ *  spacing exactly — chains land directly under the gripping hands. */
+let characterHandX = 0;
 
 /** Target distance between the two FOOT CENTERS, in world units. One stud
  *  pitch = 1 unit, so setting this to 1.0 puts each foot center exactly
@@ -2386,6 +2500,38 @@ export function loadCharacterModel(): Promise<void> {
         const finalBox = fullBoundingBox(root);
         console.log('[GLB] final bbox:', finalBox.min, finalBox.max);
         characterTopY = finalBox.max.y;
+
+        // Measure the rigged hand X positions (left + right) so the
+        // swing factory can place its chains EXACTLY under the rider's
+        // hand grip. The hands are the Cylinder.002 / Cylinder.003
+        // meshes (children of the Cube.002 / Cube.004 arms).
+        const normName = (s: string) => s.replace(/\./g, '');
+        let leftHand: THREE.Mesh | null = null;
+        let rightHand: THREE.Mesh | null = null;
+        root.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (!m.isMesh) return;
+          const n = normName(m.name);
+          if (n === 'Cylinder002') rightHand = m;
+          else if (n === 'Cylinder003') leftHand = m;
+        });
+        if (leftHand && rightHand) {
+          const lb = new THREE.Box3().setFromObject(leftHand);
+          const rb = new THREE.Box3().setFromObject(rightHand);
+          const lx = (lb.min.x + lb.max.x) / 2;
+          const rx = (rb.min.x + rb.max.x) / 2;
+          characterHandX = (Math.abs(lx) + Math.abs(rx)) / 2;
+          console.log(
+            '[GLB] hand X (world):',
+            'L=', lx.toFixed(3),
+            'R=', rx.toFixed(3),
+            '→ |handX|=', characterHandX.toFixed(3)
+          );
+        } else {
+          console.warn('[GLB] hand meshes not found, falling back to handX=1.0');
+          characterHandX = 1.0;
+        }
+
         characterTemplate = root;
         resolve();
       },
@@ -2400,6 +2546,13 @@ export function loadCharacterModel(): Promise<void> {
  *  GLB has finished loading. */
 export function getMinifigHeight(): number {
   return characterTopY;
+}
+
+/** Half-distance from the body center to a hand center, in world units.
+ *  Hand grip total width = 2 × this value. Available after
+ *  loadCharacterModel resolves. */
+export function getMinifigHandX(): number {
+  return characterHandX;
 }
 
 /**
