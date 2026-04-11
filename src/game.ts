@@ -9,6 +9,8 @@ import {
   MINIFIG_PRESETS,
   PLATE_HEIGHT,
   SIZES,
+  STUD_HEIGHT,
+  STUD_RADIUS,
 } from './config';
 import type { BlockType, ColorDef, MinifigPreset, SizeDef } from './config';
 import {
@@ -17,10 +19,12 @@ import {
   createGhost,
   createMinifigGhost,
   createMinifigure,
+  getMinifigHeight,
 } from './blocks';
 import { SoundManager } from './sound';
 
 export type Mode = 'place' | 'remove';
+export type ViewMode = 'first' | 'third';
 
 export class Game {
   private container: HTMLElement;
@@ -57,6 +61,7 @@ export class Game {
 
   // Play mode state
   isPlaying = false;
+  viewMode: ViewMode = 'first';
   private playAABBs: THREE.Box3[] = [];
   private playerPos = new THREE.Vector3(0, 0, 15);
   private playerVel = new THREE.Vector3();
@@ -67,11 +72,18 @@ export class Game {
     left: false,
     right: false,
     jump: false,
+    run: false,
   };
   private savedCam = {
     position: new THREE.Vector3(28, 28, 28),
     target: new THREE.Vector3(0, 2, 0),
   };
+  // Visible avatar in the world (used in 3rd-person, hidden in 1st-person)
+  private playerAvatar: THREE.Group | null = null;
+  private avatarYaw = 0; // facing direction in radians
+  private walkTime = 0;  // accumulator for limb-swing animation
+  private thirdPersonDistance = 14;
+  private wasMovingForJumpAnim = false;
 
   // Event callbacks
   onCountChange: (count: number) => void = () => {};
@@ -81,6 +93,14 @@ export class Game {
   onModeChange: (mode: Mode) => void = () => {};
   onPlayChange: (playing: boolean) => void = () => {};
   onBoardSizeChange: (size: number) => void = () => {};
+  onViewModeChange: (mode: ViewMode) => void = () => {};
+  /** Fires when the user clears the current selection (e.g. by pressing
+   *  Escape). UI should remove the active highlight from all type buttons. */
+  onSelectionCleared: () => void = () => {};
+
+  /** When true, no ghost is rendered and clicks don't place anything.
+   *  Cleared the moment the user picks a block type or switches mode. */
+  private placementSuspended = false;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -206,6 +226,20 @@ export class Game {
       this.hoverBox.visible = false;
     });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
+    dom.addEventListener(
+      'wheel',
+      (e) => {
+        if (this.isPlaying && this.viewMode === 'third') {
+          // Zoom the iso camera in/out
+          this.thirdPersonDistance = Math.max(
+            6,
+            Math.min(40, this.thirdPersonDistance + e.deltaY * 0.015)
+          );
+          e.preventDefault();
+        }
+      },
+      { passive: false }
+    );
 
     this.animate();
   }
@@ -306,7 +340,12 @@ export class Game {
     plate.receiveShadow = true;
     group.add(plate);
 
-    const studGeom = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16);
+    const studGeom = new THREE.CylinderGeometry(
+      STUD_RADIUS,
+      STUD_RADIUS,
+      STUD_HEIGHT,
+      16
+    );
     const total = size * size;
     const instanced = new THREE.InstancedMesh(studGeom, plateMat, total);
     const dummy = new THREE.Object3D();
@@ -315,7 +354,7 @@ export class Game {
       for (let z = 0; z < size; z++) {
         dummy.position.set(
           -size / 2 + 0.5 + x,
-          0.1,
+          STUD_HEIGHT / 2,
           -size / 2 + 0.5 + z
         );
         dummy.updateMatrix();
@@ -397,17 +436,22 @@ export class Game {
     if (
       e.shiftKey &&
       e.button === 0 &&
-      this.mode === 'place'
+      this.mode === 'place' &&
+      !this.placementSuspended
     ) {
       const start = this.computePlacement();
-      if (start) {
-        this.shiftLineStart = { ...start };
+      // Shift-drag lines always use the user's current rotation, so don't
+      // start a drag when only the auto-rotated orientation fits — that
+      // would make the start block inconsistent with the rest of the line.
+      if (start && !start.autoRotate) {
+        const p = { x: start.x, y: start.y, z: start.z };
+        this.shiftLineStart = p;
         this.shiftLinePlaced.clear();
         this.controls.enabled = false;
         this.ghost.visible = false;
         this.hoverBox.visible = false;
-        this.placeAtPosition(start);
-        this.shiftLinePlaced.add(this.posKey(start));
+        this.placeAtPosition(p);
+        this.shiftLinePlaced.add(this.posKey(p));
       }
     }
   }
@@ -427,6 +471,7 @@ export class Game {
 
     if (this.wasDrag) return;
     if (e.button === 0) {
+      if (this.placementSuspended) return; // selection cleared by Escape
       if (this.mode === 'remove') {
         this.removeBlock();
       } else {
@@ -465,8 +510,15 @@ export class Game {
         case 'ArrowRight':
           this.moveKeys.right = true;
           break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+          this.moveKeys.run = true;
+          break;
         case 'Space':
           this.moveKeys.jump = true;
+          break;
+        case 'KeyV':
+          if (!e.repeat) this.toggleViewMode();
           break;
         case 'Escape':
           this.stopPlay();
@@ -488,6 +540,15 @@ export class Game {
       this.rotateClockwise();
     } else if (e.key === 'x' || e.key === 'X') {
       this.setMode(this.mode === 'remove' ? 'place' : 'remove');
+    } else if (e.key === 'Escape') {
+      // Clear the current selection: hide the ghost AND suspend
+      // placement so the next pointermove doesn't bring it back.
+      // The user re-activates by clicking a block type button or
+      // switching mode.
+      this.placementSuspended = true;
+      this.ghost.visible = false;
+      this.hoverBox.visible = false;
+      this.onSelectionCleared();
     }
   }
 
@@ -510,10 +571,63 @@ export class Game {
       case 'ArrowRight':
         this.moveKeys.right = false;
         break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        this.moveKeys.run = false;
+        break;
       case 'Space':
         this.moveKeys.jump = false;
         break;
     }
+  }
+
+  toggleViewMode() {
+    this.setViewMode(this.viewMode === 'first' ? 'third' : 'first');
+  }
+
+  setViewMode(mode: ViewMode) {
+    if (this.viewMode === mode) return;
+    this.viewMode = mode;
+    if (this.playerAvatar) {
+      // Hide avatar in 1st-person so we don't see the inside of our own head
+      this.playerAvatar.visible = mode === 'third';
+    }
+    // Both modes use pointer lock — 1st person for FPS look, 3rd person for
+    // orbit. When switching to 3rd person we re-seed the camera with an
+    // isometric direction so the avatar appears above-and-behind.
+    if (this.isPlaying) {
+      if (mode === 'third') {
+        this.camera.position.set(
+          this.playerPos.x + 8,
+          this.playerPos.y + 10,
+          this.playerPos.z + 8
+        );
+        this.camera.lookAt(
+          this.playerPos.x,
+          this.playerPos.y + 2,
+          this.playerPos.z
+        );
+        this.updateThirdPersonCamera();
+      } else {
+        // 1st person: snap camera to eye position immediately so the very
+        // first frame doesn't render from the wrong place.
+        const eyeY = (getMinifigHeight() || 2.5) * 0.92;
+        this.camera.position.set(
+          this.playerPos.x,
+          this.playerPos.y + eyeY,
+          this.playerPos.z
+        );
+      }
+      // Re-acquire pointer lock if we lost it (e.g., user pressed ESC earlier)
+      if (this.fpsControls && !this.fpsControls.isLocked) {
+        try {
+          this.fpsControls.lock();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    this.onViewModeChange(mode);
   }
 
   // ------------------------------------------------------------------
@@ -529,18 +643,21 @@ export class Game {
 
   setBlockType(type: BlockType) {
     this.blockType = type;
+    this.placementSuspended = false;
     this.onBlockTypeChange(type);
     this.updatePreview();
   }
 
   setCharacter(preset: MinifigPreset) {
     this.character = preset;
+    this.placementSuspended = false;
     this.onCharacterChange(preset);
     this.updatePreview();
   }
 
   setMode(mode: Mode) {
     this.mode = mode;
+    this.placementSuspended = false;
     this.onModeChange(mode);
     this.renderer.domElement.style.cursor =
       mode === 'remove' ? 'not-allowed' : 'crosshair';
@@ -564,21 +681,26 @@ export class Game {
     return def?.ghostHeightPlates ?? 3;
   }
 
+  /** Unrotated (canonical) footprint of the current block type. This is the
+   *  size that gets passed to the factories — the explicit Y rotation in
+   *  placeAtPosition / updateGhost handles the visual orientation. */
+  private baseDims(): { w: number; d: number } {
+    if (this.blockType === 'minifig') {
+      return { w: 2, d: 1 };
+    }
+    const def = BLOCK_TYPES.find((t) => t.type === this.blockType);
+    if (def?.fixedSize) {
+      return { w: def.fixedSize.w, d: def.fixedSize.d };
+    }
+    return { w: this.size.w, d: this.size.d };
+  }
+
   private effectiveSize(): { w: number; d: number } {
     // Footprint only swaps on 90° / 270° (odd rotation steps); 0° and 180°
     // share the same footprint.
     const swapped = this.rotationStep % 2 === 1;
-    if (this.blockType === 'minifig') {
-      return swapped ? { w: 1, d: 2 } : { w: 2, d: 1 };
-    }
-    const def = BLOCK_TYPES.find((t) => t.type === this.blockType);
-    if (def?.fixedSize) {
-      const { w, d } = def.fixedSize;
-      return swapped ? { w: d, d: w } : { w, d };
-    }
-    return swapped
-      ? { w: this.size.d, d: this.size.w }
-      : { w: this.size.w, d: this.size.d };
+    const base = this.baseDims();
+    return swapped ? { w: base.d, d: base.w } : { w: base.w, d: base.d };
   }
 
   private snapXZ(v: number, count: number): number {
@@ -590,7 +712,14 @@ export class Game {
     return Math.max(0, Math.floor(hitY / PLATE_HEIGHT + 0.1) * PLATE_HEIGHT);
   }
 
-  private computePlacement(): { x: number; y: number; z: number } | null {
+  private computePlacement(): {
+    x: number;
+    y: number;
+    z: number;
+    /** True when the block was auto-rotated 90° to fit inside the baseplate
+     *  edge — ghost/placement should apply an extra rotation step. */
+    autoRotate: boolean;
+  } | null {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObjects(
       [this.baseplate, this.brickGroup],
@@ -607,13 +736,37 @@ export class Game {
 
     const eff = this.effectiveSize();
     const pt = hit.point.clone();
+
+    // 1) Try the user's current rotation first.
+    const primary = this.tryPlacementAt(pt, eff.w, eff.d);
+    if (primary) return { ...primary, autoRotate: false };
+
+    // 2) Edge fallback: swap w/d (visual 90° rotation) and try again. Only
+    //    meaningful when the dimensions actually differ — a square footprint
+    //    can't be un-stuck by swapping.
+    if (eff.w !== eff.d) {
+      const swapped = this.tryPlacementAt(pt, eff.d, eff.w);
+      if (swapped) return { ...swapped, autoRotate: true };
+    }
+
+    return null;
+  }
+
+  /** Attempts to place a block of footprint (w, d) under the given hit point.
+   *  Returns the snapped xyz if the block fits inside the baseplate, or null
+   *  if the edge check fails. Handles auto-stack for vertical overlap. */
+  private tryPlacementAt(
+    pt: THREE.Vector3,
+    w: number,
+    d: number
+  ): { x: number; y: number; z: number } | null {
     let bottomY = this.snapBottomY(pt.y);
-    const x = this.snapXZ(pt.x, eff.w);
-    const z = this.snapXZ(pt.z, eff.d);
+    const x = this.snapXZ(pt.x, w);
+    const z = this.snapXZ(pt.z, d);
 
     const half = this.boardSize / 2;
-    const bw = eff.w / 2;
-    const bd = eff.d / 2;
+    const bw = w / 2;
+    const bd = d / 2;
     if (x - bw < -half || x + bw > half) return null;
     if (z - bd < -half || z + bd > half) return null;
 
@@ -653,9 +806,9 @@ export class Game {
   /** Body height in world units for a given block type (excludes studs). */
   private blockBodyHeight(type: BlockType): number {
     if (type === 'minifig') {
-      // foot 0.32 + scaled GLB body 4.0 ≈ 4.32 (hat excluded; hats vary
-      // per preset and shouldn't gate stacking).
-      return 4.32;
+      // GLB character height — driven by uniform scale of the loaded
+      // model, so we read it dynamically from the loader.
+      return getMinifigHeight() || 2.5;
     }
     const def = BLOCK_TYPES.find((t) => t.type === type);
     return (def?.bodyHeightPlates ?? 3) * PLATE_HEIGHT;
@@ -705,9 +858,10 @@ export class Game {
       const swapped = ((k % 2) + 2) % 2 === 1;
       const w = swapped ? 1 : 2;
       const d = swapped ? 2 : 1;
+      const h = getMinifigHeight() || 2.5;
       return new THREE.Box3(
         new THREE.Vector3(pos.x - w / 2, pos.y, pos.z - d / 2),
-        new THREE.Vector3(pos.x + w / 2, pos.y + 4.32, pos.z + d / 2)
+        new THREE.Vector3(pos.x + w / 2, pos.y + h, pos.z + d / 2)
       );
     }
     return new THREE.Box3().setFromObject(obj);
@@ -719,6 +873,11 @@ export class Game {
 
   private updatePreview() {
     if (this.isPlaying) return;
+    if (this.placementSuspended) {
+      this.ghost.visible = false;
+      this.hoverBox.visible = false;
+      return;
+    }
     if (this.mode === 'remove') {
       this.ghost.visible = false;
       this.updateHoverBox();
@@ -741,7 +900,21 @@ export class Game {
   }
 
   private updateGhost() {
+    // Compute placement FIRST — it decides whether we need an edge auto-
+    // rotate, which determines the final footprint and visual rotation.
+    const placement = this.computePlacement();
+    if (!placement) {
+      this.ghost.visible = false;
+      return;
+    }
+
     const eff = this.effectiveSize();
+    // After the auto-rotate fallback, the effective footprint's w/d swap.
+    const finalW = placement.autoRotate ? eff.d : eff.w;
+    const finalD = placement.autoRotate ? eff.w : eff.d;
+    // Total rotation step (user's + auto-rotate delta), in 90° steps.
+    const totalRotStep = this.rotationStep + (placement.autoRotate ? 1 : 0);
+
     const heightPlates = this.currentGhostHeightPlates();
     const u = this.ghost.userData;
     const isMinifig = this.blockType === 'minifig';
@@ -749,48 +922,54 @@ export class Game {
 
     const needsRecreate =
       u.type !== this.blockType ||
-      u.w !== eff.w ||
-      u.d !== eff.d ||
+      u.w !== finalW ||
+      u.d !== finalD ||
       u.heightPlates !== heightPlates ||
       // Shaped/minifig ghosts bake color+rotation into their child materials
       // so any change requires a full rebuild.
       (isMinifig &&
         (u.characterId !== this.character.id ||
-          u.rotationStep !== this.rotationStep)) ||
+          u.totalRotStep !== totalRotStep)) ||
       (isShaped &&
         (u.colorHex !== this.color.hex ||
-          u.rotationStep !== this.rotationStep));
+          u.totalRotStep !== totalRotStep));
 
     if (needsRecreate) {
       this.scene.remove(this.ghost);
       if (isMinifig) {
         const fig = createMinifigGhost(this.character);
-        fig.rotation.y = -this.rotationStep * (Math.PI / 2);
+        fig.rotation.y = -totalRotStep * (Math.PI / 2);
         this.ghost = fig;
       } else if (isShaped) {
+        // Build the ghost from the *base* (unrotated) dimensions, then
+        // apply explicit Y rotation. The factory's internal canonical
+        // orientation + this rotation together produce the visual that
+        // matches effectiveSize() (plus any auto-rotate delta).
+        const base = this.baseDims();
         const shaped = createBrickGhost({
-          w: eff.w,
-          d: eff.d,
+          w: base.w,
+          d: base.d,
           colorHex: this.color.hex,
           type: this.blockType,
         });
-        shaped.rotation.y = -this.rotationStep * (Math.PI / 2);
+        shaped.rotation.y = -totalRotStep * (Math.PI / 2);
         this.ghost = shaped;
       } else {
+        // Box ghost: dimensions carry the rotation.
         this.ghost = createGhost({
-          w: eff.w,
-          d: eff.d,
+          w: finalW,
+          d: finalD,
           heightPlates,
           colorHex: this.color.hex,
         });
       }
       this.ghost.userData.type = this.blockType;
-      this.ghost.userData.w = eff.w;
-      this.ghost.userData.d = eff.d;
+      this.ghost.userData.w = finalW;
+      this.ghost.userData.d = finalD;
       this.ghost.userData.heightPlates = heightPlates;
       this.ghost.userData.colorHex = this.color.hex;
       this.ghost.userData.characterId = this.character.id;
-      this.ghost.userData.rotationStep = this.rotationStep;
+      this.ghost.userData.totalRotStep = totalRotStep;
       this.scene.add(this.ghost);
     } else if (!isMinifig && !isShaped && this.ghost instanceof THREE.Mesh) {
       // Cheap color update for the box ghost
@@ -799,13 +978,8 @@ export class Game {
       this.ghost.userData.colorHex = this.color.hex;
     }
 
-    const placement = this.computePlacement();
-    if (placement) {
-      this.ghost.position.set(placement.x, placement.y, placement.z);
-      this.ghost.visible = true;
-    } else {
-      this.ghost.visible = false;
-    }
+    this.ghost.position.set(placement.x, placement.y, placement.z);
+    this.ghost.visible = true;
   }
 
   private updateHoverBox() {
@@ -841,23 +1015,66 @@ export class Game {
   private placeBlock() {
     const placement = this.computePlacement();
     if (!placement) return;
-    this.placeAtPosition(placement);
+    this.placeAtPosition(placement, placement.autoRotate);
   }
 
-  /** Places a block at the given (already-snapped and validated) position. */
-  private placeAtPosition(p: { x: number; y: number; z: number }) {
+  /** Places a block at the given (already-snapped and validated) position.
+   *  `autoRotate` is true when `computePlacement` had to rotate the block
+   *  90° to fit the baseplate edge — the extra rotation is applied on top
+   *  of the user's `rotationStep`. */
+  private placeAtPosition(
+    p: { x: number; y: number; z: number },
+    autoRotate = false
+  ) {
     let obj: THREE.Group;
+    // Total rotation in 90° steps, combining the user's choice and any
+    // edge-fit auto-rotate delta.
+    const totalRotStep = this.rotationStep + (autoRotate ? 1 : 0);
+
     if (this.blockType === 'minifig') {
       obj = createMinifigure(this.character);
-      obj.rotation.y = -this.rotationStep * (Math.PI / 2);
+      obj.rotation.y = -totalRotStep * (Math.PI / 2);
     } else {
-      const eff = this.effectiveSize();
+      const base = this.baseDims();
       obj = createBrick({
-        w: eff.w,
-        d: eff.d,
+        w: base.w,
+        d: base.d,
         colorHex: this.color.hex,
         type: this.blockType,
       });
+      // Effective (post-rotation) footprint — accounts for both the user's
+      // rotation step and any auto-rotate delta.
+      const eff = this.effectiveSize();
+      const finalW = autoRotate ? eff.d : eff.w;
+      const finalD = autoRotate ? eff.w : eff.d;
+
+      // Shaped blocks (slope, arch, window, door, fence, wheel, round, cone)
+      // need an explicit Y rotation to honor the 4-way rotation step.
+      // Box blocks (brick, plate, tile) only swap dimensions on odd steps,
+      // so rotate via the dimension swap to keep their stud grid aligned.
+      if (this.isShapedBlock(this.blockType)) {
+        obj.rotation.y = -totalRotStep * (Math.PI / 2);
+        // Override the spec stored on the group with the *final* (post-
+        // everything) footprint so getBlockAABB / wouldOverlap see the right
+        // bounds.
+        obj.userData.spec = {
+          ...(obj.userData.spec ?? {}),
+          w: finalW,
+          d: finalD,
+          type: this.blockType,
+        };
+      } else {
+        // Box blocks: rebuild with the final dimensions so the stud grid
+        // matches the visible footprint.
+        if (finalW !== base.w || finalD !== base.d) {
+          obj = createBrick({
+            w: finalW,
+            d: finalD,
+            colorHex: this.color.hex,
+            type: this.blockType,
+          });
+        }
+      }
     }
     obj.position.set(p.x, p.y, p.z);
     this.brickGroup.add(obj);
@@ -962,6 +1179,15 @@ export class Game {
     this.playerPos.set(0, 0, spawnZ);
     this.playerVel.set(0, 0, 0);
     this.onGround = true;
+    this.walkTime = 0;
+    this.avatarYaw = Math.PI; // facing -Z (toward origin/baseplate center)
+
+    // Create the visible avatar (used in 3rd-person view)
+    this.playerAvatar = createMinifigure(this.character);
+    this.playerAvatar.position.copy(this.playerPos);
+    this.playerAvatar.rotation.y = this.avatarYaw;
+    this.playerAvatar.visible = this.viewMode === 'third';
+    this.scene.add(this.playerAvatar);
 
     // Lazily create PointerLockControls, bound to the canvas
     if (!this.fpsControls) {
@@ -969,6 +1195,10 @@ export class Game {
         this.camera,
         this.renderer.domElement
       );
+      // Clamp pitch so the user can't look fully straight up/down — keeps
+      // both 1st and 3rd person cameras well-behaved.
+      this.fpsControls.minPolarAngle = 0.25;
+      this.fpsControls.maxPolarAngle = Math.PI - 0.25;
       // Only exit play mode if user actually unlocks AFTER having locked
       // (e.g., pressed ESC). Failed lock attempts never reach 'lock' event.
       this.fpsControls.addEventListener('lock', () => {
@@ -982,20 +1212,35 @@ export class Game {
       });
     }
 
-    // Position camera at minifig eye height, facing baseplate center
-    this.camera.position.set(
-      this.playerPos.x,
-      this.playerPos.y + 3.0,
-      this.playerPos.z
-    );
-    this.camera.lookAt(0, 3.0, 0);
-
-    // Requesting pointer lock may fail silently in sandboxed iframes.
-    // WASD movement still works even without mouse look.
+    // Position camera based on the active view mode
+    if (this.viewMode === 'first') {
+      this.camera.position.set(
+        this.playerPos.x,
+        this.playerPos.y + 3.0,
+        this.playerPos.z
+      );
+      this.camera.lookAt(0, 3.0, 0);
+    } else {
+      // Seed an isometric look direction (NE down) so the camera ends up
+      // above-and-behind the player on the very first frame.
+      this.camera.position.set(
+        this.playerPos.x + 8,
+        this.playerPos.y + 10,
+        this.playerPos.z + 8
+      );
+      this.camera.lookAt(
+        this.playerPos.x,
+        this.playerPos.y + 2,
+        this.playerPos.z
+      );
+      this.updateThirdPersonCamera();
+    }
+    // Pointer lock works for both modes — 1st person uses it for first-person
+    // mouse-look, 3rd person uses it to orbit around the avatar.
     try {
       this.fpsControls.lock();
     } catch {
-      /* ignore — play mode continues without mouse look */
+      /* ignore — sandboxed iframes can't acquire pointer lock */
     }
     this.lastFrameTime = performance.now();
     this.onPlayChange(true);
@@ -1010,9 +1255,16 @@ export class Game {
     this.moveKeys.left = false;
     this.moveKeys.right = false;
     this.moveKeys.jump = false;
+    this.moveKeys.run = false;
 
     if (this.fpsControls && this.fpsControls.isLocked) {
       this.fpsControls.unlock();
+    }
+
+    // Despawn avatar
+    if (this.playerAvatar) {
+      this.scene.remove(this.playerAvatar);
+      this.playerAvatar = null;
     }
 
     // Restore build camera + orbit controls
@@ -1025,12 +1277,14 @@ export class Game {
   }
 
   private updatePlayMode(dt: number) {
-    const SPEED = 6;
+    const RUN_MULT = 1.7;
+    const SPEED = 6 * (this.moveKeys.run ? RUN_MULT : 1);
     const GRAVITY = -22;
     const JUMP = 9;
     const BODY_W = 0.45; // minifig width ≈ 1 stud
-    const BODY_H = 4.32; // foot 0.32 + scaled GLB body 4.0 (hat excluded)
-    const EYE_HEIGHT = 4.0; // eye level — just below the top of the GLB head
+    // Both derived from the loaded GLB so they track its uniform scale.
+    const BODY_H = getMinifigHeight() || 2.5;
+    const EYE_HEIGHT = BODY_H * 0.92; // just below the top of the head/hat
 
     // Horizontal input relative to camera facing
     const forward = new THREE.Vector3();
@@ -1049,6 +1303,7 @@ export class Game {
 
     this.playerVel.x = move.x * SPEED;
     this.playerVel.z = move.z * SPEED;
+    const isWalking = move.lengthSq() > 0.001;
 
     // Gravity
     this.playerVel.y += GRAVITY * dt;
@@ -1131,12 +1386,86 @@ export class Game {
       this.playerVel.set(0, 0, 0);
     }
 
-    // Sync camera to minifig eye position
-    this.camera.position.set(
+    // ----- Avatar update -----
+    if (this.playerAvatar) {
+      // Position avatar at the player's feet
+      this.playerAvatar.position.set(
+        this.playerPos.x,
+        this.playerPos.y,
+        this.playerPos.z
+      );
+
+      // Decide facing direction
+      if (this.viewMode === 'first') {
+        // 1st person: face whichever way the camera is looking
+        this.avatarYaw = Math.atan2(forward.x, forward.z);
+      } else if (isWalking) {
+        // 3rd person: face the movement direction (only when actively moving)
+        const targetYaw = Math.atan2(move.x, move.z);
+        // Smooth rotation toward the target
+        let delta = targetYaw - this.avatarYaw;
+        while (delta > Math.PI) delta -= 2 * Math.PI;
+        while (delta < -Math.PI) delta += 2 * Math.PI;
+        this.avatarYaw += delta * Math.min(1, dt * 12);
+      }
+      this.playerAvatar.rotation.y = this.avatarYaw;
+
+      // Walking animation: leg swing + subtle body bob
+      if (isWalking && this.onGround) {
+        this.walkTime += dt * (this.moveKeys.run ? 14 : 10);
+      }
+      const swing = isWalking && this.onGround ? Math.sin(this.walkTime) * 0.5 : 0;
+      const parts = this.playerAvatar.userData.parts as
+        | { legs?: THREE.Mesh[] }
+        | undefined;
+      if (parts?.legs && parts.legs.length >= 2) {
+        parts.legs[0].rotation.x = swing;
+        parts.legs[1].rotation.x = -swing;
+      }
+      // Subtle body bounce
+      const bob =
+        isWalking && this.onGround
+          ? Math.abs(Math.sin(this.walkTime)) * 0.06
+          : 0;
+      this.playerAvatar.position.y += bob;
+    }
+
+    // ----- Camera positioning -----
+    if (this.viewMode === 'first') {
+      // Hide avatar's head from clipping into the camera
+      this.camera.position.set(
+        this.playerPos.x,
+        this.playerPos.y + EYE_HEIGHT,
+        this.playerPos.z
+      );
+    } else {
+      this.updateThirdPersonCamera();
+    }
+  }
+
+  /** 3rd-person orbit camera. PointerLockControls drives camera.quaternion
+   *  via mouse movement; we keep the camera positioned BEHIND the player
+   *  along that look direction so it always frames the avatar. Distance is
+   *  adjustable via mouse wheel (see the wheel handler). */
+  private updateThirdPersonCamera() {
+    const focus = new THREE.Vector3(
       this.playerPos.x,
-      this.playerPos.y + EYE_HEIGHT,
+      this.playerPos.y + 2.0, // chest-height look target
       this.playerPos.z
     );
+
+    // Camera direction is set by PointerLockControls (mouse-controlled).
+    // Position the camera at focus - forward * distance so it looks at the
+    // player, then rotate look direction to keep the avatar centered.
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    if (forward.lengthSq() < 1e-6) forward.set(0, -0.5, -0.866).normalize();
+
+    const offset = forward.clone().multiplyScalar(-this.thirdPersonDistance);
+    this.camera.position.copy(focus).add(offset);
+    // Re-orient the camera so the focus point stays exactly centered.
+    // (forward is preserved up to numerical precision.)
+    this.camera.lookAt(focus);
   }
 
   private collides(

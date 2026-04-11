@@ -26,38 +26,101 @@ body {
 /* ==================  Sidebar  ================== */
 
 #sidebar {
-  width: 296px;
-  min-width: 296px;
+  width: 304px;
+  min-width: 304px;
   height: 100vh;
   background: #ffffff;
   border-right: 1px solid #ececef;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding: 24px 20px 24px;
+  padding: 0 0 18px;
+  position: relative;
+}
+
+/* ----- Brand header ----- */
+
+.sidebar-header {
+  position: sticky;
+  top: 0;
+  background: #ffffff;
+  border-bottom: 1px solid #ececef;
+  padding: 18px 20px 16px;
+  z-index: 5;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.brand-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .sidebar-header h1 {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   color: #1c1d22;
   letter-spacing: -0.2px;
-  margin-bottom: 10px;
+  line-height: 1.2;
 }
 
-.hint {
-  font-size: 11px;
+.brand-sub {
+  font-size: 10px;
+  font-weight: 600;
   color: #8a8e96;
-  line-height: 1.7;
-  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  line-height: 1.3;
+  margin-top: 2px;
 }
 
-/* Panels are now invisible groupings — separation comes from whitespace */
+.icon-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f2f4;
+  color: #6b7078;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.icon-btn:hover {
+  background: #e3e5e9;
+  color: #1c1d22;
+}
+
+/* ----- Primary actions (play + mode) ----- */
+
+.primary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 20px 0;
+}
+
+/* ----- Panels (sections) ----- */
+
 .panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 18px 20px 0;
 }
 
 .panel.disabled {
@@ -65,11 +128,33 @@ body {
   pointer-events: none;
 }
 
+/* Section title with vertical accent bar */
+.section-title {
+  display: flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #1c1d22;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.section-title::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 11px;
+  background: #1c1d22;
+  border-radius: 2px;
+  margin-right: 8px;
+}
+
+/* Legacy h2 selector retained for any panels still using it */
 .panel h2 {
   font-size: 10.5px;
-  font-weight: 600;
-  color: #8a8e96;
-  letter-spacing: 0.5px;
+  font-weight: 700;
+  color: #1c1d22;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
   display: flex;
   align-items: center;
@@ -159,39 +244,84 @@ body {
     0 0 0 0.5px rgba(20, 22, 28, 0.06);
 }
 
-/* ==================  Type & character grids  ================== */
+/* ==================  Library tabs  ================== */
 
-.type-grid,
-.character-grid {
+.library-tabs {
+  display: flex;
+  background: #f1f2f4;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 7px 0;
+  background: transparent;
+  color: #6b7078;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: #1c1d22;
+}
+
+.tab-btn.active {
+  background: #ffffff;
+  color: #1c1d22;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(20, 22, 28, 0.08),
+    0 0 0 0.5px rgba(20, 22, 28, 0.06);
+}
+
+/* ==================  Block / character grids  ================== */
+
+.type-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
+  min-height: 80px;
 }
 
-.type-btn,
-.character-btn {
+/* Three columns when showing characters (more compact previews) */
+.type-grid.character-mode {
+  grid-template-columns: 1fr 1fr;
+}
+
+.type-btn {
   background: #f6f7f9;
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
-  padding: 8px 4px 9px;
+  padding: 9px 4px 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    transform 0.08s ease;
   font-family: inherit;
 }
 
-.type-btn:hover,
-.character-btn:hover {
+.type-btn:hover {
   background: #eef0f3;
 }
 
-.type-btn.active,
-.character-btn.active {
+.type-btn:active {
+  transform: scale(0.97);
+}
+
+.type-btn.active {
   background: #ffffff;
   border-color: #1c1d22;
+  box-shadow: 0 1px 2px rgba(20, 22, 28, 0.06),
+    0 0 0 0.5px rgba(20, 22, 28, 0.04);
 }
 
 .type-btn img {
@@ -201,21 +331,18 @@ body {
   image-rendering: -webkit-optimize-contrast;
 }
 
-.character-btn img {
+.type-btn.character-btn img {
   width: 58px;
   height: 58px;
-  object-fit: contain;
 }
 
-.type-btn span,
-.character-btn span {
+.type-btn span {
   font-size: 11px;
   font-weight: 500;
   color: #5b5f67;
 }
 
-.type-btn.active span,
-.character-btn.active span {
+.type-btn.active span {
   color: #1c1d22;
   font-weight: 600;
 }
@@ -301,15 +428,47 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ==================  Actions  ================== */
+/* ==================  Properties (color / size labels)  ================== */
 
-.actions {
+.property {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.property + .property {
+  margin-top: 6px;
+}
+
+.property-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5b5f67;
+  letter-spacing: 0.1px;
+}
+
+.property-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#color-panel.disabled,
+#size-panel.disabled {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+/* ==================  Sidebar footer  ================== */
+
+.sidebar-footer {
+  display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding-top: 18px;
+  margin: 24px 20px 0;
+  padding-top: 16px;
   border-top: 1px solid #ececef;
-  margin-top: auto;
 }
 
 #clear {
@@ -337,9 +496,92 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ==================  Hidden panels  ================== */
+/* ==================  Help popover  ================== */
 
-.panel.hidden {
+.help-popover {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  background: #1c1d22;
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 12px 14px 14px;
+  width: 230px;
+  box-shadow: 0 12px 32px rgba(20, 22, 28, 0.22),
+    0 1px 2px rgba(20, 22, 28, 0.08);
+  z-index: 50;
+  animation: popoverIn 0.14s ease-out;
+}
+
+@keyframes popoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.help-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 10px;
+}
+
+.help-popover-header .icon-btn {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  width: 20px;
+  height: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.help-popover-header .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.help-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.help-list li {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-list kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: #ffffff;
+  min-width: 22px;
+  text-align: center;
+}
+
+/* ==================  Hidden  ================== */
+
+.panel.hidden,
+.help-popover.hidden {
   display: none;
 }
 
@@ -384,6 +626,49 @@ body.remove-mode #viewer canvas {
   font-weight: 300;
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
   line-height: 1;
+}
+
+/* Crosshair only makes sense in 1st-person */
+#play-overlay.third-person .crosshair {
+  display: none;
+}
+
+#play-overlay .view-toggle {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  display: inline-flex;
+  background: rgba(20, 22, 28, 0.78);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 2px;
+  pointer-events: auto; /* allow clicking on the buttons */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+#play-overlay .view-toggle-btn {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border: none;
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+#play-overlay .view-toggle-btn:hover {
+  color: #fff;
+}
+
+#play-overlay .view-toggle-btn.active {
+  background: #fff;
+  color: #1c1d22;
 }
 
 #play-overlay .play-hint {
@@ -435,4 +720,444 @@ body.playing #sidebar {
 }
 #sidebar::-webkit-scrollbar-thumb:hover {
   background: #d1d4d9;
+}
+
+/* ============================================================
+   Mobile drawer handle — only visible on mobile via media query
+   ============================================================ */
+
+.sidebar-handle {
+  display: none; /* hidden on PC by default; mobile media query enables */
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: stretch;
+  background: #ffffff;
+  padding: 10px 18px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+  border-top-left-radius: 22px;
+  border-top-right-radius: 22px;
+}
+
+.drag-indicator {
+  width: 44px;
+  height: 5px;
+  background: #d0d4db;
+  border-radius: 3px;
+  margin: 0 auto 14px;
+  display: block;
+  transition: background 0.2s ease;
+}
+.sidebar-handle:active .drag-indicator {
+  background: #a8adb5;
+}
+
+.handle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.play-btn-mobile {
+  flex: 1;
+  height: 48px;
+  padding: 0 18px;
+  background: #1c1d22;
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 4px 14px rgba(20, 22, 28, 0.16),
+    0 1px 2px rgba(20, 22, 28, 0.08);
+  transition: background 0.15s ease, transform 0.1s ease,
+    box-shadow 0.15s ease;
+}
+.play-btn-mobile:active {
+  transform: translateY(1px) scale(0.985);
+  box-shadow: 0 2px 8px rgba(20, 22, 28, 0.18);
+}
+.play-btn-mobile.playing {
+  background: #d94848;
+  box-shadow: 0 4px 14px rgba(217, 72, 72, 0.26),
+    0 1px 2px rgba(217, 72, 72, 0.12);
+}
+
+.count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  min-width: 64px;
+  padding: 0 14px;
+  background: #f1f2f4;
+  color: #1c1d22;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* The chevron is legacy — replaced by the drag indicator as the
+   expand/collapse affordance. Hidden everywhere. */
+.drawer-chevron {
+  display: none !important;
+}
+
+/* ============================================================
+   TABLET (768 ~ 1023px) — narrower fixed sidebar
+   ============================================================ */
+
+@media (max-width: 1023px) and (min-width: 768px) {
+  #sidebar {
+    width: 264px;
+    min-width: 264px;
+  }
+
+  .sidebar-header {
+    padding: 16px 16px 14px;
+  }
+
+  .sidebar-header h1 {
+    font-size: 14px;
+  }
+
+  .primary-actions,
+  .panel {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .play-btn {
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+
+  .panel {
+    gap: 8px;
+  }
+
+  .panel h2,
+  .section-title {
+    font-size: 10px;
+  }
+
+  .type-btn img {
+    width: 56px;
+    height: 56px;
+  }
+
+  .type-btn.character-btn img {
+    width: 50px;
+    height: 50px;
+  }
+
+  .type-btn span {
+    font-size: 10.5px;
+  }
+
+  .color-btn {
+    width: 26px;
+    height: 26px;
+  }
+
+  .size-btn {
+    padding: 5px 9px;
+    font-size: 11px;
+    min-width: 36px;
+  }
+
+  .sidebar-footer {
+    margin: 20px 16px 0;
+  }
+}
+
+/* ============================================================
+   MOBILE (≤767px) — bottom drawer
+   ============================================================ */
+
+@media (max-width: 767px) {
+  body {
+    flex-direction: column;
+    background: #e8ebef; /* matches #viewer fallback so the edges blend */
+  }
+
+  #viewer {
+    flex: 1;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* ===== Drawer (bottom sheet) ===== */
+  #sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    max-height: 92px; /* collapsed height — just the handle + drag area */
+    padding: 0;
+    gap: 0;
+    background: #ffffff;
+    border-right: none;
+    border-top: none;
+    border-top-left-radius: 22px;
+    border-top-right-radius: 22px;
+    box-shadow: 0 -2px 8px rgba(20, 22, 28, 0.04),
+      0 -12px 40px rgba(20, 22, 28, 0.12);
+    overflow: hidden;
+    transition: max-height 0.36s cubic-bezier(0.32, 0.72, 0, 1);
+    z-index: 50;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  #sidebar.expanded {
+    max-height: 84vh;
+    max-height: 84dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Backdrop dimmer behind the expanded drawer so the viewer recedes */
+  #sidebar.expanded::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    top: 0;
+    bottom: 0;
+    background: transparent;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .sidebar-handle {
+    display: flex;
+  }
+
+  /* ===== Hide PC-only bits on mobile ===== */
+  .sidebar-header,
+  #play,
+  .help-popover,
+  .sidebar-footer #count {
+    display: none;
+  }
+
+  /* .primary-actions still shows (mode toggle lives here), but with
+     prominent spacing as a proper section rather than a primary action. */
+  .primary-actions {
+    padding: 8px 18px 0;
+    gap: 0;
+  }
+
+  /* ===== Panels: generous breathing room ===== */
+  .panel {
+    padding: 22px 18px 0;
+    gap: 12px;
+  }
+
+  /* First panel after the handle needs a subtle divider so the drawer
+     content is clearly distinct from the always-visible handle. */
+  #sidebar.expanded > .primary-actions {
+    margin-top: 4px;
+    position: relative;
+  }
+  #sidebar.expanded > .primary-actions::before {
+    content: '';
+    display: block;
+    height: 1px;
+    background: linear-gradient(
+      to right,
+      transparent 0%,
+      #ececef 15%,
+      #ececef 85%,
+      transparent 100%
+    );
+    margin: 0 -18px 16px;
+  }
+
+  /* Last section gets extra bottom padding so it clears the home indicator */
+  #sidebar.expanded > section:last-of-type,
+  #sidebar.expanded > .sidebar-footer {
+    margin-bottom: 28px;
+  }
+
+  /* ===== Section titles: bigger, more emphatic ===== */
+  .section-title {
+    font-size: 11px;
+    color: #1c1d22;
+    margin-bottom: 2px;
+  }
+
+  .section-title::before {
+    width: 3px;
+    height: 12px;
+    background: #1c1d22;
+  }
+
+  /* ===== Footer (clear button row) ===== */
+  .sidebar-footer {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    margin: 22px 18px 0;
+    padding-top: 18px;
+    border-top: 1px solid #ececef;
+  }
+
+  /* ===== Touch targets (all buttons minimum 44px) ===== */
+
+  .mode-row {
+    background: #f1f2f4;
+    padding: 4px;
+    border-radius: 10px;
+  }
+  .mode-btn {
+    padding: 11px 0;
+    font-size: 13.5px;
+    font-weight: 600;
+    border-radius: 8px;
+  }
+  #mode-place.active,
+  #mode-remove.active {
+    box-shadow: 0 1px 3px rgba(20, 22, 28, 0.08),
+      0 0 0 0.5px rgba(20, 22, 28, 0.04);
+  }
+
+  .tab-btn {
+    padding: 11px 14px;
+    font-size: 13px;
+    min-height: 40px;
+  }
+
+  .type-grid {
+    gap: 10px;
+  }
+
+  .type-btn {
+    padding: 12px 6px 14px;
+    border-radius: 12px;
+    border-width: 1.5px;
+  }
+
+  .type-btn img {
+    width: 72px;
+    height: 72px;
+  }
+
+  .type-btn.character-btn img {
+    width: 64px;
+    height: 64px;
+  }
+
+  .type-btn span {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  #colors.row.wrap {
+    gap: 10px;
+  }
+  .color-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border-width: 2px;
+  }
+
+  .size-btn {
+    padding: 11px 15px;
+    font-size: 13.5px;
+    font-weight: 600;
+    min-width: 52px;
+    border-radius: 10px;
+    min-height: 44px;
+  }
+
+  #rotate {
+    padding: 7px 13px;
+    font-size: 12.5px;
+    font-weight: 600;
+    min-height: 34px;
+    border-radius: 8px;
+  }
+
+  #clear {
+    padding: 11px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 10px;
+    min-height: 42px;
+  }
+
+  /* Board size row — larger buttons */
+  #board-sizes.row.wrap {
+    gap: 8px;
+  }
+
+  /* Property labels — more breathing room */
+  .property {
+    gap: 10px;
+  }
+  .property-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #5b5f67;
+    margin-bottom: 2px;
+  }
+  .property-label-row {
+    font-size: 12px;
+  }
+
+  /* Play overlay adjusts for mobile (no keyboard, smaller hints) */
+  #play-overlay .play-hint {
+    font-size: 11px;
+    bottom: 28px;
+    padding: 9px 16px;
+    max-width: calc(100vw - 40px);
+    white-space: normal;
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  #play-overlay .view-badge {
+    top: 20px;
+    font-size: 10.5px;
+    padding: 5px 12px;
+  }
+}
+
+/* Very narrow screens (small phones in portrait) */
+@media (max-width: 359px) {
+  .property-label-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .handle-row {
+    gap: 8px;
+  }
+  .play-btn-mobile {
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+  .count-pill {
+    font-size: 11px;
+  }
 }

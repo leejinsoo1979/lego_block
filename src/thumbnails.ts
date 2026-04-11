@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createBrick, createMinifigure } from './blocks';
+import { createBrick, createMinifigure, getMinifigHeight } from './blocks';
 import { BLOCK_TYPES, MINIFIG_PRESETS } from './config';
 import type { BlockType, MinifigPreset } from './config';
 
@@ -53,8 +53,10 @@ export function renderBlockTypeThumbnail(
 
   if (type === 'minifig') {
     const fig = createMinifigure(MINIFIG_PRESETS[0]);
-    camera!.position.set(7, 5.5, 7.5);
-    camera!.lookAt(0, 2.2, 0);
+    const h = getMinifigHeight() || 2.5;
+    const dist = h * 1.6;
+    camera!.position.set(dist, h * 1.2, dist * 1.05);
+    camera!.lookAt(0, h * 0.5, 0);
     return render(fig);
   }
 
@@ -68,6 +70,16 @@ export function renderBlockTypeThumbnail(
     case 'brick':
       camera!.position.set(3.8, 3.2, 3.8);
       camera!.lookAt(0, 0.5, 0);
+      break;
+    case 'tallbrick':
+      // 6 plates (= 2.4 units) tall — pull camera back and aim higher.
+      camera!.position.set(4.6, 3.8, 4.6);
+      camera!.lookAt(0, 1.2, 0);
+      break;
+    case 'wallpanel':
+      // 9 plates (= 3.6 units) tall — pull further back and aim mid-height.
+      camera!.position.set(5.4, 4.4, 5.4);
+      camera!.lookAt(0, 1.8, 0);
       break;
     case 'plate':
     case 'tile':
@@ -113,7 +125,9 @@ export function renderBlockTypeThumbnail(
 export function renderMinifigPresetThumbnail(preset: MinifigPreset): string {
   setup();
   const fig = createMinifigure(preset);
-  camera!.position.set(7, 5.7, 7.6);
-  camera!.lookAt(0, 2.3, 0);
+  const h = getMinifigHeight() || 2.5;
+  const dist = h * 1.6;
+  camera!.position.set(dist, h * 1.25, dist * 1.05);
+  camera!.lookAt(0, h * 0.55, 0);
   return render(fig);
 }

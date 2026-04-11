@@ -2,75 +2,112 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>레고 블록 빌더</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <aside id="sidebar">
+      <!-- Mobile-only drawer handle (always visible when collapsed).
+           The drag indicator is the gesture affordance — tap anywhere on
+           the handle to expand/collapse the bottom sheet. -->
+      <div class="sidebar-handle" id="sidebar-handle" role="button" aria-label="빌더 옵션 펼치기">
+        <span class="drag-indicator" aria-hidden="true"></span>
+        <div class="handle-row">
+          <button id="play-mobile" class="play-btn-mobile">▶ 플레이</button>
+          <span id="count-mobile" class="count-pill">0</span>
+        </div>
+      </div>
+
       <header class="sidebar-header">
-        <h1>🧱 레고 블록 빌더</h1>
-        <p class="hint">
-          좌클릭: 설치/제거 · 우클릭: 블록 회전<br />
-          Shift + 드래그: 한 줄 연속 배치<br />
-          드래그/휠버튼 드래그: 카메라 · 휠: 줌<br />
-          회전: Tab · 우클릭 · 모드: X
-        </p>
+        <div class="brand">
+          <div class="brand-icon">🧱</div>
+          <div class="brand-text">
+            <h1>레고 빌더</h1>
+            <p class="brand-sub">Block Studio</p>
+          </div>
+          <button id="help-toggle" class="icon-btn" title="도움말">?</button>
+        </div>
       </header>
 
-      <button id="play" class="play-btn">▶ Play</button>
-
-      <section class="panel">
-        <h2>모드</h2>
+      <div class="primary-actions">
+        <button id="play" class="play-btn">▶ 플레이</button>
         <div class="row mode-row">
           <button id="mode-place" class="mode-btn">설치</button>
           <button id="mode-remove" class="mode-btn">제거</button>
         </div>
-      </section>
+      </div>
 
-      <section class="panel">
-        <h2>종류</h2>
+      <section class="panel library">
+        <div class="section-title"><span>블록 라이브러리</span></div>
+        <nav id="library-tabs" class="library-tabs"></nav>
         <div id="types" class="type-grid"></div>
       </section>
 
-      <section class="panel hidden" id="characters-panel">
-        <h2>인물</h2>
-        <div id="characters" class="character-grid"></div>
-      </section>
+      <section class="panel" id="properties">
+        <div class="section-title"><span>속성</span></div>
 
-      <section class="panel" id="color-panel">
-        <h2>색상</h2>
-        <div id="colors" class="row wrap"></div>
-      </section>
+        <div class="property" id="color-panel">
+          <label class="property-label">색상</label>
+          <div id="colors" class="row wrap"></div>
+        </div>
 
-      <section class="panel" id="size-panel">
-        <h2>
-          크기
-          <button id="rotate" title="블록 회전 (Tab / 우클릭)">
-            ↻ <span id="rot-label">0°</span>
-          </button>
-        </h2>
-        <div id="sizes" class="row wrap"></div>
+        <div class="property" id="size-panel">
+          <label class="property-label property-label-row">
+            <span>크기</span>
+            <button id="rotate" title="블록 회전 (Tab / 우클릭)">
+              ↻ <span id="rot-label">0°</span>
+            </button>
+          </label>
+          <div id="sizes" class="row wrap"></div>
+        </div>
       </section>
 
       <section class="panel">
-        <h2>맵 크기</h2>
+        <div class="section-title"><span>맵 크기</span></div>
         <div id="board-sizes" class="row wrap"></div>
       </section>
 
-      <section class="panel actions">
+      <footer class="sidebar-footer">
         <button id="clear">전체 지우기</button>
         <span id="count">블록: 0</span>
-      </section>
+      </footer>
+
+      <div id="help-popover" class="help-popover hidden">
+        <div class="help-popover-header">
+          <span>키보드 / 마우스</span>
+          <button id="help-close" class="icon-btn" aria-label="닫기">×</button>
+        </div>
+        <ul class="help-list">
+          <li><kbd>좌클릭</kbd> 설치 / 제거</li>
+          <li><kbd>우클릭</kbd> 블록 90° 회전</li>
+          <li><kbd>Tab</kbd> 블록 회전</li>
+          <li><kbd>X</kbd> 모드 전환</li>
+          <li><kbd>Shift</kbd>+드래그 한 줄 연속 배치</li>
+          <li><kbd>드래그</kbd> 카메라 회전</li>
+          <li><kbd>휠</kbd> 줌</li>
+        </ul>
+      </div>
     </aside>
 
     <main id="viewer"></main>
 
     <div id="play-overlay">
-      <div class="crosshair">+</div>
+      <div class="crosshair" id="crosshair">+</div>
+      <div class="view-toggle" id="view-toggle">
+        <button id="view-toggle-first" class="view-toggle-btn active">1인칭</button>
+        <button id="view-toggle-third" class="view-toggle-btn">3인칭</button>
+      </div>
       <div class="play-hint">
-        <kbd>WASD</kbd> 이동 · <kbd>마우스</kbd> 시점 · <kbd>Space</kbd> 점프 ·
-        <kbd>ESC</kbd> 종료
+        <kbd>WASD</kbd> 이동 · <kbd>Shift</kbd> 달리기 · <kbd>Space</kbd> 점프 ·
+        <kbd>V</kbd> 시점 전환 · <kbd>ESC</kbd> 종료
       </div>
     </div>
 

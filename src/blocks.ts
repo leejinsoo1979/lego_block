@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { GRID, PLATE_HEIGHT } from './config';
+import { GRID, PLATE_HEIGHT, STUD_HEIGHT, STUD_RADIUS } from './config';
 import type { BlockType, HatStyle, MinifigPreset } from './config';
 import characterModelUrl from './model/people.glb?url';
 
@@ -11,7 +11,12 @@ export interface BlockSpec {
   type?: BlockType;
 }
 
-const STUD_GEOMETRY = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 20);
+const STUD_GEOMETRY = new THREE.CylinderGeometry(
+  STUD_RADIUS,
+  STUD_RADIUS,
+  STUD_HEIGHT,
+  20
+);
 
 function studMaterial(colorHex: number) {
   return new THREE.MeshStandardMaterial({
@@ -35,7 +40,7 @@ function addStudGrid(
       const stud = new THREE.Mesh(STUD_GEOMETRY, material);
       stud.position.set(
         -width / 2 + 0.5 + sx,
-        topY + 0.1,
+        topY + STUD_HEIGHT / 2,
         -depth / 2 + 0.5 + sz
       );
       stud.castShadow = true;
@@ -52,6 +57,8 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'plate':
     case 'tile':
     case 'brick':
+    case 'tallbrick':
+    case 'wallpanel':
       group = createBoxBlock(spec, type);
       break;
     case 'slope':
@@ -88,12 +95,32 @@ export function createBrick(spec: BlockSpec): THREE.Group {
 
 function createBoxBlock(
   spec: BlockSpec,
-  type: 'brick' | 'plate' | 'tile'
+  type: 'brick' | 'plate' | 'tile' | 'tallbrick' | 'wallpanel'
 ): THREE.Group {
   const group = new THREE.Group();
   const width = spec.w * GRID.X;
   const depth = spec.d * GRID.Z;
-  const bodyHeight = type === 'brick' ? 3 * PLATE_HEIGHT : PLATE_HEIGHT;
+
+  // Body height in plates, keyed off the block type. Keep this in sync with
+  // bodyHeightPlates in config.ts (game.ts's collision math reads from the
+  // same source of truth).
+  let plates: number;
+  switch (type) {
+    case 'plate':
+    case 'tile':
+      plates = 1;
+      break;
+    case 'tallbrick':
+      plates = 6;
+      break;
+    case 'wallpanel':
+      plates = 9;
+      break;
+    case 'brick':
+    default:
+      plates = 3;
+  }
+  const bodyHeight = plates * PLATE_HEIGHT;
   const showStuds = type !== 'tile';
 
   const material = studMaterial(spec.colorHex);
@@ -175,7 +202,7 @@ function createSlopeBlock(spec: BlockSpec): THREE.Group {
           const stud = new THREE.Mesh(STUD_GEOMETRY, material);
           stud.position.set(
             -w / 2 + 1 + 0.5 + ix,
-            h + 0.1,
+            h + STUD_HEIGHT / 2,
             -d / 2 + 0.5 + iz
           );
           stud.castShadow = true;
@@ -190,7 +217,7 @@ function createSlopeBlock(spec: BlockSpec): THREE.Group {
           const stud = new THREE.Mesh(STUD_GEOMETRY, material);
           stud.position.set(
             -w / 2 + 0.5 + ix,
-            h + 0.1,
+            h + STUD_HEIGHT / 2,
             -d / 2 + 0.5 + iz
           );
           stud.castShadow = true;
@@ -317,7 +344,7 @@ function createConeBlock(spec: BlockSpec): THREE.Group {
   group.add(taper);
 
   const stud = new THREE.Mesh(STUD_GEOMETRY, material);
-  stud.position.set(0, h + 0.1, 0);
+  stud.position.set(0, h + STUD_HEIGHT / 2, 0);
   stud.castShadow = true;
   group.add(stud);
   return group;
@@ -856,52 +883,82 @@ function createHat(style: HatStyle, color: number): THREE.Group | null {
 // ------------------------------------------------------------------
 
 /**
- * Cached, normalized clone-source for the character GLB body
- * (built-in feet and built-in hat removed; remaining body scaled to fit
- *  target dimensions). loadCharacterModel() must complete before
- * createMinifigure() runs.
+ * Cached clone-source for the character GLB. The model is loaded EXACTLY
+ * as authored in Blender — no nodes are removed and no procedural meshes
+ * are bolted on. The loader only sets a non-uniform scale + position so
+ * the character is the right physical size in our world.
  */
-let characterBodyTemplate: THREE.Group | null = null;
-/** Top of the GLB body in the new minifig's local space — anchors hats. */
+let characterTemplate: THREE.Group | null = null;
+/** Top Y of the loaded character (after scale + recenter), in world units. */
 let characterTopY = 0;
 
-/** Each procedural foot is exactly 1 stud × 1 stud × FOOT_H, at x=±0.5. */
-const FOOT_H = 0.32;
-/** Target X width of the loaded GLB body (slightly wider than the 2-stud
- *  footprint so the arms stick out a touch — that's normal for minifigs). */
-const TARGET_BODY_X = 2.4;
-/** Target Y height of the loaded GLB body (excluding feet and hat).
- *  Picked so foot 0.32 + body 4.0 + typical hat ≈ 4.8 ≈ 4 brick-heights. */
-const TARGET_BODY_Y = 4.0;
+/** Target distance between the two FOOT CENTERS, in world units. One stud
+ *  pitch = 1 unit, so setting this to 1.0 puts each foot center exactly
+ *  on a stud center for the 2-stud-wide minifig footprint. The character
+ *  total height comes out at whatever the GLB's authored aspect ratio
+ *  yields — uniform scale, no distortion. */
+const TARGET_FOOT_SPACING = 1.0;
+/** Fallback height if the GLB doesn't have two recognizable foot meshes. */
+const FALLBACK_HEIGHT = 4.8;
+
+/** Compute the TIGHT world AABB of every mesh under `obj` by transforming
+ *  each vertex through the mesh's matrixWorld (precise=true). The default
+ *  (precise=false) variant of setFromObject only transforms the local
+ *  geometry.boundingBox, which becomes a LOOSE AABB after rotation —
+ *  for the GLB's bezier-curve legs (95° rotation), the loose box pokes
+ *  way below the visible geometry, which is why earlier shifts left the
+ *  character floating. The precise version doesn't have that problem. */
+function fullBoundingBox(obj: THREE.Object3D): THREE.Box3 {
+  const result = new THREE.Box3();
+  result.makeEmpty();
+  const tmp = new THREE.Box3();
+  obj.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh) return;
+    tmp.setFromObject(m, true);
+    result.union(tmp);
+  });
+  return result;
+}
+
+/** TIGHT world AABB of meshes whose name matches one of `names`. Used to
+ *  drive XZ centering off the FEET specifically — the full body is
+ *  asymmetric (left arm wider than right) so centering off the body bbox
+ *  shifts the feet away from stud centers. */
+function namedBoundingBox(obj: THREE.Object3D, names: Set<string>): THREE.Box3 {
+  const result = new THREE.Box3();
+  result.makeEmpty();
+  const tmp = new THREE.Box3();
+  obj.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh || !names.has(m.name)) return;
+    tmp.setFromObject(m, true);
+    result.union(tmp);
+  });
+  return result;
+}
+
+/** Names of the foot/leg meshes in the GLB. Drives XZ centering. */
+const FOOT_NAMES = new Set(['BezierCurve', 'BezierCurve.001']);
 
 /**
- * Loads `src/model/people.glb` once and prepares a clone-source body:
- *   - removes the GLB's built-in cube hat (`Cube.001`) so per-preset hats
- *     can replace it
- *   - removes the GLB's curve-based "feet" (`BezierCurve`/`BezierCurve.001`)
- *     so the procedural 1×1 stud block feet stand alone
- *   - scales the remaining body NON-uniformly to TARGET_BODY_X × TARGET_BODY_Y
- *     (with Z scaled identically to X), so the chibi GLB becomes a tall
- *     minifig that fits the 2-stud footprint
- *   - shifts so the body bottom rests on top of the procedural feet
- *   - centers the body on XZ
- * Subsequent calls are no-ops.
+ * Loads `src/model/people.glb` once and prepares it for cloning:
+ *   - shadows on every mesh
+ *   - UNIFORM scale so the visible body height = CHARACTER_HEIGHT
+ *     (aspect ratio preserved — no distortion)
+ *   - position shifted so the lowest point is at y=0 and the figure is
+ *     centered on X/Z. The shift is verified by re-computing the bbox
+ *     and applying corrective passes until min.y converges to 0.
+ * Nothing is removed and nothing is added.
  */
 export function loadCharacterModel(): Promise<void> {
-  if (characterBodyTemplate) return Promise.resolve();
+  if (characterTemplate) return Promise.resolve();
   return new Promise((resolve, reject) => {
     new GLTFLoader().load(
       characterModelUrl,
       (gltf) => {
         const root = gltf.scene;
 
-        // Strip parts that the procedural code overrides.
-        for (const name of ['Cube.001', 'BezierCurve', 'BezierCurve.001']) {
-          const obj = root.getObjectByName(name);
-          if (obj && obj.parent) obj.parent.remove(obj);
-        }
-
-        // Shadows for everything that's left.
         root.traverse((c) => {
           const m = c as THREE.Mesh;
           if (m.isMesh) {
@@ -910,34 +967,91 @@ export function loadCharacterModel(): Promise<void> {
           }
         });
 
-        // Wrap in a parent so scale + position can be set cleanly.
-        const wrapper = new THREE.Group();
-        wrapper.add(root);
-        wrapper.updateMatrixWorld(true);
+        // List every mesh by name + its TIGHT world bounds. Helps debug
+        // what the GLB actually contains and where each part lives.
+        root.updateMatrixWorld(true);
+        const tmp = new THREE.Box3();
+        const meshList: Array<{ name: string; lo: number[]; hi: number[] }> = [];
+        root.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (!m.isMesh) return;
+          tmp.setFromObject(m, true);
+          meshList.push({
+            name: m.name || '(unnamed)',
+            lo: [+tmp.min.x.toFixed(3), +tmp.min.y.toFixed(3), +tmp.min.z.toFixed(3)],
+            hi: [+tmp.max.x.toFixed(3), +tmp.max.y.toFixed(3), +tmp.max.z.toFixed(3)],
+          });
+        });
+        console.log('[GLB] meshes (sorted by min Y):',
+          meshList.sort((a, b) => a.lo[1] - b.lo[1]));
 
-        const bbox = new THREE.Box3().setFromObject(wrapper);
-        const size = new THREE.Vector3();
-        bbox.getSize(size);
+        // ----- Compute uniform scale from foot SPACING -----
+        // Find the two foot meshes individually, measure each one's
+        // X-center at scale 1, then scale the whole model so the spacing
+        // between them = exactly 1 stud (TARGET_FOOT_SPACING). After this
+        // and the foot-bbox-based XZ recenter below, each foot lands
+        // precisely on a stud center.
+        const footMeshesAtScale1: THREE.Mesh[] = [];
+        root.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (m.isMesh && FOOT_NAMES.has(m.name)) footMeshesAtScale1.push(m);
+        });
 
-        // Non-uniform scale: X & Z share one factor (preserving cross-section
-        // proportions); Y has its own factor so we can stretch the chibi
-        // GLB into a tall minifig regardless of its native aspect ratio.
-        const sx = size.x > 0 ? TARGET_BODY_X / size.x : 1;
-        const sy = size.y > 0 ? TARGET_BODY_Y / size.y : 1;
-        wrapper.scale.set(sx, sy, sx);
-        wrapper.updateMatrixWorld(true);
+        let scale = 1;
+        if (footMeshesAtScale1.length === 2) {
+          const b1 = new THREE.Box3().setFromObject(footMeshesAtScale1[0], true);
+          const b2 = new THREE.Box3().setFromObject(footMeshesAtScale1[1], true);
+          const c1 = (b1.min.x + b1.max.x) / 2;
+          const c2 = (b2.min.x + b2.max.x) / 2;
+          const spacing = Math.abs(c1 - c2);
+          if (spacing > 0) scale = TARGET_FOOT_SPACING / spacing;
+          console.log('[GLB] foot centers at scale 1:', c1, c2,
+                      'spacing=', spacing, '→ scale=', scale);
+        } else {
+          // Fallback: scale by body height if foot meshes weren't found
+          const beforeBox = fullBoundingBox(root);
+          const bodyHeight = beforeBox.max.y - beforeBox.min.y;
+          if (bodyHeight > 0) scale = FALLBACK_HEIGHT / bodyHeight;
+          console.log('[GLB] foot meshes not found, falling back to height-based scale:', scale);
+        }
 
-        // Re-bbox after scaling, then position so body bottom = FOOT_H
-        // (sits on top of the procedural feet) and center on XZ.
-        const bbox2 = new THREE.Box3().setFromObject(wrapper);
-        wrapper.position.x -= (bbox2.min.x + bbox2.max.x) / 2;
-        wrapper.position.y += FOOT_H - bbox2.min.y;
-        wrapper.position.z -= (bbox2.min.z + bbox2.max.z) / 2;
-        wrapper.updateMatrixWorld(true);
+        root.scale.setScalar(scale);
+        root.updateMatrixWorld(true);
 
-        const finalBox = new THREE.Box3().setFromObject(wrapper);
+        const afterScale = fullBoundingBox(root);
+        console.log('[GLB] after-scale bbox (full body):', afterScale.min, afterScale.max);
+
+        // XZ centering: use the FEET bbox, not the full body bbox.
+        // The full body is asymmetric (one arm wider than the other), so
+        // centering on it shifts the feet off the stud grid. Centering on
+        // the feet themselves keeps the feet aligned with stud centers.
+        // Y bottom: still uses the full body's lowest visible point so
+        // nothing pokes through the baseplate.
+        const footBox = namedBoundingBox(root, FOOT_NAMES);
+        console.log('[GLB] after-scale foot bbox:', footBox.min, footBox.max);
+        const xzPivot = !footBox.isEmpty() ? footBox : afterScale;
+
+        root.position.set(
+          -(xzPivot.min.x + xzPivot.max.x) / 2,
+          -afterScale.min.y,
+          -(xzPivot.min.z + xzPivot.max.z) / 2
+        );
+        root.updateMatrixWorld(true);
+
+        // Verify-and-correct: keep applying Y corrections until the
+        // bbox bottom converges to 0. Catches any drift in setFromObject.
+        for (let pass = 0; pass < 6; pass++) {
+          const box = fullBoundingBox(root);
+          if (Math.abs(box.min.y) < 0.001) break;
+          console.log(`[GLB] correction pass ${pass}: min.y=`, box.min.y);
+          root.position.y -= box.min.y;
+          root.updateMatrixWorld(true);
+        }
+
+        const finalBox = fullBoundingBox(root);
+        console.log('[GLB] final bbox:', finalBox.min, finalBox.max);
         characterTopY = finalBox.max.y;
-        characterBodyTemplate = wrapper;
+        characterTemplate = root;
         resolve();
       },
       undefined,
@@ -946,22 +1060,23 @@ export function loadCharacterModel(): Promise<void> {
   });
 }
 
-/** Total minifig height in world units (feet + body + space for a small
- *  hat). Used by Game for collision/eye height. Available after the GLB
- *  has been loaded. */
+/** Total minifig height in world units. Available after loadCharacterModel
+ *  resolves. Used by Game for collision/eye height. Returns 0 before the
+ *  GLB has finished loading. */
 export function getMinifigHeight(): number {
-  return characterTopY > 0 ? characterTopY + 0.6 : FOOT_H + TARGET_BODY_Y + 0.6;
+  return characterTopY;
 }
 
 /**
- * Creates a Lego minifigure: procedural 1×1 stud block feet at the bottom
- * + cloned GLB body on top + procedural hat. Origin at BOTTOM CENTER
- * (feet stand at y=0). Faces +Z. Footprint: 2 studs wide × 1 stud deep.
+ * Creates a Lego minifigure by cloning the loaded GLB scene unchanged.
+ * Origin at BOTTOM CENTER (feet stand at y=0). Faces +Z.
+ * Footprint: 2 studs wide × 1 stud deep (placement only — the visual
+ * model may be wider; that's expected for a minifig with arms/hat).
  *
  * `loadCharacterModel()` MUST be awaited before this is called.
  */
 export function createMinifigure(preset: MinifigPreset): THREE.Group {
-  if (!characterBodyTemplate) {
+  if (!characterTemplate) {
     throw new Error(
       'character model not loaded; call loadCharacterModel() and await it before createMinifigure()'
     );
@@ -969,26 +1084,9 @@ export function createMinifigure(preset: MinifigPreset): THREE.Group {
 
   const group = new THREE.Group();
 
-  // ---------- Procedural feet (1 stud × 1 stud each) ----------
-  const footMat = new THREE.MeshStandardMaterial({
-    color: preset.pantsHex,
-    roughness: 0.5,
-  });
-  const footGeom = new THREE.BoxGeometry(1.0, FOOT_H, 1.0);
-  const leftFoot = new THREE.Mesh(footGeom, footMat);
-  leftFoot.position.set(-0.5, FOOT_H / 2, 0);
-  leftFoot.castShadow = true;
-  leftFoot.receiveShadow = true;
-  group.add(leftFoot);
-
-  const rightFoot = new THREE.Mesh(footGeom, footMat);
-  rightFoot.position.set(0.5, FOOT_H / 2, 0);
-  rightFoot.castShadow = true;
-  rightFoot.receiveShadow = true;
-  group.add(rightFoot);
-
-  // ---------- GLB body (clone + per-instance materials) ----------
-  const body = characterBodyTemplate.clone(true);
+  // Deep clone the GLB scene + per-instance material clones, so each
+  // minifig can be recolored independently.
+  const body = characterTemplate.clone(true);
   body.traverse((c) => {
     const m = c as THREE.Mesh;
     if (!m.isMesh || !m.material) return;
@@ -999,53 +1097,55 @@ export function createMinifigure(preset: MinifigPreset): THREE.Group {
     }
   });
 
-  // Recolor by mesh name (best-guess mapping from GLB node inspection;
-  // fix here if visual inspection shows the wrong part is wearing a color):
-  //   Cube      → torso (shirt)
-  //   Cube.002  → arm   (shirt)
-  //   Cube.004  → arm   (shirt)
-  //   Cylinder  → head  (skin)
-  //   everything else → pants
-  const SHIRT_NAMES = new Set(['Cube', 'Cube.002', 'Cube.004']);
-  const SKIN_NAMES = new Set(['Cylinder']);
+  // Recolor by Blender-exported node name. The GLB's hierarchy (verified by
+  // dumping the glTF JSON) looks like this:
+  //   Cube.001      (y=4.17)           → hat      (cube perched on top)
+  //   Cylinder      (y=3.62)           → head     (short wide cylinder)
+  //   Cube          (y=2.73)           → torso    (main body block)
+  //   Cube.002      (y=3.10, x=+0.90)  → right arm
+  //     └ Cylinder.002                 → right hand (child of arm)
+  //   Cube.004      (y=3.10, x=-0.90)  → left arm
+  //     └ Cylinder.003                 → left hand  (child of arm)
+  //   BezierCurve / BezierCurve.001    → legs
+  //   everything else                  → shirt (default bucket)
+  //
+  // Hands need to be skin-colored (yellow by default), NOT shirt-colored —
+  // that's why they're called out explicitly below.
+  // GLTFLoader strips the dot from Blender names on some versions, so we
+  // normalize 'Cube.001' / 'Cube001' to match either form.
+  const legs: THREE.Mesh[] = [];
+  const skinHex = preset.headHex ?? 0xf5cd30;
+  const norm = (name: string) => name.replace(/\./g, '');
   body.traverse((c) => {
     const m = c as THREE.Mesh;
     if (!m.isMesh || !m.material) return;
     const mat = m.material as THREE.MeshStandardMaterial;
     if (!mat.color) return;
-    if (SHIRT_NAMES.has(m.name)) {
-      mat.color.setHex(preset.shirtHex);
-    } else if (SKIN_NAMES.has(m.name)) {
-      mat.color.setHex(preset.headHex ?? 0xf5cd30);
-    } else {
+    const n = norm(m.name);
+    if (n === 'Cube001') {
+      // Hat on top of head
+      mat.color.setHex(preset.hatColor ?? preset.shirtHex);
+    } else if (n === 'Cylinder') {
+      // Head — skin color
+      mat.color.setHex(skinHex);
+    } else if (n === 'Cylinder002' || n === 'Cylinder003') {
+      // Hands — skin color (same as head)
+      mat.color.setHex(skinHex);
+    } else if (n === 'BezierCurve' || n === 'BezierCurve001') {
+      // Legs — pants color
       mat.color.setHex(preset.pantsHex);
+      legs.push(m);
+    } else {
+      // Torso, arms, belt, etc. — shirt color
+      mat.color.setHex(preset.shirtHex);
     }
   });
 
   group.add(body);
-
-  // ---------- Hat ----------
-  const hat = createHat(preset.hatStyle, preset.hatColor ?? preset.shirtHex);
-  if (hat) {
-    hat.position.y = characterTopY;
-    group.add(hat);
-  } else {
-    // Default: a chunky cube hat (replaces the GLB's removed Cube.001).
-    const s = 1.0;
-    const cubeHat = new THREE.Mesh(
-      new THREE.BoxGeometry(s, s, s),
-      new THREE.MeshStandardMaterial({
-        color: preset.shirtHex,
-        roughness: 0.5,
-      })
-    );
-    cubeHat.position.y = characterTopY + s / 2;
-    cubeHat.castShadow = true;
-    group.add(cubeHat);
-  }
-
   group.userData.isBrick = true;
   group.userData.isMinifig = true;
+  // Expose part references for walk animation in play mode.
+  group.userData.parts = { legs };
   return group;
 }
 

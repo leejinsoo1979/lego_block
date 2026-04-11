@@ -1,11 +1,12 @@
 import {
   BLOCK_TYPES,
   BOARD_SIZES,
+  CATEGORIES,
   COLORS,
   MINIFIG_PRESETS,
   SIZES,
 } from './config';
-import type { BlockType, MinifigPreset } from './config';
+import type { BlockCategory, BlockType } from './config';
 import type { Game, Mode } from './game';
 import {
   renderBlockTypeThumbnail,
@@ -15,22 +16,64 @@ import {
 const THUMBNAIL_COLOR = 0xd4534a;
 
 export function buildUI(game: Game) {
-  // --- Play button ---
-  const playBtn = document.getElementById('play') as HTMLButtonElement;
+  const sidebar = document.getElementById('sidebar')!;
+
+  // --- Play buttons (PC sidebar + mobile drawer handle) ---
+  const playButtons = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('#play, #play-mobile')
+  );
   const playOverlay = document.getElementById('play-overlay')!;
+  const viewToggleFirst = document.getElementById(
+    'view-toggle-first'
+  ) as HTMLButtonElement;
+  const viewToggleThird = document.getElementById(
+    'view-toggle-third'
+  ) as HTMLButtonElement;
   const syncPlay = (playing: boolean) => {
-    playBtn.textContent = playing ? '■ 빌드로 돌아가기' : '▶ Play';
-    playBtn.classList.toggle('playing', playing);
+    playButtons.forEach((btn) => {
+      btn.textContent = playing ? '■ 빌드로 돌아가기' : '▶ Play';
+      btn.classList.toggle('playing', playing);
+    });
     playOverlay.classList.toggle('active', playing);
     document.body.classList.toggle('playing', playing);
+    // Auto-collapse the mobile drawer whenever play mode starts
+    if (playing) sidebar.classList.remove('expanded');
   };
-  playBtn.addEventListener('click', () => {
-    if (game.isPlaying) game.stopPlay();
-    else game.startPlay();
-    playBtn.blur(); // prevent Space from re-triggering the button during play
+  const syncViewMode = (mode: 'first' | 'third') => {
+    viewToggleFirst.classList.toggle('active', mode === 'first');
+    viewToggleThird.classList.toggle('active', mode === 'third');
+    playOverlay.classList.toggle('third-person', mode === 'third');
+  };
+  viewToggleFirst.addEventListener('click', () => {
+    game.setViewMode('first');
+    viewToggleFirst.blur();
+  });
+  viewToggleThird.addEventListener('click', () => {
+    game.setViewMode('third');
+    viewToggleThird.blur();
+  });
+  playButtons.forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't bubble up to drawer toggle handler
+      if (game.isPlaying) game.stopPlay();
+      else game.startPlay();
+      btn.blur(); // prevent Space from re-triggering the button during play
+    });
   });
   game.onPlayChange = syncPlay;
+  game.onViewModeChange = syncViewMode;
   syncPlay(game.isPlaying);
+  syncViewMode(game.viewMode);
+
+  // --- Mobile drawer toggle ---
+  // Tapping anywhere on the handle (except the play button itself) toggles
+  // the expand/collapse state of the bottom drawer.
+  const sidebarHandle = document.getElementById('sidebar-handle');
+  if (sidebarHandle) {
+    sidebarHandle.addEventListener('click', () => {
+      sidebar.classList.toggle('expanded');
+    });
+  }
 
   // --- Mode toggle ---
   const placeBtn = document.getElementById('mode-place') as HTMLButtonElement;
@@ -45,81 +88,146 @@ export function buildUI(game: Game) {
   game.onModeChange = syncMode;
   syncMode(game.mode);
 
-  // --- Block type ---
+  // --- Block library (tabs + filtered grid) ---
+  const tabsNav = document.getElementById('library-tabs')!;
   const typeGrid = document.getElementById('types')!;
+  const tabButtons = new Map<BlockCategory, HTMLButtonElement>();
   const typeButtons = new Map<BlockType, HTMLButtonElement>();
-
-  BLOCK_TYPES.forEach((t) => {
-    const btn = document.createElement('button');
-    btn.className = 'type-btn';
-    btn.dataset.type = t.type;
-
-    const img = document.createElement('img');
-    img.alt = t.label;
-    try {
-      img.src = renderBlockTypeThumbnail(t.type, THUMBNAIL_COLOR);
-    } catch {
-      /* fallback: no thumbnail */
-    }
-    btn.appendChild(img);
-
-    const label = document.createElement('span');
-    label.textContent = t.label;
-    btn.appendChild(label);
-
-    btn.addEventListener('click', () => game.setBlockType(t.type));
-    if (t.type === game.blockType) btn.classList.add('active');
-
-    typeGrid.appendChild(btn);
-    typeButtons.set(t.type, btn);
-  });
-
-  // --- Character picker (shown when minifig selected) ---
-  const charPanel = document.getElementById('characters-panel')!;
-  const charGrid = document.getElementById('characters')!;
   const charButtons = new Map<string, HTMLButtonElement>();
 
-  MINIFIG_PRESETS.forEach((preset) => {
-    const btn = document.createElement('button');
-    btn.className = 'character-btn';
-    btn.dataset.char = preset.id;
+  let activeCategory: BlockCategory =
+    BLOCK_TYPES.find((t) => t.type === game.blockType)?.category ?? 'basic';
 
-    const img = document.createElement('img');
-    img.alt = preset.name;
-    try {
-      img.src = renderMinifigPresetThumbnail(preset);
-    } catch {
-      /* fallback */
+  /** Renders the block / character grid for the given category. Reused
+   *  whenever the active tab or character preset changes. */
+  function renderGrid(cat: BlockCategory) {
+    typeGrid.innerHTML = '';
+    typeButtons.clear();
+    charButtons.clear();
+    typeGrid.classList.toggle('character-mode', cat === 'character');
+
+    if (cat === 'character') {
+      MINIFIG_PRESETS.forEach((preset) => {
+        const btn = document.createElement('button');
+        btn.className = 'type-btn character-btn';
+        btn.dataset.char = preset.id;
+
+        const img = document.createElement('img');
+        img.alt = preset.name;
+        try {
+          img.src = renderMinifigPresetThumbnail(preset);
+        } catch {
+          /* fallback */
+        }
+        btn.appendChild(img);
+
+        const label = document.createElement('span');
+        label.textContent = preset.name;
+        btn.appendChild(label);
+
+        btn.addEventListener('click', () => {
+          game.setBlockType('minifig');
+          game.setCharacter(preset);
+        });
+        if (preset.id === game.character.id) btn.classList.add('active');
+
+        typeGrid.appendChild(btn);
+        charButtons.set(preset.id, btn);
+      });
+    } else {
+      BLOCK_TYPES.filter((t) => t.category === cat).forEach((t) => {
+        const btn = document.createElement('button');
+        btn.className = 'type-btn';
+        btn.dataset.type = t.type;
+
+        const img = document.createElement('img');
+        img.alt = t.label;
+        try {
+          img.src = renderBlockTypeThumbnail(t.type, THUMBNAIL_COLOR);
+        } catch {
+          /* fallback: no thumbnail */
+        }
+        btn.appendChild(img);
+
+        const label = document.createElement('span');
+        label.textContent = t.label;
+        btn.appendChild(label);
+
+        btn.addEventListener('click', () => game.setBlockType(t.type));
+        if (t.type === game.blockType) btn.classList.add('active');
+
+        typeGrid.appendChild(btn);
+        typeButtons.set(t.type, btn);
+      });
     }
-    btn.appendChild(img);
+  }
 
-    const label = document.createElement('span');
-    label.textContent = preset.name;
-    btn.appendChild(label);
+  function setActiveCategory(cat: BlockCategory) {
+    activeCategory = cat;
+    tabButtons.forEach((btn, c) => btn.classList.toggle('active', c === cat));
+    renderGrid(cat);
+  }
 
-    btn.addEventListener('click', () => game.setCharacter(preset));
-    if (preset.id === game.character.id) btn.classList.add('active');
-
-    charGrid.appendChild(btn);
-    charButtons.set(preset.id, btn);
+  // Build tab buttons from CATEGORIES (order is meaningful)
+  CATEGORIES.forEach((cat) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn';
+    btn.dataset.category = cat.id;
+    btn.textContent = cat.label;
+    btn.addEventListener('click', () => {
+      if (activeCategory === cat.id) return;
+      setActiveCategory(cat.id);
+      // When entering a tab, auto-select its first member so the
+      // properties panel reflects something sensible.
+      if (cat.id === 'character') {
+        game.setBlockType('minifig');
+      } else {
+        const first = BLOCK_TYPES.find((t) => t.category === cat.id);
+        if (first) game.setBlockType(first.type);
+      }
+    });
+    tabsNav.appendChild(btn);
+    tabButtons.set(cat.id, btn);
   });
 
-  game.onCharacterChange = (preset) => {
-    charButtons.forEach((b, k) => b.classList.toggle('active', k === preset.id));
-  };
+  setActiveCategory(activeCategory);
 
+  // Disable color/size panels for blocks that don't honor them.
   const updateTypeVisibility = (type: BlockType) => {
+    const def = BLOCK_TYPES.find((t) => t.type === type);
     const isMinifig = type === 'minifig';
-    charPanel.classList.toggle('hidden', !isMinifig);
-    document.getElementById('color-panel')!.classList.toggle('disabled', isMinifig);
-    document.getElementById('size-panel')!.classList.toggle('disabled', isMinifig);
+    const fixedSize = !!def?.fixedSize;
+    document
+      .getElementById('color-panel')!
+      .classList.toggle('disabled', isMinifig);
+    document
+      .getElementById('size-panel')!
+      .classList.toggle('disabled', isMinifig || fixedSize);
   };
 
   game.onBlockTypeChange = (type) => {
+    // Auto-switch the tab if the new block lives in a different category
+    const def = BLOCK_TYPES.find((t) => t.type === type);
+    if (def && def.category !== activeCategory) {
+      setActiveCategory(def.category);
+    }
     typeButtons.forEach((b, k) => b.classList.toggle('active', k === type));
     updateTypeVisibility(type);
   };
+
+  game.onSelectionCleared = () => {
+    // Escape was pressed — drop active highlight from every type button
+    // so the user sees that nothing is selected. The internal blockType
+    // value is left alone; it'll re-activate the moment a button is clicked.
+    typeButtons.forEach((b) => b.classList.remove('active'));
+  };
   updateTypeVisibility(game.blockType);
+
+  game.onCharacterChange = (preset) => {
+    charButtons.forEach((b, k) =>
+      b.classList.toggle('active', k === preset.id)
+    );
+  };
 
   // --- Colors ---
   const colorRow = document.getElementById('colors')!;
@@ -195,8 +303,37 @@ export function buildUI(game: Game) {
     if (confirm('모든 블록을 지울까요?')) game.clearAll();
   });
 
-  const countEl = document.getElementById('count')!;
+  // Count is mirrored in the PC sidebar (#count, full "블록: N" label) and
+  // the mobile drawer handle pill (#count-mobile, just the number)
+  const countDesktop = document.getElementById('count');
+  const countMobile = document.getElementById('count-mobile');
   game.onCountChange = (count) => {
-    countEl.textContent = `블록: ${count}`;
+    if (countDesktop) countDesktop.textContent = `블록: ${count}`;
+    if (countMobile) countMobile.textContent = String(count);
   };
+
+  // --- Help popover toggle ---
+  const helpToggle = document.getElementById('help-toggle');
+  const helpClose = document.getElementById('help-close');
+  const helpPopover = document.getElementById('help-popover');
+  if (helpToggle && helpPopover) {
+    helpToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      helpPopover.classList.toggle('hidden');
+    });
+  }
+  if (helpClose && helpPopover) {
+    helpClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      helpPopover.classList.add('hidden');
+    });
+  }
+  // Click outside the popover closes it
+  document.addEventListener('click', (e) => {
+    if (!helpPopover || helpPopover.classList.contains('hidden')) return;
+    const target = e.target as Node;
+    if (helpPopover.contains(target)) return;
+    if (helpToggle && helpToggle.contains(target)) return;
+    helpPopover.classList.add('hidden');
+  });
 }

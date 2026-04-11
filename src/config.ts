@@ -1,10 +1,42 @@
-export const PLATE_HEIGHT = 0.4; // 1 Lego plate = 0.4 world units
-export const BRICK_PLATES = 3; // 1 brick = 3 plates (= 1.2 units)
+// ------------------------------------------------------------------
+//  Lego brick spec — official dimensions in world units.
+//
+//  We use 1 world unit = 1 stud pitch = 8.0 mm. Every other dimension
+//  below is the real Lego dimension (in mm) divided by 8.0, so the
+//  whole engine works in stud-pitch units while staying in proportion
+//  with real bricks.
+// ------------------------------------------------------------------
+
+/** Stud pitch — distance between stud centers. 8.0 mm in real Lego. */
+export const STUD_PITCH = 1.0;
+
+/** Plate height — 3.2 mm. (1 plate = 3.2 mm = 0.4 unit) */
+export const PLATE_HEIGHT = 0.4;
+/** A brick is exactly 3 plates tall = 9.6 mm = 1.2 units. */
+export const BRICK_PLATES = 3;
+/** Brick body height (3 plates). */
+export const BRICK_HEIGHT = BRICK_PLATES * PLATE_HEIGHT; // 1.2
+
+/** Stud diameter — 4.8 mm = 0.6 units. */
+export const STUD_DIAMETER = 0.6;
+export const STUD_RADIUS = STUD_DIAMETER / 2; // 0.3
+/** Stud height — 1.8 mm = 0.225 units. */
+export const STUD_HEIGHT = 0.225;
+
+/** Brick wall thickness — 1.5–1.6 mm ≈ 0.194 units. */
+export const WALL_THICKNESS = 0.194;
+
+/** Under-side cylindrical tube outer diameter — 6.51 mm ≈ 0.814 units. */
+export const TUBE_OUTER_DIAMETER = 0.814;
+export const TUBE_OUTER_RADIUS = TUBE_OUTER_DIAMETER / 2; // 0.407
+/** Under-side cylindrical tube inner diameter — 4.8 mm = 0.6 units. */
+export const TUBE_INNER_DIAMETER = 0.6;
+export const TUBE_INNER_RADIUS = TUBE_INNER_DIAMETER / 2; // 0.3
 
 export const GRID = {
-  X: 1, // stud width
+  X: STUD_PITCH, // stud pitch
   Y: PLATE_HEIGHT, // plate-sized vertical grid
-  Z: 1,
+  Z: STUD_PITCH,
 } as const;
 
 export const BOARD_SIZE = 40; // default 40x40 studs (legacy, used as default)
@@ -24,6 +56,8 @@ export const BOARD_SIZES: BoardSizePreset[] = [
 
 export type BlockType =
   | 'brick'
+  | 'tallbrick'
+  | 'wallpanel'
   | 'plate'
   | 'tile'
   | 'slope'
@@ -36,9 +70,26 @@ export type BlockType =
   | 'wheel'
   | 'minifig';
 
+export type BlockCategory = 'basic' | 'shape' | 'part' | 'character';
+
+export interface CategoryDef {
+  id: BlockCategory;
+  label: string;
+}
+
+/** Order here drives the tab order in the sidebar. */
+export const CATEGORIES: CategoryDef[] = [
+  { id: 'basic', label: '블록' },
+  { id: 'shape', label: '모양' },
+  { id: 'part', label: '부품' },
+  { id: 'character', label: '캐릭터' },
+];
+
 export interface BlockTypeDef {
   type: BlockType;
   label: string;
+  /** Which library tab the block lives under */
+  category: BlockCategory;
   /** Ghost preview height in plates (visual only; actual placement uses block geometry) */
   ghostHeightPlates: number;
   /** True body height in plates — used by collision/auto-stack math in game.ts */
@@ -50,18 +101,24 @@ export interface BlockTypeDef {
 }
 
 export const BLOCK_TYPES: BlockTypeDef[] = [
-  { type: 'brick', label: '벽돌', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: true },
-  { type: 'plate', label: '플레이트', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: true },
-  { type: 'tile', label: '타일', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: true },
-  { type: 'slope', label: '경사', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: true },
-  { type: 'arch', label: '아치', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
-  { type: 'round', label: '원형', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
-  { type: 'cone', label: '콘', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
-  { type: 'window', label: '창문', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 1 } },
-  { type: 'door', label: '문', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 2, d: 1 } },
-  { type: 'fence', label: '울타리', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
-  { type: 'wheel', label: '바퀴', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 2, d: 2 } },
-  { type: 'minifig', label: '사람', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
+  // 기본
+  { type: 'brick', label: '벽돌', category: 'basic', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: true },
+  { type: 'tallbrick', label: '높은 벽돌', category: 'basic', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: true },
+  { type: 'wallpanel', label: '벽 패널', category: 'basic', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: true },
+  { type: 'plate', label: '플레이트', category: 'basic', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: true },
+  { type: 'tile', label: '타일', category: 'basic', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: true },
+  // 모양
+  { type: 'slope', label: '경사', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: true },
+  { type: 'arch', label: '아치', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
+  { type: 'round', label: '원형', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'cone', label: '콘', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  // 부품
+  { type: 'window', label: '창문', category: 'part', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 1 } },
+  { type: 'door', label: '문', category: 'part', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 2, d: 1 } },
+  { type: 'fence', label: '울타리', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
+  { type: 'wheel', label: '바퀴', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 2, d: 2 } },
+  // 캐릭터
+  { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
 ];
 
 export interface ColorDef {
