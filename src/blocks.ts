@@ -1157,8 +1157,8 @@ function createLadderBlock(spec: BlockSpec): THREE.Group {
 function createSlideBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w; // 4
-  const d = spec.d; // 12
-  const h = 24 * PLATE_HEIGHT; // 9.6 units (~2× minifig)
+  const d = spec.d; // 16
+  const h = 18 * PLATE_HEIGHT; // 7.2 units
   const frameMat = studMaterial(spec.colorHex);
   const slideMat = new THREE.MeshStandardMaterial({
     color: 0xf5cd30, // bright yellow slide
@@ -1170,20 +1170,37 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
   const depth = d * GRID.Z;
   const panelT = 0.22; // side panel thickness
 
-  // Layout zones along Z. With d=12 the slide gets 7 stud of run for a
-  // gentler descent (~54° vs ~61° at d=9), and the stairs sit OUTSIDE
-  // the side panels so they're visible from every angle.
-  //   stairs   : -d/2 .. -d/2+4    (4 stud, 4 steps × 2.4u rise)
-  //   platform : -d/2+4 .. -d/2+5  (1 stud)
-  //   slide    : -d/2+5 .. d/2     (7 stud)
-  const numSteps = 4;
-  const stairsRunZ = 4;
+  // Layout zones along Z. d=16 + h=18 plates gives a much more gradual
+  // slide (~38° linear angle, smoothstep peak ~48°) and stairs that
+  // climb only 1 brick per step.
+  //   stairs   : -d/2 .. -d/2+6   (6 stud, 6 steps × 1.2u (1 brick) rise)
+  //   platform : -d/2+6 .. -d/2+7 (1 stud)
+  //   slide    : -d/2+7 .. d/2    (9 stud)
+  const numSteps = 6;
+  const stairsRunZ = 6;
   const platformDepth = 1;
-  const stepRise = h / numSteps; // 2.4u per step
+  const stepRise = h / numSteps; // 1.2u (1 brick) per step
   const z0 = -d / 2;
   const z1 = z0 + stairsRunZ; // front of stairs / back of platform
   const z2 = z1 + platformDepth; // front of platform / start of slide
   const z3 = d / 2; // front edge of slide
+
+  // Expose slide ride parameters on userData so game.ts can find a
+  // matching slide block under the player and compute the slide curve.
+  group.userData.slideParams = {
+    width,
+    depth,
+    height: h,
+    numSteps,
+    stairsRunZ,
+    platformDepth,
+    z0,
+    z1,
+    z2,
+    z3,
+    slideExitY: 0.4,
+    panelT,
+  };
 
   // ----- Slide curve points (smoothstep eased descent) -----
   const slideExitY = 0.4;
@@ -1199,17 +1216,15 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
   }
 
   // ----- Side panels (only PLATFORM + SLIDE area, leaving stairs
-  // exposed). Outline traces: back-of-platform-bottom → up the back of
-  // the platform → over the railing → down to platform deck → along the
-  // slide curve → down to the front exit → back along the bottom. -----
-  const railingExtra = 0.8;
+  // exposed). Outline traces: back-of-platform-bottom → straight up
+  // the platform back → across the platform top → down the slide
+  // curve to the front exit → back along the bottom. No railing
+  // protrusion above the platform. -----
   const panelShape = new THREE.Shape();
   panelShape.moveTo(z1, 0); // back of platform, on the ground
-  panelShape.lineTo(z1, h + railingExtra); // up the back of the railing
-  panelShape.lineTo(z2, h + railingExtra); // top edge of railing
-  panelShape.lineTo(z2, h); // drop to platform deck level
-  // Slide curve from platform front edge to slide exit
-  for (let i = 1; i < curvePts.length; i++) {
+  panelShape.lineTo(z1, h); // up to platform top
+  // Slide curve from platform front edge down to slide exit
+  for (let i = 0; i < curvePts.length; i++) {
     panelShape.lineTo(curvePts[i].z, curvePts[i].y);
   }
   panelShape.lineTo(z3, 0); // front-bottom
@@ -1256,17 +1271,8 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
   platform.receiveShadow = true;
   group.add(platform);
 
-  // ----- Back wall behind the platform (closes off the platform back so
-  // the railing has something to lean against). Sits at z=z1, between
-  // the side panels. -----
-  const backWall = new THREE.Mesh(
-    new THREE.BoxGeometry(innerW, railingExtra + 0.4, panelT),
-    frameMat
-  );
-  backWall.position.set(0, h + railingExtra / 2 - 0.2, z1 + panelT / 2);
-  backWall.castShadow = true;
-  backWall.receiveShadow = true;
-  group.add(backWall);
+  // (No back wall — the topmost stair already reaches y=h, which is
+  // exactly the platform top, so the platform back has no gap to close.)
 
   // ----- Curved slide deck (yellow), extruded along world X (width) -----
   const slabT = 0.24;

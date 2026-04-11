@@ -1,10 +1,18 @@
+import dogBarkUrl from './sounds/dog-bark.mp3?url';
+
 /**
- * Synthesizes a short "Lego click" snap sound via Web Audio API,
- * so no external audio files are required.
+ * Synthesizes short UI sounds via Web Audio API. One-shot sample
+ * playback (currently just the dog bark) is supported as well — the
+ * sample is fetched once, decoded, and cached; each `playBark()` call
+ * creates a fresh `AudioBufferSourceNode` so overlapping plays work.
  */
 export class SoundManager {
   private ctx: AudioContext | null = null;
   enabled = true;
+  /** Decoded dog-bark sample, or null until the fetch/decode resolves. */
+  private barkBuffer: AudioBuffer | null = null;
+  /** True once we've kicked off the fetch — avoids racing multiple loads. */
+  private barkLoadStarted = false;
 
   private ensureContext(): AudioContext | null {
     if (!this.ctx) {
@@ -19,6 +27,25 @@ export class SoundManager {
       this.ctx.resume();
     }
     return this.ctx;
+  }
+
+  /** Fetches and decodes the dog-bark MP3 the first time it's called.
+   *  Subsequent calls are no-ops. */
+  private loadBarkSample() {
+    if (this.barkBuffer || this.barkLoadStarted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    this.barkLoadStarted = true;
+    fetch(dogBarkUrl)
+      .then((r) => r.arrayBuffer())
+      .then((buf) => ctx.decodeAudioData(buf))
+      .then((audio) => {
+        this.barkBuffer = audio;
+      })
+      .catch((err) => {
+        console.warn('[SoundManager] failed to load dog bark sample:', err);
+        this.barkLoadStarted = false; // allow a retry
+      });
   }
 
   /**
@@ -157,65 +184,32 @@ export class SoundManager {
   }
 
   /**
-   * A single "woof!" bark — a low pitched transient blended with a
-   * filtered noise burst. Short enough to layer several in quick
-   * succession for multiple dogs.
+   * Plays the dog bark sample (`src/sounds/dog-bark.mp3`). Each call
+   * creates a fresh `AudioBufferSourceNode` so multiple dogs can bark
+   * simultaneously without clipping each other. The sample is lazily
+   * loaded on the first call and cached thereafter. If the fetch/decode
+   * is still in flight, the call is silently dropped.
    */
   playBark() {
     if (!this.enabled) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
-
-    const now = ctx.currentTime;
-    const dur = 0.22;
-
-    // Pitched body — a sawtooth swept downward ≈ dog throat growl.
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(260, now);
-    osc.frequency.exponentialRampToValueAtTime(120, now + dur);
-
-    // Low-pass to warm it and kill the buzzy top of the saw.
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(1400, now);
-    lp.frequency.exponentialRampToValueAtTime(350, now + dur);
-    lp.Q.value = 1.1;
-
-    const oscGain = ctx.createGain();
-    // "Woo-f" shape: fast rise, short sustain, quick cut.
-    oscGain.gain.setValueAtTime(0.0001, now);
-    oscGain.gain.linearRampToValueAtTime(0.35, now + 0.02);
-    oscGain.gain.setValueAtTime(0.35, now + 0.06);
-    oscGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-
-    osc.connect(lp);
-    lp.connect(oscGain);
-    oscGain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + dur + 0.02);
-
-    // Breath/tongue noise burst on top of the pitched body.
-    const noiseLen = Math.floor(dur * ctx.sampleRate);
-    const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
-    const data = noiseBuf.getChannelData(0);
-    for (let i = 0; i < noiseLen; i++) {
-      const env = Math.pow(1 - i / noiseLen, 2);
-      data[i] = (Math.random() * 2 - 1) * env;
+    // Kick off the load on first use (requires an already-unlocked
+    // AudioContext on most browsers — guaranteed because every play
+    // mode entry is behind a user click).
+    if (!this.barkBuffer) {
+      this.loadBarkSample();
+      return; // sample not ready yet
     }
-    const noise = ctx.createBufferSource();
-    noise.buffer = noiseBuf;
-    const noiseBp = ctx.createBiquadFilter();
-    noiseBp.type = 'bandpass';
-    noiseBp.frequency.value = 900;
-    noiseBp.Q.value = 0.8;
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.18, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-    noise.connect(noiseBp);
-    noiseBp.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
-    noise.start(now);
-    noise.stop(now + dur + 0.02);
+    const source = ctx.createBufferSource();
+    source.buffer = this.barkBuffer;
+    // Slight per-play pitch variation (±6%) so multiple dogs don't all
+    // sound like a single echo.
+    source.playbackRate.value = 0.94 + Math.random() * 0.12;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.65;
+    source.connect(gain);
+    gain.connect(ctx.destination);
+    source.start();
   }
 }

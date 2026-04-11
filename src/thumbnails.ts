@@ -222,11 +222,12 @@ export function renderBlockTypeThumbnail(
     //  Playground modules
     // ------------------------------------------------------------------
     case 'slide':
-      // 4×12×9.6 — long slide with 4-step staircase (exposed at the back)
-      // and a 7-stud-long curved ramp. Side-on 3/4 view shows both the
-      // stairs and the slide profile clearly.
-      camera!.position.set(15, 9, 18);
-      camera!.lookAt(0, 4.4, 0);
+      // 4×16×7.2 — long gradual slide with 6-step staircase (exposed
+      // at the back, 1 brick rise per step) and a 9-stud-long curved
+      // ramp at ~38°. Side-on 3/4 view shows both the stairs and the
+      // slide profile clearly.
+      camera!.position.set(17, 10, 20);
+      camera!.lookAt(0, 3.4, 0);
       break;
     case 'swing':
       // 8×3×9.6 — wide A-frame with 3 swings. Head-on view, pulled

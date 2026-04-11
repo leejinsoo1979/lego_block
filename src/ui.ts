@@ -66,6 +66,24 @@ export function buildUI(game: Game) {
   syncPlay(game.isPlaying);
   syncViewMode(game.viewMode);
 
+  // --- Dog whistle button (only visible in play mode with dogs) ---
+  const dogWhistleBtn = document.getElementById(
+    'dog-whistle'
+  ) as HTMLButtonElement | null;
+  if (dogWhistleBtn) {
+    dogWhistleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      game.whistleDogs();
+      dogWhistleBtn.blur();
+    });
+    game.onDogsPresentChange = (present) => {
+      dogWhistleBtn.classList.toggle('hidden', !present);
+    };
+    game.onDogsFollowingChange = (following) => {
+      dogWhistleBtn.classList.toggle('active', following);
+    };
+  }
+
   // --- Mobile drawer toggle ---
   // Tapping anywhere on the handle (except the play button itself) toggles
   // the expand/collapse state of the bottom drawer.

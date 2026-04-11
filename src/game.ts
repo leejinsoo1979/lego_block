@@ -163,6 +163,13 @@ export class Game {
   private npcPromptLabelEl: HTMLElement | null = null;
   private npcBubbleEl: HTMLElement | null = null;
   private npcBubbleTextEl: HTMLElement | null = null;
+  /** When the player is currently riding a slide, this holds the slide's
+   *  root group + the player's progress along the slide's local Z axis.
+   *  Null when not on a slide. The slide ride mechanic locks the player
+   *  to the slide curve and overrides normal physics until they reach
+   *  the slide's exit. */
+  private slideRideObj: THREE.Object3D | null = null;
+  private slideRideLocalZ = 0;
   private playerPos = new THREE.Vector3(0, 0, 15);
   private playerVel = new THREE.Vector3();
   private onGround = false;
@@ -1284,6 +1291,12 @@ export class Game {
               this.interactWithCurrentNpc();
             }
           }
+          break;
+        case 'Digit9':
+          // "9" key toggles the dog whistle (same action as the HUD
+          // button). Plays the whistle sound regardless so it still
+          // feels responsive when no dogs are on the board.
+          if (!e.repeat) this.whistleDogs();
           break;
         case 'Escape':
           this.stopPlay();
@@ -2490,6 +2503,10 @@ export class Game {
     this.dogsFollowing = false;
     this.onDogsPresentChange(hasDog);
     this.onDogsFollowingChange(false);
+    // Kick off the dog-bark sample load early so the first real bark
+    // doesn't drop while the fetch/decode is in flight. This call makes
+    // no sound — playBark() bails out until the buffer is ready.
+    if (hasDog) this.sound.playBark();
   }
 
   stopPlay() {

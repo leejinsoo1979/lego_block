@@ -237,7 +237,7 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   // water.
   { type: 'bridge', label: '교량', category: 'special', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 6, d: 44 } },
   // 놀이터 — sizes scaled to ~2× minifig height (minifig is 4.8 units tall)
-  { type: 'slide', label: '미끄럼틀', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 4, d: 12 } },
+  { type: 'slide', label: '미끄럼틀', category: 'playground', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 4, d: 16 } },
   { type: 'swing', label: '그네', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 8, d: 3 } },
   { type: 'seesaw', label: '시소', category: 'playground', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 10, d: 3 } },
   { type: 'junglegym', label: '정글짐', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 5, d: 5 } },
