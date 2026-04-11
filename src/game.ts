@@ -324,16 +324,31 @@ export class Game {
     return group;
   }
 
-  /** Match the shadow frustum to the current baseplate so large maps
-   *  still receive crisp shadows. */
+  /** Match the shadow frustum to the union of every placed baseplate tile
+   *  so large multi-tile maps still receive crisp shadows. */
   private updateSunShadowBounds() {
     if (!this.sunLight) return;
-    const s = this.boardSize / 2 + 5;
+    let minX = -this.tileSize / 2;
+    let maxX = this.tileSize / 2;
+    let minZ = -this.tileSize / 2;
+    let maxZ = this.tileSize / 2;
+    for (const tile of this.baseplates.values()) {
+      const cx = tile.position.x;
+      const cz = tile.position.z;
+      const half = this.tileSize / 2;
+      if (cx - half < minX) minX = cx - half;
+      if (cx + half > maxX) maxX = cx + half;
+      if (cz - half < minZ) minZ = cz - half;
+      if (cz + half > maxZ) maxZ = cz + half;
+    }
+    const cx = (minX + maxX) / 2;
+    const cz = (minZ + maxZ) / 2;
+    const halfSpan = Math.max(maxX - minX, maxZ - minZ) / 2 + 8;
     const cam = this.sunLight.shadow.camera;
-    cam.left = -s;
-    cam.right = s;
-    cam.top = s;
-    cam.bottom = -s;
+    cam.left = cx - halfSpan;
+    cam.right = cx + halfSpan;
+    cam.top = cz + halfSpan;
+    cam.bottom = cz - halfSpan;
     cam.updateProjectionMatrix();
   }
 
@@ -868,7 +883,7 @@ export class Game {
   } | null {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObjects(
-      [this.baseplate, this.brickGroup],
+      [...this.baseplates.values(), this.brickGroup],
       true
     );
     if (hits.length === 0) return null;
@@ -910,11 +925,13 @@ export class Game {
     const x = this.snapXZ(pt.x, w);
     const z = this.snapXZ(pt.z, d);
 
-    const half = this.boardSize / 2;
+    // The footprint must be entirely covered by some baseplate at this Y
+    // (or by the column of an existing brick — in that case the auto-stack
+    // loop below handles it). For now, just require that the (x, z) center
+    // sits over a baseplate tile.
     const bw = w / 2;
     const bd = d / 2;
-    if (x - bw < -half || x + bw > half) return null;
-    if (z - bd < -half || z + bd > half) return null;
+    if (!this.isFootprintOnBaseplate(x, z, bw, bd)) return null;
 
     // Auto-stack: if the placement footprint overlaps an existing block,
     // raise bottomY to sit on top of it. Loop until the candidate is clear,

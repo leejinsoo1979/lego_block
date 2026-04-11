@@ -127,8 +127,14 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 2.4, 0);
       break;
     case 'stairs':
-      // 4×2×4.8 — 3/4 view angled so the step profile is visible.
-      camera!.position.set(8, 5.5, 8);
+      // 4×2×4.8 — the step profile only reads from a ±Z side view. A
+      // 3/4 view from +X/+Z compresses the step silhouette into a diagonal
+      // and stops looking like stairs. Camera sits on the -Z side with a
+      // small +X offset: world +X → screen right, so the staircase rises
+      // left-to-right (natural reading direction). The -Z face is nearest
+      // and shows every step's height clearly. Slight Y elevation also
+      // reveals the stud rows on each step's top.
+      camera!.position.set(2, 5, -11);
       camera!.lookAt(0, 2.4, 0);
       break;
     case 'column':
