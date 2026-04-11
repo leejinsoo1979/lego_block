@@ -1157,7 +1157,7 @@ function createLadderBlock(spec: BlockSpec): THREE.Group {
 function createSlideBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w; // 4
-  const d = spec.d; // 9
+  const d = spec.d; // 12
   const h = 24 * PLATE_HEIGHT; // 9.6 units (~2× minifig)
   const frameMat = studMaterial(spec.colorHex);
   const slideMat = new THREE.MeshStandardMaterial({
@@ -1170,22 +1170,24 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
   const depth = d * GRID.Z;
   const panelT = 0.22; // side panel thickness
 
-  // Layout zones along Z:
-  //   stairs   : -d/2 .. -d/2+4   (4 stud, 4 steps)
-  //   platform : -d/2+4 .. -d/2+5 (1 stud)
-  //   slide    : -d/2+5 .. d/2    (4 stud)
+  // Layout zones along Z. With d=12 the slide gets 7 stud of run for a
+  // gentler descent (~54° vs ~61° at d=9), and the stairs sit OUTSIDE
+  // the side panels so they're visible from every angle.
+  //   stairs   : -d/2 .. -d/2+4    (4 stud, 4 steps × 2.4u rise)
+  //   platform : -d/2+4 .. -d/2+5  (1 stud)
+  //   slide    : -d/2+5 .. d/2     (7 stud)
   const numSteps = 4;
   const stairsRunZ = 4;
   const platformDepth = 1;
-  const stepRise = h / numSteps; // 2.4u per step (~half minifig)
+  const stepRise = h / numSteps; // 2.4u per step
   const z0 = -d / 2;
-  const z1 = z0 + stairsRunZ; // front of stairs
-  const z2 = z1 + platformDepth; // front of platform = start of slide
+  const z1 = z0 + stairsRunZ; // front of stairs / back of platform
+  const z2 = z1 + platformDepth; // front of platform / start of slide
   const z3 = d / 2; // front edge of slide
 
   // ----- Slide curve points (smoothstep eased descent) -----
   const slideExitY = 0.4;
-  const segments = 22;
+  const segments = 24;
   const curvePts: { z: number; y: number }[] = [];
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
@@ -1196,22 +1198,22 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
     });
   }
 
-  // ----- Side panels (one on -X, one on +X) -----
-  // Outline (CCW) traces: back-bottom → up the back wall → over the
-  // platform railing → down to platform deck → along the slide curve
-  // → down to the front exit → back to the back-bottom.
-  const railingExtra = 0.7; // railing height above platform deck
+  // ----- Side panels (only PLATFORM + SLIDE area, leaving stairs
+  // exposed). Outline traces: back-of-platform-bottom → up the back of
+  // the platform → over the railing → down to platform deck → along the
+  // slide curve → down to the front exit → back along the bottom. -----
+  const railingExtra = 0.8;
   const panelShape = new THREE.Shape();
-  panelShape.moveTo(z0, 0); // back-bottom
-  panelShape.lineTo(z0, h + railingExtra); // back-top of railing
-  panelShape.lineTo(z2, h + railingExtra); // top of railing, going forward
-  panelShape.lineTo(z2, h); // step down to platform deck
-  // Slide curve top edge (from platform front down to slide exit)
+  panelShape.moveTo(z1, 0); // back of platform, on the ground
+  panelShape.lineTo(z1, h + railingExtra); // up the back of the railing
+  panelShape.lineTo(z2, h + railingExtra); // top edge of railing
+  panelShape.lineTo(z2, h); // drop to platform deck level
+  // Slide curve from platform front edge to slide exit
   for (let i = 1; i < curvePts.length; i++) {
     panelShape.lineTo(curvePts[i].z, curvePts[i].y);
   }
-  panelShape.lineTo(z3, 0); // down to front-bottom
-  panelShape.closePath();
+  panelShape.lineTo(z3, 0); // front-bottom
+  panelShape.closePath(); // back along the bottom to (z1, 0)
 
   const panelGeom = new THREE.ExtrudeGeometry(panelShape, {
     depth: panelT,
@@ -1228,12 +1230,12 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
     group.add(panel);
   }
 
-  // ----- 4 stair boxes (between the side panels) -----
-  const innerW = width - 2 * panelT - 0.04;
+  // ----- 4 stair boxes (FULL width since no side panels in the stair
+  // zone). Each step is a stacked box from y=0 up to its top y. -----
   for (let i = 0; i < numSteps; i++) {
     const stepTopY = (i + 1) * stepRise;
     const step = new THREE.Mesh(
-      new THREE.BoxGeometry(innerW, stepTopY, GRID.Z),
+      new THREE.BoxGeometry(width - 0.05, stepTopY, GRID.Z),
       frameMat
     );
     step.position.set(0, stepTopY / 2, z0 + 0.5 + i);
@@ -1242,7 +1244,8 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
     group.add(step);
   }
 
-  // ----- Platform tile (flat slab at top, between the panels) -----
+  // ----- Platform tile (flat slab at top, between the side panels) -----
+  const innerW = width - 2 * panelT - 0.04;
   const platformT = 0.3;
   const platform = new THREE.Mesh(
     new THREE.BoxGeometry(innerW, platformT, platformDepth * GRID.Z),
@@ -1253,18 +1256,20 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
   platform.receiveShadow = true;
   group.add(platform);
 
-  // ----- Back wall (closes off the back of the platform area) -----
+  // ----- Back wall behind the platform (closes off the platform back so
+  // the railing has something to lean against). Sits at z=z1, between
+  // the side panels. -----
   const backWall = new THREE.Mesh(
-    new THREE.BoxGeometry(innerW, h + railingExtra, panelT),
+    new THREE.BoxGeometry(innerW, railingExtra + 0.4, panelT),
     frameMat
   );
-  backWall.position.set(0, (h + railingExtra) / 2, z0 + panelT / 2);
+  backWall.position.set(0, h + railingExtra / 2 - 0.2, z1 + panelT / 2);
   backWall.castShadow = true;
   backWall.receiveShadow = true;
   group.add(backWall);
 
   // ----- Curved slide deck (yellow), extruded along world X (width) -----
-  const slabT = 0.22;
+  const slabT = 0.24;
   const slideW = innerW;
   const slideShape = new THREE.Shape();
   slideShape.moveTo(curvePts[0].z, curvePts[0].y);
@@ -1406,110 +1411,145 @@ function createSwingBlock(spec: BlockSpec): THREE.Group {
 //  on each end. The whole "plank assembly" is a single child group so
 //  the rotation cleanly tilts the plank, seats, and handles together.
 // ------------------------------------------------------------------
+// ------------------------------------------------------------------
+//  Seesaw — two side posts hold a horizontal axle bar; the plank is
+//  balanced on the axle with seats and back-handles at each end.
+// ------------------------------------------------------------------
 function createSeesawBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w; // 10
   const d = spec.d; // 3
   const material = studMaterial(spec.colorHex);
   const plankMat = new THREE.MeshStandardMaterial({
-    color: 0xc4281c,
+    color: 0xc4281c, // bright red plank
     roughness: 0.5,
   });
   const seatMat = new THREE.MeshStandardMaterial({
-    color: 0x0d69ac,
+    color: 0x0d69ac, // bright blue seats
     roughness: 0.5,
   });
 
   const width = w * GRID.X;
   const depth = d * GRID.Z;
 
-  // ----- Curved fulcrum: half-cylinder lying on its side -----
-  // CylinderGeometry with thetaStart=0, thetaLength=π builds a half
-  // cylinder bulging in the +Z direction (default Y-axis up). Rotating
-  // by -π/2 around X re-orients the half-cylinder so its central axis
-  // runs along world Z (the seesaw's depth direction), the flat cut
-  // surface lies in the y=0 plane (sits on the ground), and the curved
-  // bulge points straight up along +Y.
-  const fulcrumR = 0.95;
-  const fulcrumLen = depth - 0.4;
-  const fulcrumGeom = new THREE.CylinderGeometry(
-    fulcrumR,
-    fulcrumR,
-    fulcrumLen,
-    24,
-    1,
-    false,
-    0,
-    Math.PI
-  );
-  fulcrumGeom.rotateX(-Math.PI / 2);
-  fulcrumGeom.computeVertexNormals();
-  const fulcrum = new THREE.Mesh(fulcrumGeom, material);
-  fulcrum.position.set(0, 0, 0);
-  fulcrum.castShadow = true;
-  fulcrum.receiveShadow = true;
-  group.add(fulcrum);
+  // ----- Two A-frame side posts holding the axle -----
+  // Each "post" is a small triangular wedge prism standing at z = ±zPost,
+  // tapering up to support the axle bar.
+  const postZ = depth / 2 - 0.4;
+  const postBaseW = 0.7;
+  const postH = 1.4;
+  const postT = 0.3;
 
-  // Two base supports under the fulcrum to anchor it visually.
+  // Triangle (base wide, apex narrow at top) in shape XY
+  const postShape = new THREE.Shape();
+  postShape.moveTo(-postBaseW / 2, 0);
+  postShape.lineTo(postBaseW / 2, 0);
+  postShape.lineTo(0.12, postH);
+  postShape.lineTo(-0.12, postH);
+  postShape.closePath();
+  const postGeom = new THREE.ExtrudeGeometry(postShape, {
+    depth: postT,
+    bevelEnabled: false,
+  });
+  postGeom.translate(0, 0, -postT / 2);
+  postGeom.computeVertexNormals();
   for (const sz of [-1, 1]) {
-    const support = new THREE.Mesh(
-      new THREE.BoxGeometry(fulcrumR * 1.7, 0.22, 0.4),
-      material
-    );
-    support.position.set(0, 0.11, sz * (fulcrumLen / 2 - 0.15));
-    support.castShadow = true;
-    support.receiveShadow = true;
-    group.add(support);
+    const post = new THREE.Mesh(postGeom.clone(), material);
+    post.position.set(0, 0, sz * postZ);
+    post.castShadow = true;
+    post.receiveShadow = true;
+    group.add(post);
   }
 
-  // ----- Plank assembly (sub-group that rotates as a unit) -----
+  // ----- Axle bar (horizontal, between the two post tops) -----
+  const axleR = 0.14;
+  const axleLen = 2 * postZ + 0.4;
+  const axle = new THREE.Mesh(
+    new THREE.CylinderGeometry(axleR, axleR, axleLen, 14),
+    material
+  );
+  axle.rotation.x = Math.PI / 2; // align Y-axis cylinder along Z
+  axle.position.set(0, postH, 0);
+  axle.castShadow = true;
+  group.add(axle);
+
+  // ----- Plank assembly (rotates around Z as a unit, balanced on the axle) -----
   const plankGroup = new THREE.Group();
-  const plankY = fulcrumR;
-  plankGroup.position.set(0, plankY, 0);
-  plankGroup.rotation.z = -0.14;
+  plankGroup.position.set(0, postH + axleR, 0);
+  plankGroup.rotation.z = -0.14; // gentle tilt (~8°)
   group.add(plankGroup);
 
-  // Long plank
+  // Long red plank
   const plankLen = width - 0.5;
-  const plankD = 1.3;
+  const plankD = 1.4;
+  const plankT = 0.3;
   const plank = new THREE.Mesh(
-    new THREE.BoxGeometry(plankLen, 0.28, plankD),
+    new THREE.BoxGeometry(plankLen, plankT, plankD),
     plankMat
   );
-  plank.position.y = 0.14;
+  plank.position.y = plankT / 2;
   plank.castShadow = true;
   plank.receiveShadow = true;
   plankGroup.add(plank);
 
-  // Seat pads + handles at each end of the plank (sized for a minifig
-  // who's 2 stud wide × 1 stud deep — pad needs to actually fit them).
-  for (const sx of [-1, 1]) {
-    const endX = sx * (plankLen / 2 - 0.7);
+  // ----- Saddle (small block under the plank center, hugs the axle so
+  // the visual reads as "plank attached to axle") -----
+  const saddle = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55, 0.25, plankD - 0.1),
+    material
+  );
+  saddle.position.y = -0.12;
+  plankGroup.add(saddle);
 
-    // Seat pad
+  // ----- Seats with backrests at each end of the plank -----
+  for (const sx of [-1, 1]) {
+    const endX = sx * (plankLen / 2 - 0.85);
+
+    // Seat pad (blue)
     const pad = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 0.12, 1.0),
+      new THREE.BoxGeometry(1.4, 0.16, 1.1),
       seatMat
     );
-    pad.position.set(endX, 0.34, 0);
+    pad.position.set(endX, plankT + 0.08, 0);
     pad.castShadow = true;
     plankGroup.add(pad);
 
-    // Vertical handle post
+    // Backrest at the END of the plank (the outermost side)
+    const backrest = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.95, 1.1),
+      seatMat
+    );
+    backrest.position.set(
+      endX + sx * 0.65,
+      plankT + 0.16 + 0.475,
+      0
+    );
+    backrest.castShadow = true;
+    plankGroup.add(backrest);
+
+    // Vertical handle post at the seat (between minifig's hands)
     const handlePost = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 1.0, 0.14),
+      new THREE.BoxGeometry(0.16, 1.1, 0.16),
       material
     );
-    handlePost.position.set(endX, 0.9, 0);
+    handlePost.position.set(
+      endX - sx * 0.65,
+      plankT + 0.16 + 0.55,
+      0
+    );
     handlePost.castShadow = true;
     plankGroup.add(handlePost);
 
     // Horizontal grip bar at the top of the post
     const handleGrip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.14, 0.7),
+      new THREE.BoxGeometry(0.16, 0.16, 0.85),
       material
     );
-    handleGrip.position.set(endX, 1.34, 0);
+    handleGrip.position.set(
+      endX - sx * 0.65,
+      plankT + 0.16 + 1.05,
+      0
+    );
     handleGrip.castShadow = true;
     plankGroup.add(handleGrip);
   }
@@ -1518,24 +1558,30 @@ function createSeesawBlock(spec: BlockSpec): THREE.Group {
 }
 
 // ------------------------------------------------------------------
-//  Jungle gym — 4 corner posts, 6 levels of climbing rungs on every
-//  side, a flat top platform with raised guard rails, and diagonal
-//  cross-bracing on two sides.
+//  Jungle gym — 4 corner posts hold a railed top platform. The back
+//  side is a SOLID climbing wall with grip holes; the left side has
+//  ladder rungs for climbing; the front and right sides have railings
+//  with one open entry/exit. A flag on top adds character.
 // ------------------------------------------------------------------
 function createJungleGymBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w; // 5
   const d = spec.d; // 5
-  // 24 plates (= 9.6 units) tall — 2× minifig so they can climb up
-  // multiple levels and reach the platform. Keep in sync with
-  // bodyHeightPlates in config.ts.
-  const h = 24 * PLATE_HEIGHT;
+  const h = 24 * PLATE_HEIGHT; // 9.6 units (~2× minifig)
   const material = studMaterial(spec.colorHex);
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: 0xf5cd30, // yellow climbing wall (color contrast)
+    roughness: 0.55,
+  });
+  const flagMat = new THREE.MeshStandardMaterial({
+    color: 0xc4281c, // red flag
+    roughness: 0.6,
+  });
 
   const width = w * GRID.X;
   const depth = d * GRID.Z;
-  const postT = 0.28;
-  const barT = 0.16;
+  const postT = 0.32;
+  const wallT = 0.22;
 
   // ----- 4 vertical corner posts -----
   for (const sx of [-1, 1]) {
@@ -1555,54 +1601,70 @@ function createJungleGymBlock(spec: BlockSpec): THREE.Group {
     }
   }
 
-  // ----- Horizontal climbing rungs at 8 evenly-spaced levels.
-  // The top level coincides with the platform top. With 9.6u of height
-  // 8 rungs gives ~1.2u (1 brick) spacing — proper minifig climb step. -----
-  const levels: number[] = [];
-  const numLevels = 8;
-  for (let i = 1; i <= numLevels; i++) {
-    levels.push((h * i) / numLevels - 0.08);
+  // ----- SOLID climbing wall at -Z side (yellow with grip studs) -----
+  // The wall fills the area between the two -Z corner posts, from y=0
+  // up to y=h. Grip studs (small spheres) are scattered in a grid for
+  // climb-hold visual.
+  const wallW = width - 2 * postT - 0.04;
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(wallW, h, wallT),
+    wallMat
+  );
+  wall.position.set(0, h / 2, -depth / 2 + postT + wallT / 2);
+  wall.castShadow = true;
+  wall.receiveShadow = true;
+  group.add(wall);
+
+  // Climb grip studs scattered on the back wall
+  const gripMat = new THREE.MeshStandardMaterial({
+    color: 0xc4281c,
+    roughness: 0.5,
+  });
+  const gripGridX = 3;
+  const gripGridY = 5;
+  for (let gx = 0; gx < gripGridX; gx++) {
+    for (let gy = 0; gy < gripGridY; gy++) {
+      const px =
+        -wallW / 2 +
+        (wallW / (gripGridX + 1)) * (gx + 1) +
+        (gy % 2 === 0 ? 0 : 0.25);
+      const py = (h / (gripGridY + 1)) * (gy + 1);
+      const grip = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 10, 8),
+        gripMat
+      );
+      grip.position.set(
+        px,
+        py,
+        -depth / 2 + postT + wallT + 0.04
+      );
+      grip.castShadow = true;
+      group.add(grip);
+    }
   }
 
-  for (const y of levels) {
-    // -X side bar (along Z)
-    const barXL = new THREE.Mesh(
-      new THREE.BoxGeometry(barT, barT, depth - postT),
+  // ----- Ladder rungs on the -X side (between back-left and front-left
+  // corner posts). 7 horizontal rungs spanning the depth. -----
+  const numRungs = 7;
+  for (let i = 0; i < numRungs; i++) {
+    const ry = (h * (i + 0.5)) / numRungs;
+    const rung = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.18, depth - 2 * postT - 0.04),
       material
     );
-    barXL.position.set(-width / 2 + postT / 2, y, 0);
-    barXL.castShadow = true;
-    group.add(barXL);
-    // +X side
-    const barXR = new THREE.Mesh(
-      new THREE.BoxGeometry(barT, barT, depth - postT),
-      material
-    );
-    barXR.position.set(width / 2 - postT / 2, y, 0);
-    barXR.castShadow = true;
-    group.add(barXR);
-    // -Z side bar (along X)
-    const barZL = new THREE.Mesh(
-      new THREE.BoxGeometry(width - postT, barT, barT),
-      material
-    );
-    barZL.position.set(0, y, -depth / 2 + postT / 2);
-    barZL.castShadow = true;
-    group.add(barZL);
-    // +Z side
-    const barZR = new THREE.Mesh(
-      new THREE.BoxGeometry(width - postT, barT, barT),
-      material
-    );
-    barZR.position.set(0, y, depth / 2 - postT / 2);
-    barZR.castShadow = true;
-    group.add(barZR);
+    rung.position.set(-width / 2 + postT / 2 + 0.05, ry, 0);
+    rung.castShadow = true;
+    group.add(rung);
   }
 
-  // ----- Top platform: a thin flat slab spanning the full footprint -----
-  const platformT = 0.18;
+  // ----- Top platform: solid slab spanning the full footprint -----
+  const platformT = 0.3;
   const platform = new THREE.Mesh(
-    new THREE.BoxGeometry(width - postT, platformT, depth - postT),
+    new THREE.BoxGeometry(
+      width - postT - 0.02,
+      platformT,
+      depth - postT - 0.02
+    ),
     material
   );
   platform.position.set(0, h - platformT / 2, 0);
@@ -1610,43 +1672,75 @@ function createJungleGymBlock(spec: BlockSpec): THREE.Group {
   platform.receiveShadow = true;
   group.add(platform);
 
-  // ----- Diagonal cross-bracing on the -X and +X sides for visual
-  // structure. Two diagonals per side forming an X pattern. The brace
-  // box has its length along local +Z; rotating around X by -braceAngle
-  // tilts that local +Z to point along (0, +sin(braceAngle), +cos(braceAngle))
-  // = (+Y, +Z) — the diagonal that goes from low-Z low-Y to high-Z
-  // high-Y. The OTHER diagonal is built by additionally rotating the
-  // brace 180° around Y, which negates its Z direction.
-  const braceLen = Math.sqrt(
-    (depth - postT) * (depth - postT) + h * h
+  // ----- Top railings on 3 sides (back/left/right; +X side open as exit) -----
+  const railH = 0.7;
+  const railT = 0.14;
+
+  // Back railing (-Z)
+  const railBack = new THREE.Mesh(
+    new THREE.BoxGeometry(width - postT, railT, railT),
+    material
   );
-  const braceAngle = Math.atan2(h, depth - postT);
-  for (const sx of [-1, 1]) {
-    const braceX = sx * (width / 2 - postT - 0.04);
-    // Diagonal 1: from (-Z, y=0) to (+Z, y=h)
-    const brace1 = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.08, braceLen),
+  railBack.position.set(0, h + railH - railT / 2, -depth / 2 + postT / 2);
+  group.add(railBack);
+  // Left railing (-X)
+  const railLeft = new THREE.Mesh(
+    new THREE.BoxGeometry(railT, railT, depth - postT),
+    material
+  );
+  railLeft.position.set(-width / 2 + postT / 2, h + railH - railT / 2, 0);
+  group.add(railLeft);
+  // Front railing (+Z)
+  const railFront = new THREE.Mesh(
+    new THREE.BoxGeometry(width - postT, railT, railT),
+    material
+  );
+  railFront.position.set(0, h + railH - railT / 2, depth / 2 - postT / 2);
+  group.add(railFront);
+
+  // Vertical balusters supporting the railings (every other corner)
+  for (const corner of [
+    { x: -1, z: -1 },
+    { x: 1, z: -1 },
+    { x: -1, z: 1 },
+    { x: 1, z: 1 },
+  ]) {
+    const bx = corner.x * (width / 2 - postT / 2);
+    const bz = corner.z * (depth / 2 - postT / 2);
+    const baluster = new THREE.Mesh(
+      new THREE.BoxGeometry(railT, railH, railT),
       material
     );
-    brace1.position.set(braceX, h / 2, 0);
-    brace1.rotation.x = -braceAngle;
-    brace1.castShadow = true;
-    group.add(brace1);
-    // Diagonal 2: from (+Z, y=0) to (-Z, y=h). Three.js applies Euler
-    // rotations as Rx*Ry*Rz to a vector, so rotation.y=π fires first
-    // (flipping the box's local +Z to -Z), and then rotation.x=+braceAngle
-    // tilts that flipped Z up to (0, +sin α, -cos α) — the desired
-    // diagonal direction.
-    const brace2 = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.08, braceLen),
-      material
-    );
-    brace2.position.set(braceX, h / 2, 0);
-    brace2.rotation.x = braceAngle;
-    brace2.rotation.y = Math.PI;
-    brace2.castShadow = true;
-    group.add(brace2);
+    baluster.position.set(bx, h + railH / 2, bz);
+    group.add(baluster);
   }
+
+  // ----- Flag pole + flag on top of the platform -----
+  const poleH = 1.6;
+  const flagPoleY = h + railH + poleH / 2;
+  const flagPole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.08, poleH, 10),
+    material
+  );
+  flagPole.position.set(0, flagPoleY, 0);
+  flagPole.castShadow = true;
+  group.add(flagPole);
+
+  // Triangular flag on the pole (extruded right triangle)
+  const flagShape = new THREE.Shape();
+  flagShape.moveTo(0, 0);
+  flagShape.lineTo(0.9, 0.3);
+  flagShape.lineTo(0, 0.6);
+  flagShape.closePath();
+  const flagGeom = new THREE.ExtrudeGeometry(flagShape, {
+    depth: 0.05,
+    bevelEnabled: false,
+  });
+  flagGeom.translate(0, 0, -0.025);
+  const flag = new THREE.Mesh(flagGeom, flagMat);
+  flag.position.set(0.05, h + railH + poleH - 0.65, 0);
+  flag.castShadow = true;
+  group.add(flag);
 
   return group;
 }
@@ -1654,26 +1748,32 @@ function createJungleGymBlock(spec: BlockSpec): THREE.Group {
 // ------------------------------------------------------------------
 //  Merry-go-round — round disc base, central pole, 4 radial handles
 // ------------------------------------------------------------------
+// ------------------------------------------------------------------
+//  Merry-go-round — round disc base, central pole, conical canopy on
+//  top, 4 seats around the rim and 4 vertical drop-bars from the
+//  canopy edge to the rim.
+// ------------------------------------------------------------------
 function createMerryGoRoundBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w; // 6
   const d = spec.d; // 6
-  // 9 plates (= 3.6 units) tall — about chest height on a minifig.
-  // Big enough for 4 minifigs to ride around the rim. Keep in sync
-  // with bodyHeightPlates in config.ts.
-  const h = 9 * PLATE_HEIGHT;
+  const h = 9 * PLATE_HEIGHT; // 3.6 units (chest-high on a minifig)
   const material = studMaterial(spec.colorHex);
   const seatMat = new THREE.MeshStandardMaterial({
     color: 0xf5cd30, // yellow seats
     roughness: 0.5,
   });
+  const canopyMat = new THREE.MeshStandardMaterial({
+    color: 0xc4281c, // red canopy roof
+    roughness: 0.55,
+  });
 
-  const radius = Math.min(w, d) * 0.5 - 0.1;
+  const radius = Math.min(w, d) * 0.5 - 0.15;
+  const baseH = 0.32;
 
-  // Round disc base — flat cylinder
-  const baseH = 0.3;
+  // ----- Round disc base (flat cylinder) -----
   const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius, radius, baseH, 24),
+    new THREE.CylinderGeometry(radius, radius, baseH, 32),
     material
   );
   base.position.y = baseH / 2;
@@ -1681,80 +1781,102 @@ function createMerryGoRoundBlock(spec: BlockSpec): THREE.Group {
   base.receiveShadow = true;
   group.add(base);
 
-  // Inner support disc (slightly raised)
-  const support = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius * 0.85, radius * 0.95, 0.12, 24),
-    material
+  // Trim ring around the base edge
+  const trimH = 0.14;
+  const trim = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius + 0.05, radius, trimH, 32),
+    canopyMat
   );
-  support.position.y = baseH + 0.06;
-  support.castShadow = true;
-  group.add(support);
+  trim.position.y = baseH + trimH / 2;
+  group.add(trim);
 
   // Central vertical pole
-  const poleH = h - baseH;
+  const poleH = h - baseH - 0.2;
   const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.1, 0.1, poleH, 16),
+    new THREE.CylinderGeometry(0.12, 0.12, poleH, 16),
     material
   );
   pole.position.y = baseH + poleH / 2;
   pole.castShadow = true;
   group.add(pole);
 
-  // Top cap on the pole
-  const topCap = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 14, 10),
-    material
+  // ----- Conical canopy (red, sits on top of the pole) -----
+  const canopyR = radius + 0.05;
+  const canopyH = h * 0.45;
+  const canopy = new THREE.Mesh(
+    new THREE.ConeGeometry(canopyR, canopyH, 20, 1, true),
+    canopyMat
   );
-  topCap.position.y = baseH + poleH;
-  group.add(topCap);
+  canopy.position.y = baseH + poleH + canopyH / 2 - 0.05;
+  canopy.castShadow = true;
+  group.add(canopy);
 
-  // 4 radial handle bars going from the pole top out to the rim
-  for (let i = 0; i < 4; i++) {
-    const angle = (i / 4) * Math.PI * 2;
+  // Tiny finial on top of the canopy
+  const finial = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 12, 8),
+    canopyMat
+  );
+  finial.position.y = baseH + poleH + canopyH;
+  group.add(finial);
+
+  // ----- 4 vertical drop bars from canopy rim to disc rim -----
+  // Each bar carries a seat at its base.
+  const numSeats = 4;
+  for (let i = 0; i < numSeats; i++) {
+    const angle = (i / numSeats) * Math.PI * 2;
     const cosA = Math.cos(angle);
     const sinA = Math.sin(angle);
 
-    // Horizontal handle bar (from center to rim)
-    const handleLen = radius - 0.2;
-    const handle = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.08, handleLen),
+    const dropH = canopyH * 0.5 + poleH * 0.5;
+    const dropY = baseH + poleH - dropH / 2 + 0.2;
+    const dropR = radius - 0.15;
+
+    // Vertical bar
+    const dropBar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.07, dropH, 10),
       material
     );
-    handle.position.set(
-      cosA * (handleLen / 2 + 0.1),
-      h - 0.25,
-      sinA * (handleLen / 2 + 0.1)
-    );
-    handle.rotation.y = -angle;
-    handle.castShadow = true;
-    group.add(handle);
+    dropBar.position.set(cosA * dropR, dropY, sinA * dropR);
+    dropBar.castShadow = true;
+    group.add(dropBar);
 
-    // Vertical drop from handle end to disc rim
-    const drop = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, h - baseH - 0.5, 0.08),
-      material
+    // Seat — slightly curved-looking using a wider box (faces tangent
+    // to the disc, so the seat back is the outer side)
+    const seatGroup = new THREE.Group();
+    seatGroup.position.set(
+      cosA * (radius - 0.55),
+      baseH + 0.32,
+      sinA * (radius - 0.55)
     );
-    drop.position.set(
-      cosA * (radius - 0.15),
-      baseH + (h - baseH - 0.5) / 2,
-      sinA * (radius - 0.15)
-    );
-    drop.castShadow = true;
-    group.add(drop);
+    seatGroup.rotation.y = -angle;
+    group.add(seatGroup);
 
-    // Small seat block on the disc at this rim position
-    const seat = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.18, 0.5),
+    const seatPad = new THREE.Mesh(
+      new THREE.BoxGeometry(0.85, 0.14, 0.6),
       seatMat
     );
-    seat.position.set(
-      cosA * (radius - 0.45),
-      baseH + 0.21,
-      sinA * (radius - 0.45)
+    seatPad.castShadow = true;
+    seatGroup.add(seatPad);
+
+    // Small backrest on the outside (radial-out direction)
+    const seatBack = new THREE.Mesh(
+      new THREE.BoxGeometry(0.85, 0.55, 0.1),
+      seatMat
     );
-    seat.rotation.y = -angle;
-    seat.castShadow = true;
-    group.add(seat);
+    seatBack.position.set(0, 0.3, 0.28);
+    seatBack.castShadow = true;
+    seatGroup.add(seatBack);
+
+    // Small arms on the sides
+    for (const ax of [-1, 1]) {
+      const arm = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.4, 0.5),
+        seatMat
+      );
+      arm.position.set(ax * (0.85 / 2 - 0.04), 0.22, 0.04);
+      arm.castShadow = true;
+      seatGroup.add(arm);
+    }
   }
 
   return group;

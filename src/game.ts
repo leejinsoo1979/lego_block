@@ -50,13 +50,15 @@ interface NpcState {
   yaw: number;
   /** Phase accumulator for limb-swing animation. */
   walkTime: number;
-  state: 'idle' | 'walking' | 'greeting';
+  state: 'idle' | 'walking' | 'greeting' | 'following';
   /** Time remaining in the current state before transitioning. */
   stateTimer: number;
   /** The line shown in the chat bubble while state === 'greeting'. */
   greeting: string;
   /** True for dog NPCs — quadruped walk animation, no chat interaction. */
   isDog: boolean;
+  /** Countdown to the next bark while following (dogs only). */
+  nextBarkIn?: number;
 }
 
 /** Random greetings shown when the player presses E near an NPC. */
@@ -197,10 +199,19 @@ export class Game {
   /** Fires when the user clears the current selection (e.g. by pressing
    *  Escape). UI should remove the active highlight from all type buttons. */
   onSelectionCleared: () => void = () => {};
+  /** Fires when entering/leaving play mode if at least one dog NPC is on
+   *  the baseplate — UI shows/hides the dog-whistle button accordingly. */
+  onDogsPresentChange: (present: boolean) => void = () => {};
+  /** Fires when the whistle toggles dogs between follow / wander — UI
+   *  updates the "active" highlight on the whistle button. */
+  onDogsFollowingChange: (following: boolean) => void = () => {};
 
   /** When true, no ghost is rendered and clicks don't place anything.
    *  Cleared the moment the user picks a block type or switches mode. */
   private placementSuspended = false;
+  /** True while the player has active dogs following them — toggled by
+   *  `whistleDogs()`. Only meaningful during play mode. */
+  private dogsFollowing = false;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -2473,6 +2484,12 @@ export class Game {
     }
     this.lastFrameTime = performance.now();
     this.onPlayChange(true);
+    // Notify UI whether a dog-whistle button should appear on the
+    // overlay. Dogs were added to `this.npcs` above.
+    const hasDog = this.npcs.some((n) => n.isDog);
+    this.dogsFollowing = false;
+    this.onDogsPresentChange(hasDog);
+    this.onDogsFollowingChange(false);
   }
 
   stopPlay() {
@@ -2526,6 +2543,46 @@ export class Game {
     this.controls.update();
 
     this.onPlayChange(false);
+    // Hide the dog-whistle UI on the way out of play mode.
+    this.dogsFollowing = false;
+    this.onDogsPresentChange(false);
+    this.onDogsFollowingChange(false);
+  }
+
+  /**
+   * Toggle: the player blows a whistle. If no dogs are currently
+   * following, every dog NPC in range switches to the 'following' state
+   * and starts chasing the player with periodic barks. A second whistle
+   * sends them back to their wander pattern. Always plays the whistle
+   * sound so the user gets audible feedback on the click regardless.
+   */
+  whistleDogs() {
+    if (!this.isPlaying) return;
+    this.sound.playWhistle();
+    const dogs = this.npcs.filter((n) => n.isDog);
+    if (dogs.length === 0) return;
+
+    if (!this.dogsFollowing) {
+      this.dogsFollowing = true;
+      for (const dog of dogs) {
+        dog.state = 'following';
+        dog.walkTime = 0;
+        // Stagger first barks so multiple dogs don't all fire on the
+        // same frame as the whistle.
+        dog.nextBarkIn = 0.15 + Math.random() * 0.35;
+      }
+      // A single immediate bark for instant acknowledgement.
+      this.sound.playBark();
+    } else {
+      this.dogsFollowing = false;
+      for (const dog of dogs) {
+        if (dog.state === 'following') {
+          dog.state = 'idle';
+          dog.stateTimer = 0.4 + Math.random() * 1.2;
+        }
+      }
+    }
+    this.onDogsFollowingChange(this.dogsFollowing);
   }
 
   private updatePlayMode(dt: number) {
@@ -3058,6 +3115,57 @@ export class Game {
     const npcHeight = getMinifigHeight() || 2.5;
     for (const npc of this.npcs) {
       // --- State machine ---
+      // Dogs following the player after a whistle — tracks the player's
+      // live position, barks periodically, stops just short so it doesn't
+      // push the player around.
+      if (npc.state === 'following') {
+        const tx = this.playerPos.x - npc.obj.position.x;
+        const tz = this.playerPos.z - npc.obj.position.z;
+        const distSq = tx * tx + tz * tz;
+
+        // Periodic bark while following
+        npc.nextBarkIn = (npc.nextBarkIn ?? 0) - dt;
+        if (npc.nextBarkIn <= 0) {
+          this.sound.playBark();
+          npc.nextBarkIn = 1.6 + Math.random() * 2.0;
+        }
+
+        // Stand next to the player, not on top
+        const FOLLOW_STOP = 2.2;
+        if (distSq < FOLLOW_STOP * FOLLOW_STOP) {
+          this.faceNpcToward(npc, this.playerPos.x, this.playerPos.z, dt * 6);
+          applyNpcLimbs(npc.obj, 0);
+          continue;
+        }
+
+        const inv = 1 / Math.sqrt(distSq);
+        const dirX = tx * inv;
+        const dirZ = tz * inv;
+        // Dogs run a bit faster than a wandering NPC so they can catch up
+        const speed = Game.NPC_SPEED * 1.8;
+        const step = speed * dt;
+        const nextX = npc.obj.position.x + dirX * step;
+        const nextZ = npc.obj.position.z + dirZ * step;
+
+        if (this.npcCanMoveTo(nextX, nextZ, npc, npcHeight)) {
+          npc.obj.position.x = nextX;
+          npc.obj.position.z = nextZ;
+          this.faceNpcToward(
+            npc,
+            this.playerPos.x,
+            this.playerPos.z,
+            dt * 8
+          );
+          npc.walkTime += dt * 9;
+          const swing = Math.sin(npc.walkTime) * 0.35;
+          applyNpcLimbs(npc.obj, swing);
+        } else {
+          // Blocked by terrain — idle the limbs and retry next frame
+          applyNpcLimbs(npc.obj, 0);
+        }
+        continue;
+      }
+
       if (npc.state === 'greeting') {
         npc.stateTimer -= dt;
         if (npc.stateTimer <= 0) {

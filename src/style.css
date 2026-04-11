@@ -706,6 +706,48 @@ body.remove-mode #viewer canvas {
   color: #1c1d22;
 }
 
+/* Dog-whistle button — top-right of the play overlay, below the view
+   toggle. Shown only when at least one dog is placed in the scene. */
+#play-overlay .dog-whistle {
+  position: absolute;
+  top: 76px;
+  right: 24px;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  font-size: 28px;
+  line-height: 1;
+  background: rgba(20, 22, 28, 0.78);
+  color: #fff;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  transition: transform 0.12s ease, background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+#play-overlay .dog-whistle:hover {
+  transform: scale(1.08);
+  background: rgba(40, 44, 52, 0.9);
+}
+
+#play-overlay .dog-whistle.hidden {
+  display: none;
+}
+
+/* When dogs are actively following the player, outline the button so
+   the user sees it's a toggle. Click again to stop following. */
+#play-overlay .dog-whistle.active {
+  background: #ffeb85;
+  color: #2a2010;
+  border-color: #ffcc33;
+  box-shadow: 0 4px 18px rgba(255, 204, 51, 0.55);
+}
+
 #play-overlay .play-hint {
   position: absolute;
   bottom: 40px;
