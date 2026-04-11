@@ -86,6 +86,10 @@ export class Game {
   private hoverBox: THREE.LineSegments;
   private pointerDownPos = new THREE.Vector2();
   private wasDrag = false;
+  // Tablet long-press → rotate block (touch-only substitute for right click)
+  private longPressTimer: number | null = null;
+  private longPressFired = false;
+  private lastPointerType: string = 'mouse';
   private sound = new SoundManager();
   private lastFrameTime = performance.now();
 
@@ -317,12 +321,21 @@ export class Game {
     ro.observe(container);
 
     const dom = this.renderer.domElement;
+    // Let the canvas own every touch gesture — otherwise the browser
+    // hijacks single-finger drags as page scrolls on tablets.
+    dom.style.touchAction = 'none';
     dom.addEventListener('pointermove', (e) => this.onPointerMove(e));
     dom.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     dom.addEventListener('pointerup', (e) => this.onPointerUp(e));
+    dom.addEventListener('pointercancel', () => {
+      this.cancelLongPress();
+      this.longPressFired = false;
+      this.wasDrag = false;
+    });
     dom.addEventListener('pointerleave', () => {
       this.ghost.visible = false;
       this.hoverBox.visible = false;
+      this.cancelLongPress();
     });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener(
@@ -1041,8 +1054,14 @@ export class Game {
 
   private updatePointer(e: PointerEvent) {
     const rect = this.renderer.domElement.getBoundingClientRect();
+    // Raise the raycast target ~70 screen pixels above the finger on
+    // touch devices so the finger doesn't occlude the ghost or the cell
+    // the user is trying to target. The ghost visually floats just above
+    // the fingertip — users adapt to this within a few taps.
+    const offsetY = e.pointerType === 'touch' ? -70 : 0;
     this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    this.pointer.y =
+      -((e.clientY - rect.top + offsetY) / rect.height) * 2 + 1;
   }
 
   private onPointerMove(e: PointerEvent) {
@@ -1051,7 +1070,15 @@ export class Game {
     if (e.buttons > 0) {
       const dx = e.clientX - this.pointerDownPos.x;
       const dy = e.clientY - this.pointerDownPos.y;
-      if (dx * dx + dy * dy > 25) this.wasDrag = true;
+      // Larger drag tolerance on touch — fingertips naturally wiggle
+      // several pixels on contact, and treating that as a camera drag
+      // would break tap-to-place.
+      const dragThresholdSq = e.pointerType === 'touch' ? 400 : 25;
+      if (dx * dx + dy * dy > dragThresholdSq) {
+        this.wasDrag = true;
+        // Dragging cancels the pending long-press rotation on touch
+        this.cancelLongPress();
+      }
     }
     if (this.addBaseplateMode) {
       this.updateBaseplateGhost();
@@ -1068,7 +1095,41 @@ export class Game {
     if (this.isPlaying) return;
     this.pointerDownPos.set(e.clientX, e.clientY);
     this.wasDrag = false;
+    this.lastPointerType = e.pointerType || 'mouse';
     if (e.button === 1) e.preventDefault();
+
+    // Touch has no "hover" state — so refresh the ghost immediately on
+    // contact. This way the user sees exactly where the block will land
+    // *before* lifting their finger, without having to dry-tap first.
+    if (e.pointerType === 'touch') {
+      this.updatePointer(e);
+      if (!this.addBaseplateMode && !this.shiftLineStart) {
+        this.updatePreview();
+      }
+    }
+
+    // Touch: start a long-press timer that rotates the block on hold.
+    // Right-click doesn't exist on tablets, so this is the touch substitute
+    // for "right click → rotate".
+    this.cancelLongPress();
+    this.longPressFired = false;
+    if (e.pointerType === 'touch' && e.button === 0) {
+      this.longPressTimer = window.setTimeout(() => {
+        // Only fire if still holding in place (no drag, no release)
+        if (!this.wasDrag && !this.placementSuspended) {
+          this.rotateClockwise();
+          this.longPressFired = true;
+          // Haptic nudge so the user knows rotation fired
+          if (
+            typeof navigator !== 'undefined' &&
+            typeof navigator.vibrate === 'function'
+          ) {
+            navigator.vibrate(25);
+          }
+        }
+        this.longPressTimer = null;
+      }, 450);
+    }
 
     // Shift + left click starts a line-placement drag
     if (
@@ -1099,6 +1160,9 @@ export class Game {
   private onPointerUp(e: PointerEvent) {
     if (this.isPlaying) return;
 
+    // Clear any pending long-press regardless of whether it fired
+    this.cancelLongPress();
+
     // End line-placement drag
     if (this.shiftLineStart) {
       this.shiftLineStart = null;
@@ -1106,6 +1170,12 @@ export class Game {
       this.controls.enabled = true;
       this.wasDrag = false;
       this.updatePreview();
+      return;
+    }
+
+    // If a long press already rotated the block, don't also place on release
+    if (this.longPressFired) {
+      this.longPressFired = false;
       return;
     }
 
@@ -1130,6 +1200,13 @@ export class Game {
       this.rotateClockwise();
     }
     // Middle click is camera-drag only; no tap action
+  }
+
+  private cancelLongPress() {
+    if (this.longPressTimer !== null) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
   }
 
   private onKeyDown(e: KeyboardEvent) {
