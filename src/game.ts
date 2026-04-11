@@ -280,6 +280,18 @@ export class Game {
       }
     ).RIGHT = null;
 
+    // Touch bindings: one finger is reserved for block drag-and-drop (the
+    // game's own pointer handlers). Two fingers handle the camera — pinch
+    // to zoom, drag to rotate. This matches Minecraft PE / Procreate / most
+    // mobile builders.
+    (
+      this.controls.touches as unknown as {
+        ONE: number | null;
+        TWO: number | null;
+      }
+    ).ONE = null;
+    this.controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+
     this.setupLights();
     this.createBaseplate();
     this.scene.add(this.brickGroup);
@@ -1179,9 +1191,16 @@ export class Game {
       return;
     }
 
-    if (this.wasDrag) return;
+    // Touch uses drag-and-drop placement: the finger drags the ghost to
+    // the desired spot and releasing commits. So on touch we IGNORE the
+    // wasDrag guard — any release places (or taps the current slot in
+    // add-baseplate mode). Mouse drags are still camera rotation.
+    const isTouch = e.pointerType === 'touch';
+    if (!isTouch && this.wasDrag) return;
 
-    // Add-baseplate mode handles its own clicks
+    // Add-baseplate mode handles its own clicks — drag-and-drop works the
+    // same way since the ghost highlights the slot under the finger and
+    // commitBaseplateGhost uses that highlighted slot.
     if (this.addBaseplateMode) {
       if (e.button === 0) this.commitBaseplateGhost();
       else if (e.button === 2) this.setAddBaseplateMode(false);

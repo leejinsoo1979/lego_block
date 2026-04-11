@@ -1148,46 +1148,71 @@ function createLadderBlock(spec: BlockSpec): THREE.Group {
 }
 
 // ------------------------------------------------------------------
-//  Slide — playground slide. Two triangular A-frame side panels carry a
-//  curved slide deck on the +Z half and a stair set with handrails on
-//  the -Z half.
+//  Slide — playground slide. Two solid side panels with a complex
+//  outline (back wall + railings + slide curve) define the silhouette.
+//  Stair boxes, platform tile, back wall and a curved slide deck fill
+//  the structure. Yellow slide for color contrast against the user's
+//  frame color.
 // ------------------------------------------------------------------
 function createSlideBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w; // 4
   const d = spec.d; // 9
-  // 24 plates (= 9.6 units) tall — about 2× a minifig so the slide
-  // actually towers over them. Keep in sync with bodyHeightPlates in
-  // config.ts.
-  const h = 24 * PLATE_HEIGHT;
+  const h = 24 * PLATE_HEIGHT; // 9.6 units (~2× minifig)
   const frameMat = studMaterial(spec.colorHex);
   const slideMat = new THREE.MeshStandardMaterial({
-    color: 0xc0c5cc, // light metallic gray for the slide surface
-    roughness: 0.32,
-    metalness: 0.45,
-  });
-  const railMat = new THREE.MeshStandardMaterial({
-    color: 0xf5cd30, // bright yellow handrails
-    roughness: 0.45,
+    color: 0xf5cd30, // bright yellow slide
+    roughness: 0.35,
+    metalness: 0.15,
   });
 
   const width = w * GRID.X;
   const depth = d * GRID.Z;
-  const numSteps = 4;
-  const stepDepthZ = 1; // each step occupies 1 stud of depth
-  const stepRise = h / numSteps; // 2.4 units per step (~half minifig)
-  const stairsRunZ = numSteps * stepDepthZ; // 4
-  const stairsTopZ = -d / 2 + stairsRunZ; // front edge of the platform
-  const panelT = 0.18; // side panel thickness
+  const panelT = 0.22; // side panel thickness
 
-  // ----- Side panels (A-frame triangles) on ±X -----
-  // Triangle in shape XY where shape-X = world Z, shape-Y = world Y.
-  // Vertices: back-bottom → top-of-stairs → front-bottom.
+  // Layout zones along Z:
+  //   stairs   : -d/2 .. -d/2+4   (4 stud, 4 steps)
+  //   platform : -d/2+4 .. -d/2+5 (1 stud)
+  //   slide    : -d/2+5 .. d/2    (4 stud)
+  const numSteps = 4;
+  const stairsRunZ = 4;
+  const platformDepth = 1;
+  const stepRise = h / numSteps; // 2.4u per step (~half minifig)
+  const z0 = -d / 2;
+  const z1 = z0 + stairsRunZ; // front of stairs
+  const z2 = z1 + platformDepth; // front of platform = start of slide
+  const z3 = d / 2; // front edge of slide
+
+  // ----- Slide curve points (smoothstep eased descent) -----
+  const slideExitY = 0.4;
+  const segments = 22;
+  const curvePts: { z: number; y: number }[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const eased = t * t * (3 - 2 * t);
+    curvePts.push({
+      z: z2 + (z3 - z2) * t,
+      y: h + (slideExitY - h) * eased,
+    });
+  }
+
+  // ----- Side panels (one on -X, one on +X) -----
+  // Outline (CCW) traces: back-bottom → up the back wall → over the
+  // platform railing → down to platform deck → along the slide curve
+  // → down to the front exit → back to the back-bottom.
+  const railingExtra = 0.7; // railing height above platform deck
   const panelShape = new THREE.Shape();
-  panelShape.moveTo(-d / 2, 0);
-  panelShape.lineTo(stairsTopZ, h);
-  panelShape.lineTo(d / 2, 0);
+  panelShape.moveTo(z0, 0); // back-bottom
+  panelShape.lineTo(z0, h + railingExtra); // back-top of railing
+  panelShape.lineTo(z2, h + railingExtra); // top of railing, going forward
+  panelShape.lineTo(z2, h); // step down to platform deck
+  // Slide curve top edge (from platform front down to slide exit)
+  for (let i = 1; i < curvePts.length; i++) {
+    panelShape.lineTo(curvePts[i].z, curvePts[i].y);
+  }
+  panelShape.lineTo(z3, 0); // down to front-bottom
   panelShape.closePath();
+
   const panelGeom = new THREE.ExtrudeGeometry(panelShape, {
     depth: panelT,
     bevelEnabled: false,
@@ -1203,83 +1228,51 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
     group.add(panel);
   }
 
-  // ----- Stairs at -Z (numSteps stacked boxes between the side panels) -----
-  const stepWidth = width - 2 * panelT - 0.04;
+  // ----- 4 stair boxes (between the side panels) -----
+  const innerW = width - 2 * panelT - 0.04;
   for (let i = 0; i < numSteps; i++) {
     const stepTopY = (i + 1) * stepRise;
     const step = new THREE.Mesh(
-      new THREE.BoxGeometry(stepWidth, stepTopY, stepDepthZ * GRID.Z),
+      new THREE.BoxGeometry(innerW, stepTopY, GRID.Z),
       frameMat
     );
-    step.position.set(0, stepTopY / 2, -depth / 2 + stepDepthZ * (i + 0.5));
+    step.position.set(0, stepTopY / 2, z0 + 0.5 + i);
     step.castShadow = true;
     step.receiveShadow = true;
     group.add(step);
   }
 
-  // ----- Stair handrails (yellow) -----
-  // Vertical post at the entrance + a sloped rail along the steps.
-  for (const sx of [-1, 1]) {
-    const handrailX = sx * (width / 2 - panelT - 0.06);
-    const postH = h * 0.55;
-    const postBottom = new THREE.Mesh(
-      new THREE.BoxGeometry(0.09, postH, 0.09),
-      railMat
-    );
-    postBottom.position.set(handrailX, postH / 2, -depth / 2 + 0.15);
-    postBottom.castShadow = true;
-    group.add(postBottom);
-    // Sloped rail running from the bottom post up to (and slightly past)
-    // the top of the stairs.
-    const railRiseY = h - postH;
-    const railRunZ = stairsRunZ - 0.3;
-    const railLen = Math.sqrt(railRunZ * railRunZ + railRiseY * railRiseY);
-    const railAngle = Math.atan2(railRiseY, railRunZ);
-    const slopedRail = new THREE.Mesh(
-      new THREE.BoxGeometry(0.09, 0.09, railLen),
-      railMat
-    );
-    slopedRail.position.set(
-      handrailX,
-      postH + railRiseY / 2,
-      -depth / 2 + 0.15 + railRunZ / 2
-    );
-    slopedRail.rotation.x = railAngle;
-    slopedRail.castShadow = true;
-    group.add(slopedRail);
-  }
+  // ----- Platform tile (flat slab at top, between the panels) -----
+  const platformT = 0.3;
+  const platform = new THREE.Mesh(
+    new THREE.BoxGeometry(innerW, platformT, platformDepth * GRID.Z),
+    frameMat
+  );
+  platform.position.set(0, h - platformT / 2, (z1 + z2) / 2);
+  platform.castShadow = true;
+  platform.receiveShadow = true;
+  group.add(platform);
 
-  // ----- Curved slide deck on the +Z half -----
-  // The slide starts at the top of the stairs (z = stairsTopZ, y = h)
-  // and curves down to the front edge of the block.
-  const slideHighZ = stairsTopZ;
-  const slideLowZ = d / 2 + 0.4;
-  const slideHighY = h;
-  const slideLowY = 0.4;
-  const slabT = 0.2;
-  const slideW = width - 2 * panelT - 0.06;
-  const segments = 18;
+  // ----- Back wall (closes off the back of the platform area) -----
+  const backWall = new THREE.Mesh(
+    new THREE.BoxGeometry(innerW, h + railingExtra, panelT),
+    frameMat
+  );
+  backWall.position.set(0, (h + railingExtra) / 2, z0 + panelT / 2);
+  backWall.castShadow = true;
+  backWall.receiveShadow = true;
+  group.add(backWall);
 
-  // Top edge of the deck (smooth curve from high to low)
-  const topPts: { z: number; y: number }[] = [];
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    // Smoothstep ease: starts almost horizontal, accelerates, then
-    // levels out at the bottom — a real slide curve.
-    const eased = t * t * (3 - 2 * t);
-    topPts.push({
-      z: slideHighZ + (slideLowZ - slideHighZ) * t,
-      y: slideHighY + (slideLowY - slideHighY) * eased,
-    });
-  }
+  // ----- Curved slide deck (yellow), extruded along world X (width) -----
+  const slabT = 0.22;
+  const slideW = innerW;
   const slideShape = new THREE.Shape();
-  slideShape.moveTo(topPts[0].z, topPts[0].y);
-  for (let i = 1; i < topPts.length; i++) {
-    slideShape.lineTo(topPts[i].z, topPts[i].y);
+  slideShape.moveTo(curvePts[0].z, curvePts[0].y);
+  for (let i = 1; i < curvePts.length; i++) {
+    slideShape.lineTo(curvePts[i].z, curvePts[i].y);
   }
-  // Underside (reverse, offset by slab thickness)
-  for (let i = topPts.length - 1; i >= 0; i--) {
-    slideShape.lineTo(topPts[i].z, topPts[i].y - slabT);
+  for (let i = curvePts.length - 1; i >= 0; i--) {
+    slideShape.lineTo(curvePts[i].z, curvePts[i].y - slabT);
   }
   slideShape.closePath();
 
@@ -1295,43 +1288,19 @@ function createSlideBlock(spec: BlockSpec): THREE.Group {
   slideMesh.receiveShadow = true;
   group.add(slideMesh);
 
-  // ----- Slide side rails (yellow) — follow the same curve, offset to
-  // the X edges of the slide deck. Built from short segments connecting
-  // each pair of top points. -----
-  for (const sx of [-1, 1]) {
-    const railX = sx * (slideW / 2 + 0.04);
-    for (let i = 0; i < topPts.length - 1; i++) {
-      const a = topPts[i];
-      const b = topPts[i + 1];
-      const dz = b.z - a.z;
-      const dy = b.y - a.y;
-      const segLen = Math.sqrt(dz * dz + dy * dy);
-      const seg = new THREE.Mesh(
-        new THREE.BoxGeometry(0.09, 0.18, segLen),
-        railMat
-      );
-      seg.position.set(railX, (a.y + b.y) / 2 + 0.12, (a.z + b.z) / 2);
-      seg.rotation.x = Math.atan2(a.y - b.y, dz);
-      seg.castShadow = true;
-      group.add(seg);
-    }
-  }
-
   return group;
 }
 
 // ------------------------------------------------------------------
-//  Swing — proper A-frame swing set. Two pairs of inward-leaning posts
-//  meet at a top horizontal bar, with two seats hanging on twin chains.
+//  Swing — proper A-frame swing set. Two SOLID triangular side panels
+//  on each X end (extruded along Z), connected by a top beam, with
+//  three swings hanging underneath on twin chains.
 // ------------------------------------------------------------------
 function createSwingBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w; // 8
   const d = spec.d; // 3
-  // 24 plates (= 9.6 units) tall — 2× minifig so the bar is well above
-  // their head and the swing has real hang length. Keep in sync with
-  // bodyHeightPlates in config.ts.
-  const h = 24 * PLATE_HEIGHT;
+  const h = 24 * PLATE_HEIGHT; // 9.6 units (~2× minifig)
   const frameMat = studMaterial(spec.colorHex);
   const chainMat = new THREE.MeshStandardMaterial({
     color: 0x4a4d52,
@@ -1339,117 +1308,92 @@ function createSwingBlock(spec: BlockSpec): THREE.Group {
     metalness: 0.65,
   });
   const seatMat = new THREE.MeshStandardMaterial({
-    color: 0xc4281c,
+    color: 0xc4281c, // bright red seats
     roughness: 0.5,
   });
 
   const width = w * GRID.X;
   const depth = d * GRID.Z;
-  const postT = 0.24;
-  const apexInset = postT * 0.5; // top bar inset from each X edge
+  const panelT = 0.28; // side panel thickness
 
-  // ----- 4 leaned posts forming 2 A-frames -----
-  // Each A-frame has its apex at (±apexX, h, 0) and its feet at the
-  // four corners of the footprint. A post connects one foot to the
-  // nearest apex.
-  const apexY = h - 0.18;
-  const buildLeanedPost = (
-    footX: number,
-    footZ: number,
-    apexX: number,
-    apexZ: number
-  ) => {
-    const dx = apexX - footX;
-    const dy = apexY - 0;
-    const dz = apexZ - footZ;
-    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    const post = new THREE.Mesh(
-      new THREE.BoxGeometry(postT, len, postT),
-      frameMat
-    );
-    // Center at midpoint
-    post.position.set((footX + apexX) / 2, (0 + apexY) / 2, (footZ + apexZ) / 2);
-    // Orient: default +Y to (dx, dy, dz)/len
-    // Rotation around X first to handle the Z-component (lean toward center on Z),
-    // then around Z to handle X-component. For our use the apex is on the same X
-    // as the foot (no X lean) and offset on Z, so only one rotation is needed.
-    post.rotation.x = Math.atan2(dz, dy);
-    post.rotation.z = Math.atan2(-dx, dy);
-    post.castShadow = true;
-    post.receiveShadow = true;
-    group.add(post);
-  };
-
-  // Left A-frame (apex at -X side)
-  const leftApexX = -width / 2 + apexInset + 0.6;
-  for (const sz of [-1, 1]) {
-    buildLeanedPost(
-      -width / 2 + postT * 0.6,
-      sz * (depth / 2 - postT * 0.6),
-      leftApexX,
-      0
-    );
-  }
-  // Right A-frame (apex at +X side)
-  const rightApexX = width / 2 - apexInset - 0.6;
-  for (const sz of [-1, 1]) {
-    buildLeanedPost(
-      width / 2 - postT * 0.6,
-      sz * (depth / 2 - postT * 0.6),
-      rightApexX,
-      0
-    );
+  // ----- Two solid triangular side panels (one at each X end) -----
+  // Triangle in shape XY where shape-X = world Z, shape-Y = world Y.
+  // Vertices: front-bottom (z=-d/2), back-bottom (z=+d/2), apex (z=0, y=h).
+  // After extrude+rotate the panel sits in the YZ plane at world X = ±X edge.
+  const triShape = new THREE.Shape();
+  triShape.moveTo(-d / 2, 0);
+  triShape.lineTo(d / 2, 0);
+  triShape.lineTo(0, h);
+  triShape.closePath();
+  const triGeom = new THREE.ExtrudeGeometry(triShape, {
+    depth: panelT,
+    bevelEnabled: false,
+  });
+  triGeom.translate(0, 0, -panelT / 2);
+  triGeom.rotateY(-Math.PI / 2);
+  triGeom.computeVertexNormals();
+  for (const sx of [-1, 1]) {
+    const panel = new THREE.Mesh(triGeom.clone(), frameMat);
+    panel.position.x = sx * (width / 2 - panelT / 2);
+    panel.castShadow = true;
+    panel.receiveShadow = true;
+    group.add(panel);
   }
 
-  // ----- Top horizontal bar (connects the two apexes) -----
-  const barLen = rightApexX - leftApexX;
-  const topBar = new THREE.Mesh(
-    new THREE.BoxGeometry(barLen + 0.2, 0.26, 0.26),
+  // ----- Top horizontal beam (connects the two triangle apexes) -----
+  // The apex of each triangle is at (±(width/2 - panelT/2), h, 0). The
+  // beam runs along X between the two apexes.
+  const apexY = h - 0.14;
+  const beamLen = width - panelT - 0.04;
+  const topBeam = new THREE.Mesh(
+    new THREE.BoxGeometry(beamLen, 0.32, 0.32),
     frameMat
   );
-  topBar.position.set((leftApexX + rightApexX) / 2, apexY, 0);
-  topBar.castShadow = true;
-  group.add(topBar);
+  topBeam.position.set(0, apexY, 0);
+  topBeam.castShadow = true;
+  group.add(topBeam);
 
-  // ----- Three hanging swings — each with twin chains + seat + backrest.
-  // Spaced 25% / 50% / 75% along the top bar for an even pattern. -----
-  const chainLen = h * 0.6;
+  // ----- Three hanging swings — twin chains + seat + backrest each -----
+  const chainLen = h * 0.62;
   const seatY = apexY - chainLen;
+  // Spread along X. Avoid the very ends near the side panels.
+  const usableW = beamLen - 1.6;
   const seatXs = [
-    leftApexX + (rightApexX - leftApexX) * 0.18,
-    leftApexX + (rightApexX - leftApexX) * 0.5,
-    leftApexX + (rightApexX - leftApexX) * 0.82,
+    -usableW / 2 + usableW * 0.0,
+    -usableW / 2 + usableW * 0.5,
+    -usableW / 2 + usableW * 1.0,
   ];
-  // Chain z-spread slightly less than seat depth so they sit on the seat.
-  const chainCz = depth / 2 - 0.45;
+  const chainCz = depth / 2 - 0.55; // chain z-offsets (front + back)
+  const seatW = 1.1;
+  const seatD = chainCz * 2 + 0.3;
+
   for (const sx of seatXs) {
+    // Twin chains (front + back of seat)
     for (const cz of [-chainCz, chainCz]) {
       const chain = new THREE.Mesh(
-        new THREE.BoxGeometry(0.07, chainLen, 0.07),
+        new THREE.BoxGeometry(0.08, chainLen, 0.08),
         chainMat
       );
-      chain.position.set(sx, apexY - chainLen / 2 - 0.13, cz);
+      chain.position.set(sx, apexY - chainLen / 2 - 0.16, cz);
       chain.castShadow = true;
       group.add(chain);
     }
 
-    // Seat — wider for the bigger swing
-    const seatW = 1.0;
-    const seatD = chainCz * 2 + 0.3;
+    // Seat with backrest + side arms
     const seat = new THREE.Mesh(
-      new THREE.BoxGeometry(seatW, 0.14, seatD),
+      new THREE.BoxGeometry(seatW, 0.16, seatD),
       seatMat
     );
-    seat.position.set(sx, seatY - 0.07, 0);
+    seat.position.set(sx, seatY - 0.08, 0);
     seat.castShadow = true;
     seat.receiveShadow = true;
     group.add(seat);
 
     const backrest = new THREE.Mesh(
-      new THREE.BoxGeometry(seatW, 0.7, 0.1),
+      new THREE.BoxGeometry(seatW, 0.75, 0.12),
       seatMat
     );
-    backrest.position.set(sx, seatY + 0.28, seatD / 2 - 0.05);
+    backrest.position.set(sx, seatY + 0.3, seatD / 2 - 0.06);
     backrest.castShadow = true;
     group.add(backrest);
   }
