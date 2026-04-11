@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { createBrick, createMinifigure, getMinifigHeight } from './blocks';
+import {
+  createBrick,
+  createDogCharacter,
+  createMinifigure,
+  getMinifigHeight,
+} from './blocks';
 import { BLOCK_TYPES, MINIFIG_PRESETS } from './config';
 import type { BlockType, MinifigPreset } from './config';
 
@@ -60,6 +65,15 @@ export function renderBlockTypeThumbnail(
     return render(fig);
   }
 
+  if (type === 'dog') {
+    const dog = createDogCharacter();
+    // Dog is ~2 long × 1 wide × 1.5 tall. Three-quarter view from
+    // the front-right so head, ears, and legs all read clearly.
+    camera!.position.set(3.0, 2.3, 3.6);
+    camera!.lookAt(0, 0.9, 0);
+    return render(dog);
+  }
+
   // Pick a representative footprint
   const def = BLOCK_TYPES.find((t) => t.type === type);
   const w = def?.fixedSize?.w ?? 2;
@@ -80,6 +94,16 @@ export function renderBlockTypeThumbnail(
       // 9 plates (= 3.6 units) tall — pull further back and aim mid-height.
       camera!.position.set(5.4, 4.4, 5.4);
       camera!.lookAt(0, 1.8, 0);
+      break;
+    case 'wallhigh':
+      // 15 plates (= 6.0 units) tall — matches the door height.
+      camera!.position.set(7.5, 6.0, 7.5);
+      camera!.lookAt(0, 3.0, 0);
+      break;
+    case 'walltower':
+      // 18 plates (= 7.2 units) tall — matches the archway height.
+      camera!.position.set(8.5, 7.0, 8.5);
+      camera!.lookAt(0, 3.6, 0);
       break;
     case 'plate':
     case 'tile':
@@ -128,10 +152,22 @@ export function renderBlockTypeThumbnail(
     //  6.0-tall block needs distance ~14. All aim at the vertical center.
     // ------------------------------------------------------------------
     case 'archway':
-      // 6×2×7.2 — now the tallest fixed block. Pull camera back so the
-      // 6-wide footprint AND the 7.2-tall opening both fit comfortably.
+      // 6×2×7.2 — default archway. Pull camera back so the 6-wide
+      // footprint AND the 7.2-tall opening both fit comfortably.
       camera!.position.set(10, 6, 13);
       camera!.lookAt(0, 3.6, 0);
+      break;
+    case 'archmid':
+      // 8×2×8.4 — wider opening, slightly taller. Pull back further so
+      // both axes still fit the square thumbnail.
+      camera!.position.set(11, 7, 15);
+      camera!.lookAt(0, 4.2, 0);
+      break;
+    case 'archlarge':
+      // 10×3×9.6 — monumental. Largest fixed block in the library —
+      // needs the most distance. Aim at the vertical center.
+      camera!.position.set(13, 8, 18);
+      camera!.lookAt(0, 4.8, 0);
       break;
     case 'stairs':
       // 2×4×4.8 — climbs along +Z (unified with archway's walk-through
@@ -168,9 +204,52 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 3.0, 0);
       break;
     case 'ladder':
-      // 1×1×4.8 — thin front-facing piece.
-      camera!.position.set(7, 5, 7);
-      camera!.lookAt(0, 2.4, 0);
+      // 2×1×7.2 — widened to 2 stud and raised to 18 plates so a minifig
+      // can climb past the top rung. Pull camera back further to fit the
+      // taller height.
+      camera!.position.set(9, 6, 10);
+      camera!.lookAt(0, 3.6, 0);
+      break;
+    case 'bridge':
+      // 6×44×2.4 — wide road bridge. Rotate 45° around Y so the full
+      // length packs diagonally into the square thumbnail, then pull the
+      // camera further back to fit both the wider deck and the long span.
+      obj.rotation.y = Math.PI / 4;
+      camera!.position.set(24, 19, 28);
+      camera!.lookAt(0, 1.2, 0);
+      break;
+    // ------------------------------------------------------------------
+    //  Playground modules
+    // ------------------------------------------------------------------
+    case 'slide':
+      // 4×9×9.6 — tall slide with 4-step staircase + curved ramp.
+      // Side view at 3/4 to read both the stairs and the slide curve.
+      camera!.position.set(13, 8, 17);
+      camera!.lookAt(0, 4.4, 0);
+      break;
+    case 'swing':
+      // 8×3×9.6 — wide A-frame with 3 swings. Head-on view, pulled
+      // way back to fit the 8-stud width and the 9.6u height.
+      camera!.position.set(0, 7, 22);
+      camera!.lookAt(0, 4.8, 0);
+      break;
+    case 'seesaw':
+      // 10×3×2.4 — long horizontal toy. 3/4 view from above shows
+      // the tilted plank, curved fulcrum, and both seats together.
+      camera!.position.set(13, 8, 11);
+      camera!.lookAt(0, 1.0, 0);
+      break;
+    case 'junglegym':
+      // 5×5×9.6 — big cube-shaped climbing frame with 8 levels of
+      // rungs and a top platform. 3/4 view at distance.
+      camera!.position.set(13, 9, 14);
+      camera!.lookAt(0, 4.8, 0);
+      break;
+    case 'merrygoround':
+      // 6×6×3.6 — round disc with central pole and 4 seats. Elevated
+      // 3/4 view to read the disc top, pole, and seats together.
+      camera!.position.set(11, 9, 11);
+      camera!.lookAt(0, 1.6, 0);
       break;
     default:
       camera!.position.set(3.8, 3.2, 3.8);

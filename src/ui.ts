@@ -130,10 +130,42 @@ export function buildUI(game: Game) {
           game.setBlockType('minifig');
           game.setCharacter(preset);
         });
-        if (preset.id === game.character.id) btn.classList.add('active');
+        if (preset.id === game.character.id && game.blockType === 'minifig') {
+          btn.classList.add('active');
+        }
 
         typeGrid.appendChild(btn);
         charButtons.set(preset.id, btn);
+      });
+
+      // Non-minifig characters (dog, future animals) — drawn after the
+      // minifig presets. Reuse the block thumbnail path so the button
+      // style matches the other character-tab tiles.
+      BLOCK_TYPES.filter(
+        (t) => t.category === 'character' && t.type !== 'minifig'
+      ).forEach((t) => {
+        const btn = document.createElement('button');
+        btn.className = 'type-btn character-btn';
+        btn.dataset.type = t.type;
+
+        const img = document.createElement('img');
+        img.alt = t.label;
+        try {
+          img.src = renderBlockTypeThumbnail(t.type, THUMBNAIL_COLOR);
+        } catch {
+          /* fallback */
+        }
+        btn.appendChild(img);
+
+        const label = document.createElement('span');
+        label.textContent = t.label;
+        btn.appendChild(label);
+
+        btn.addEventListener('click', () => game.setBlockType(t.type));
+        if (t.type === game.blockType) btn.classList.add('active');
+
+        typeGrid.appendChild(btn);
+        typeButtons.set(t.type, btn);
       });
     } else {
       BLOCK_TYPES.filter((t) => t.category === cat).forEach((t) => {
@@ -197,16 +229,19 @@ export function buildUI(game: Game) {
   const updateTypeVisibility = (type: BlockType) => {
     const def = BLOCK_TYPES.find((t) => t.type === type);
     const isMinifig = type === 'minifig';
+    const isDog = type === 'dog';
+    const isCharacter = isMinifig || isDog;
     const fixedSize = !!def?.fixedSize;
-    // Blocks with hard-coded natural colors (tree, lamp) ignore the color
-    // picker — disable the panel so users don't get confused.
-    const isColorless = isMinifig || type === 'tree' || type === 'lamp';
+    // Blocks with hard-coded natural colors (tree, lamp, characters)
+    // ignore the color picker — disable the panel so users don't get
+    // confused.
+    const isColorless = isCharacter || type === 'tree' || type === 'lamp';
     document
       .getElementById('color-panel')!
       .classList.toggle('disabled', isColorless);
     document
       .getElementById('size-panel')!
-      .classList.toggle('disabled', isMinifig || fixedSize);
+      .classList.toggle('disabled', isCharacter || fixedSize);
   };
 
   game.onBlockTypeChange = (type) => {

@@ -101,8 +101,12 @@ export const ENVIRONMENTS: EnvironmentDef[] = [
     // island visibly rises out of the water.
     baseplateThickness: 2.4,
     surroundType: 'water',
-    waterColor: 0x0a4466,
-    waterDistortion: 2.4,
+    // Pure deep ocean blue — green component dropped to near zero so
+    // there's no teal/cyan cast. Combined with the slightly lower
+    // distortion below, the sky reflection no longer washes the base
+    // color out toward white/cyan.
+    waterColor: 0x0850e8,
+    waterDistortion: 1.6,
     // Water surface sits ~1.4 units below the plate top, which is roughly
     // halfway down the cliff face — leaves plenty of visible island above.
     waterLevel: -1.4,
@@ -129,6 +133,8 @@ export type BlockType =
   | 'brick'
   | 'tallbrick'
   | 'wallpanel'
+  | 'wallhigh'
+  | 'walltower'
   | 'plate'
   | 'tile'
   | 'slope'
@@ -140,6 +146,8 @@ export type BlockType =
   | 'fence'
   | 'wheel'
   | 'archway'
+  | 'archmid'
+  | 'archlarge'
   | 'stairs'
   | 'gentlestairs'
   | 'column'
@@ -147,13 +155,20 @@ export type BlockType =
   | 'lamp'
   | 'ladder'
   | 'bridge'
-  | 'minifig';
+  | 'slide'
+  | 'swing'
+  | 'seesaw'
+  | 'junglegym'
+  | 'merrygoround'
+  | 'minifig'
+  | 'dog';
 
 export type BlockCategory =
   | 'basic'
   | 'shape'
   | 'part'
   | 'special'
+  | 'playground'
   | 'character';
 
 export interface CategoryDef {
@@ -167,6 +182,7 @@ export const CATEGORIES: CategoryDef[] = [
   { id: 'shape', label: '모양' },
   { id: 'part', label: '부품' },
   { id: 'special', label: '특수' },
+  { id: 'playground', label: '놀이터' },
   { id: 'character', label: '캐릭터' },
 ];
 
@@ -190,6 +206,8 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'brick', label: '벽돌', category: 'basic', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: true },
   { type: 'tallbrick', label: '높은 벽돌', category: 'basic', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: true },
   { type: 'wallpanel', label: '벽 패널', category: 'basic', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: true },
+  { type: 'wallhigh', label: '큰 벽', category: 'basic', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: true },
+  { type: 'walltower', label: '거대 벽', category: 'basic', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: true },
   { type: 'plate', label: '플레이트', category: 'basic', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: true },
   { type: 'tile', label: '타일', category: 'basic', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: true },
   // 모양
@@ -204,18 +222,29 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'wheel', label: '바퀴', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 2, d: 2 } },
   // 특수
   { type: 'archway', label: '아치 입구', category: 'special', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 6, d: 2 } },
+  { type: 'archmid', label: '중간 아치 입구', category: 'special', ghostHeightPlates: 21, bodyHeightPlates: 21, usesSize: false, fixedSize: { w: 8, d: 2 } },
+  { type: 'archlarge', label: '큰 아치 입구', category: 'special', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 10, d: 3 } },
   { type: 'stairs', label: '계단', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 2, d: 4 } },
   { type: 'gentlestairs', label: '완만한 계단', category: 'special', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 6 } },
   { type: 'column', label: '기둥', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'tree', label: '나무', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'lamp', label: '가로등', category: 'special', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 1, d: 1 } },
-  { type: 'ladder', label: '사다리', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
-  // 44 studs long — enough to span a 40-stud gap between two baseplates
-  // with 2 studs of overhang on each end for anchoring. Placement uses a
-  // relaxed bridge-specific check so the middle can hang over open water.
-  { type: 'bridge', label: '교량', category: 'special', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 44 } },
+  { type: 'ladder', label: '사다리', category: 'special', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 2, d: 1 } },
+  // 6 studs wide × 44 long — wide enough for a Lego car to drive across
+  // (a standard car is ~4 studs wide), long enough to span a 40-stud gap
+  // between two baseplates with 2 studs of overhang on each end. Placement
+  // uses a relaxed bridge-specific check so the middle can hang over open
+  // water.
+  { type: 'bridge', label: '교량', category: 'special', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 6, d: 44 } },
+  // 놀이터 — sizes scaled to ~2× minifig height (minifig is 4.8 units tall)
+  { type: 'slide', label: '미끄럼틀', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 4, d: 9 } },
+  { type: 'swing', label: '그네', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 8, d: 3 } },
+  { type: 'seesaw', label: '시소', category: 'playground', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 10, d: 3 } },
+  { type: 'junglegym', label: '정글짐', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 5, d: 5 } },
+  { type: 'merrygoround', label: '회전무대', category: 'playground', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 6, d: 6 } },
   // 캐릭터
   { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
+  { type: 'dog', label: '강아지', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 1, d: 2 } },
 ];
 
 export interface ColorDef {

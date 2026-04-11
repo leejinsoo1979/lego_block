@@ -24,6 +24,8 @@ import type {
 import {
   createBrick,
   createBrickGhost,
+  createDogCharacter,
+  createDogGhost,
   createGhost,
   createMinifigGhost,
   createMinifigure,
@@ -38,8 +40,8 @@ export type ViewMode = 'first' | 'third';
  *  is brought to life during play mode — wanders around, faces movement,
  *  collides with the world, and can be talked to by pressing E nearby). */
 interface NpcState {
-  /** The minifig's root THREE.Group — position/rotation are mutated in
-   *  place each frame. Restored to `homePos`/`origRotY` on stopPlay. */
+  /** The character's root THREE.Group — position/rotation are mutated
+   *  in place each frame. Restored to `homePos`/`origRotY` on stopPlay. */
   obj: THREE.Group;
   homePos: THREE.Vector3;
   origRotY: number;
@@ -53,6 +55,8 @@ interface NpcState {
   stateTimer: number;
   /** The line shown in the chat bubble while state === 'greeting'. */
   greeting: string;
+  /** True for dog NPCs — quadruped walk animation, no chat interaction. */
+  isDog: boolean;
 }
 
 /** Random greetings shown when the player presses E near an NPC. */
@@ -109,6 +113,10 @@ export class Game {
   /** Cached water-normals texture — reused whenever we toggle back into
    *  an environment with surroundType === 'water'. */
   private waterNormalsTex: THREE.Texture | null = null;
+  /** Invisible 2000×2000 plane at y=0, used as a raycast target ONLY when
+   *  the bridge block is selected. Lets the user point at empty space
+   *  (water / off-tile / gap between baseplates) to position a bridge. */
+  private bridgePlane: THREE.Mesh | null = null;
   // Map-extension mode — translucent tile-shaped "slots" appear at every
   // empty horizontal neighbor of an existing baseplate. The user clicks a
   // slot to add a real tile there.
@@ -251,6 +259,9 @@ export class Game {
     this.controls.minDistance = 6;
     this.controls.maxDistance = 120;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.02;
+    // Wheel zoom anchors at the mouse pointer instead of the orbit target,
+    // so scrolling zooms INTO whatever the cursor is over.
+    this.controls.zoomToCursor = true;
     this.controls.target.set(0, 2, 0);
     // LEFT drag: rotate camera (default)
     // MIDDLE drag: also rotate camera (user request)
@@ -509,6 +520,20 @@ export class Game {
     // existing code that touches `this.baseplate` still works.
     this.baseplate = this.baseplates.get('0,0,0')!;
     this.rebuildSurround();
+
+    // Build the invisible bridge raycast plane once. It's a giant
+    // horizontal quad at y=0 — never added to the scene, only used as a
+    // raycast target inside computePlacement when blockType === 'bridge'.
+    const bridgePlaneGeom = new THREE.PlaneGeometry(2000, 2000);
+    const bridgePlaneMat = new THREE.MeshBasicMaterial({
+      visible: false,
+      side: THREE.DoubleSide,
+    });
+    this.bridgePlane = new THREE.Mesh(bridgePlaneGeom, bridgePlaneMat);
+    this.bridgePlane.rotation.x = -Math.PI / 2;
+    this.bridgePlane.position.y = 0;
+    // matrixWorld must be current for raycasting to work
+    this.bridgePlane.updateMatrixWorld(true);
   }
 
   // ------------------------------------------------------------------
@@ -1056,7 +1081,9 @@ export class Game {
       // Shift-drag lines always use the user's current rotation, so don't
       // start a drag when only the auto-rotated orientation fits — that
       // would make the start block inconsistent with the rest of the line.
-      if (start && !start.autoRotate) {
+      // Also skip invalid placements (bridge raw fallback) — we never want
+      // to start a line from a "can't place here" preview.
+      if (start && !start.autoRotate && !start.invalid) {
         const p = { x: start.x, y: start.y, z: start.z };
         this.shiftLineStart = p;
         this.shiftLinePlaced.clear();
@@ -1142,8 +1169,13 @@ export class Game {
           if (!e.repeat) this.toggleViewMode();
           break;
         case 'KeyE':
-          if (!e.repeat && this.currentDoorHotspot) {
-            this.toggleCurrentDoor();
+          if (!e.repeat) {
+            // Doors take priority over NPCs (they share the E key).
+            if (this.currentDoorHotspot) {
+              this.toggleCurrentDoor();
+            } else if (this.currentNpcHotspot) {
+              this.interactWithCurrentNpc();
+            }
           }
           break;
         case 'Escape':
@@ -1316,6 +1348,9 @@ export class Game {
     if (this.blockType === 'minifig') {
       return { w: 2, d: 1 };
     }
+    if (this.blockType === 'dog') {
+      return { w: 1, d: 2 };
+    }
     const def = BLOCK_TYPES.find((t) => t.type === this.blockType);
     if (def?.fixedSize) {
       return { w: def.fixedSize.w, d: def.fixedSize.d };
@@ -1347,12 +1382,29 @@ export class Game {
     /** True when the block was auto-rotated 90° to fit inside the baseplate
      *  edge — ghost/placement should apply an extra rotation step. */
     autoRotate: boolean;
+    /** True when the position is geometrically snapped but the block CAN'T
+     *  actually be placed there (only used by bridges so the ghost can
+     *  show a "red, can't place" preview). */
+    invalid: boolean;
   } | null {
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hits = this.raycaster.intersectObjects(
-      [...this.baseplates.values(), this.brickGroup],
-      true
-    );
+    // For the bridge, the user needs to be able to point at the EMPTY GAP
+    // between two baseplates (e.g. open water in island mode) so the
+    // bridge's center can land in the middle of the gap. We add both the
+    // surround mesh (if any) AND a hidden y=0 raycast plane so any cursor
+    // position over the world resolves to a hit. Baseplates remain the
+    // closest hit when the cursor is over a tile, so normal hovering
+    // behaviour is unchanged.
+    const isBridge = this.blockType === 'bridge';
+    const targets: THREE.Object3D[] = [
+      ...this.baseplates.values(),
+      this.brickGroup,
+    ];
+    if (isBridge) {
+      if (this.surroundMesh) targets.push(this.surroundMesh);
+      if (this.bridgePlane) targets.push(this.bridgePlane);
+    }
+    const hits = this.raycaster.intersectObjects(targets, true);
     if (hits.length === 0) return null;
     const hit = hits[0];
     if (!hit.face) return null;
@@ -1364,17 +1416,40 @@ export class Game {
 
     const eff = this.effectiveSize();
     const pt = hit.point.clone();
+    // If the bridge raycast hit the surround/raycast-plane instead of a
+    // baseplate, force the placement Y up to baseplate-top level so the
+    // bridge sits at the same height as the islands it's connecting.
+    if (isBridge) {
+      const hitObj = hit.object;
+      const isSurroundHit =
+        this.surroundMesh != null &&
+        (hitObj === this.surroundMesh || hitObj.parent === this.surroundMesh);
+      const isPlaneHit = hitObj === this.bridgePlane;
+      if (isSurroundHit || isPlaneHit) {
+        pt.y = 0;
+      }
+    }
 
     // 1) Try the user's current rotation first.
     const primary = this.tryPlacementAt(pt, eff.w, eff.d);
-    if (primary) return { ...primary, autoRotate: false };
+    if (primary) return { ...primary, autoRotate: false, invalid: false };
 
     // 2) Edge fallback: swap w/d (visual 90° rotation) and try again. Only
     //    meaningful when the dimensions actually differ — a square footprint
     //    can't be un-stuck by swapping.
     if (eff.w !== eff.d) {
       const swapped = this.tryPlacementAt(pt, eff.d, eff.w);
-      if (swapped) return { ...swapped, autoRotate: true };
+      if (swapped) return { ...swapped, autoRotate: true, invalid: false };
+    }
+
+    // 3) Bridge fallback: even if no valid placement exists, return a raw
+    //    snapped position so the ghost can render in red. This gives the
+    //    user feedback about WHERE the bridge would go, instead of leaving
+    //    them staring at an empty viewport wondering why the ghost vanished.
+    if (isBridge) {
+      const x = this.snapXZ(pt.x, eff.w);
+      const z = this.snapXZ(pt.z, eff.d);
+      return { x, y: 0, z, autoRotate: false, invalid: true };
     }
 
     return null;
@@ -1502,7 +1577,249 @@ export class Game {
         new THREE.Vector3(pos.x + w / 2, pos.y + h, pos.z + d / 2)
       );
     }
+    if (obj.userData.isDog) {
+      // Dog footprint is 1x2, swapped to 2x1 on 90°/270° rotations.
+      const k = Math.round(obj.rotation.y / (Math.PI / 2));
+      const swapped = ((k % 2) + 2) % 2 === 1;
+      const w = swapped ? 2 : 1;
+      const d = swapped ? 1 : 2;
+      // Body top (legLen 0.7 + bodyH 0.7 + ears ≈ 0.4 headroom)
+      const h = 2.0;
+      return new THREE.Box3(
+        new THREE.Vector3(pos.x - w / 2, pos.y, pos.z - d / 2),
+        new THREE.Vector3(pos.x + w / 2, pos.y + h, pos.z + d / 2)
+      );
+    }
     return new THREE.Box3().setFromObject(obj);
+  }
+
+  /** Returns the list of collision AABBs for an archway / archmid /
+   *  archlarge block: two vertical jambs (1 stud wide each) plus a
+   *  lintel AABB spanning the top. The interior opening is left
+   *  uncovered so the player can walk through. The walk-through axis
+   *  depends on the block's effective footprint — the jambs sit at the
+   *  extremes of the LONGER side. */
+  private archwayCollisionBoxes(
+    obj: THREE.Object3D,
+    spec: { w: number; d: number; type?: BlockType }
+  ): THREE.Box3[] {
+    // Height varies per variant — keep in sync with createArchwayBlock.
+    let plates: number;
+    switch (spec.type) {
+      case 'archmid':
+        plates = 21;
+        break;
+      case 'archlarge':
+        plates = 24;
+        break;
+      default:
+        plates = 18; // archway
+    }
+    const pos = obj.position;
+    const h = plates * PLATE_HEIGHT;
+    const legThk = 1.0; // 1 stud wide legs
+    const LINTEL_Y = h - 3 * PLATE_HEIGHT; // top 1 brick = flat lintel
+    const boxes: THREE.Box3[] = [];
+    const w = spec.w;
+    const d = spec.d;
+
+    if (w >= d) {
+      // Walk-through along ±Z (jambs at ±X extremes)
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(pos.x - w / 2, pos.y, pos.z - d / 2),
+          new THREE.Vector3(
+            pos.x - w / 2 + legThk,
+            pos.y + h,
+            pos.z + d / 2
+          )
+        )
+      );
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(
+            pos.x + w / 2 - legThk,
+            pos.y,
+            pos.z - d / 2
+          ),
+          new THREE.Vector3(pos.x + w / 2, pos.y + h, pos.z + d / 2)
+        )
+      );
+      // Lintel only spans the OPENING between jambs (the jambs already
+      // cover their corners at full height).
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(
+            pos.x - w / 2 + legThk,
+            pos.y + LINTEL_Y,
+            pos.z - d / 2
+          ),
+          new THREE.Vector3(
+            pos.x + w / 2 - legThk,
+            pos.y + h,
+            pos.z + d / 2
+          )
+        )
+      );
+    } else {
+      // Walk-through along ±X (jambs at ±Z extremes)
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(pos.x - w / 2, pos.y, pos.z - d / 2),
+          new THREE.Vector3(
+            pos.x + w / 2,
+            pos.y + h,
+            pos.z - d / 2 + legThk
+          )
+        )
+      );
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(
+            pos.x - w / 2,
+            pos.y,
+            pos.z + d / 2 - legThk
+          ),
+          new THREE.Vector3(pos.x + w / 2, pos.y + h, pos.z + d / 2)
+        )
+      );
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(
+            pos.x - w / 2,
+            pos.y + LINTEL_Y,
+            pos.z - d / 2 + legThk
+          ),
+          new THREE.Vector3(
+            pos.x + w / 2,
+            pos.y + h,
+            pos.z + d / 2 - legThk
+          )
+        )
+      );
+    }
+
+    return boxes;
+  }
+
+  /** Returns per-step collision AABBs for a staircase. Each step is a
+   *  box from the ground (y=0) to the top of that step. This lets
+   *  `tryStepUp` walk the player up one step at a time instead of
+   *  seeing the whole staircase as an impassable full-height block.
+   *  Uses the object's world matrix so rotated staircases work too. */
+  private stairsCollisionBoxes(
+    obj: THREE.Object3D,
+    spec: { w: number; d: number; type?: BlockType }
+  ): THREE.Box3[] {
+    // Step rise per staircase variant (must match createStairsBlockShared).
+    const stepRise =
+      spec.type === 'gentlestairs' ? PLATE_HEIGHT : 3 * PLATE_HEIGHT;
+
+    // Base (unrotated) dims from fixedSize in config. The block was built
+    // in this orientation and then obj.rotation.y was applied.
+    let baseW = 2;
+    let baseD = spec.type === 'gentlestairs' ? 6 : 4;
+    // If the effective footprint's longer axis doesn't match the base's,
+    // the block was rotated by an odd step — swap to recover base dims.
+    if ((spec.w > spec.d) !== (baseW > baseD)) {
+      [baseW, baseD] = [baseD, baseW];
+    }
+    // GRID.X / GRID.Z = 1 stud pitch in our unit system.
+    const width = baseW;
+    const depth = baseD;
+
+    obj.updateMatrixWorld(true);
+    const boxes: THREE.Box3[] = [];
+    // One AABB per step. Local step i spans full width, 1 stud in z at
+    // z = -depth/2 + i, height = (i+1)*stepRise.
+    for (let i = 0; i < baseD; i++) {
+      const stepTop = (i + 1) * stepRise;
+      const local = new THREE.Box3(
+        new THREE.Vector3(-width / 2, 0, -depth / 2 + i),
+        new THREE.Vector3(width / 2, stepTop, -depth / 2 + i + 1)
+      );
+      local.applyMatrix4(obj.matrixWorld);
+      boxes.push(local);
+    }
+    return boxes;
+  }
+
+  /** Returns collision AABBs for a small arch (4×1, 1 brick tall). Two
+   *  jamb boxes + the flat beam. The opening under the beam is 0.8 units
+   *  tall — too short to walk under at ground level, but auto step-up
+   *  handles the 1.2-tall top just fine. */
+  private archCollisionBoxes(
+    obj: THREE.Object3D,
+    spec: { w: number; d: number }
+  ): THREE.Box3[] {
+    const pos = obj.position;
+    const h = 3 * PLATE_HEIGHT; // 1.2
+    const beamH = PLATE_HEIGHT; // 0.4 top flat
+    const legH = h - beamH; // 0.8
+    const legThk = 1.0;
+    const w = spec.w;
+    const d = spec.d;
+    const boxes: THREE.Box3[] = [];
+
+    if (w >= d) {
+      // Jambs at ±X extremes, beam across full width at the top
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(pos.x - w / 2, pos.y, pos.z - d / 2),
+          new THREE.Vector3(
+            pos.x - w / 2 + legThk,
+            pos.y + legH,
+            pos.z + d / 2
+          )
+        )
+      );
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(
+            pos.x + w / 2 - legThk,
+            pos.y,
+            pos.z - d / 2
+          ),
+          new THREE.Vector3(pos.x + w / 2, pos.y + legH, pos.z + d / 2)
+        )
+      );
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(pos.x - w / 2, pos.y + legH, pos.z - d / 2),
+          new THREE.Vector3(pos.x + w / 2, pos.y + h, pos.z + d / 2)
+        )
+      );
+    } else {
+      // Jambs at ±Z extremes
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(pos.x - w / 2, pos.y, pos.z - d / 2),
+          new THREE.Vector3(
+            pos.x + w / 2,
+            pos.y + legH,
+            pos.z - d / 2 + legThk
+          )
+        )
+      );
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(
+            pos.x - w / 2,
+            pos.y,
+            pos.z + d / 2 - legThk
+          ),
+          new THREE.Vector3(pos.x + w / 2, pos.y + legH, pos.z + d / 2)
+        )
+      );
+      boxes.push(
+        new THREE.Box3(
+          new THREE.Vector3(pos.x - w / 2, pos.y + legH, pos.z - d / 2),
+          new THREE.Vector3(pos.x + w / 2, pos.y + h, pos.z + d / 2)
+        )
+      );
+    }
+
+    return boxes;
   }
 
   // ------------------------------------------------------------------
@@ -1556,6 +1873,7 @@ export class Game {
     const heightPlates = this.currentGhostHeightPlates();
     const u = this.ghost.userData;
     const isMinifig = this.blockType === 'minifig';
+    const isDog = this.blockType === 'dog';
     const isShaped = this.isShapedBlock(this.blockType);
 
     const needsRecreate =
@@ -1563,11 +1881,12 @@ export class Game {
       u.w !== finalW ||
       u.d !== finalD ||
       u.heightPlates !== heightPlates ||
-      // Shaped/minifig ghosts bake color+rotation into their child materials
-      // so any change requires a full rebuild.
+      // Shaped/minifig/dog ghosts bake rotation into their child meshes
+      // so any rotation change requires a full rebuild.
       (isMinifig &&
         (u.characterId !== this.character.id ||
           u.totalRotStep !== totalRotStep)) ||
+      (isDog && u.totalRotStep !== totalRotStep) ||
       (isShaped &&
         (u.colorHex !== this.color.hex ||
           u.totalRotStep !== totalRotStep));
@@ -1578,6 +1897,10 @@ export class Game {
         const fig = createMinifigGhost(this.character);
         fig.rotation.y = -totalRotStep * (Math.PI / 2);
         this.ghost = fig;
+      } else if (isDog) {
+        const dog = createDogGhost();
+        dog.rotation.y = -totalRotStep * (Math.PI / 2);
+        this.ghost = dog;
       } else if (isShaped) {
         // Build the ghost from the *base* (unrotated) dimensions, then
         // apply explicit Y rotation. The factory's internal canonical
@@ -1608,12 +1931,49 @@ export class Game {
       this.ghost.userData.colorHex = this.color.hex;
       this.ghost.userData.characterId = this.character.id;
       this.ghost.userData.totalRotStep = totalRotStep;
+      // Snapshot original colors so the invalid-state red tint can be
+      // restored cleanly when the placement becomes valid again.
+      this.ghost.userData.invalidTinted = false;
+      this.ghost.userData.materialOriginalColors = [];
+      this.ghost.traverse((c) => {
+        if (c instanceof THREE.Mesh) {
+          const mat = c.material as { color?: THREE.Color };
+          if (mat.color) {
+            this.ghost.userData.materialOriginalColors.push({
+              mat,
+              hex: mat.color.getHex(),
+            });
+          }
+        }
+      });
       this.scene.add(this.ghost);
-    } else if (!isMinifig && !isShaped && this.ghost instanceof THREE.Mesh) {
+    } else if (
+      !isMinifig &&
+      !isDog &&
+      !isShaped &&
+      this.ghost instanceof THREE.Mesh
+    ) {
       // Cheap color update for the box ghost
       const mat = this.ghost.material as THREE.MeshBasicMaterial;
       mat.color.setHex(this.color.hex);
       this.ghost.userData.colorHex = this.color.hex;
+    }
+
+    // Apply / restore the "invalid" red tint based on the current placement.
+    // Only the bridge currently uses placement.invalid; other blocks always
+    // have invalid === false.
+    const wantTinted = placement.invalid === true;
+    if (wantTinted !== this.ghost.userData.invalidTinted) {
+      const originals = (this.ghost.userData.materialOriginalColors ?? []) as {
+        mat: { color: THREE.Color };
+        hex: number;
+      }[];
+      if (wantTinted) {
+        for (const o of originals) o.mat.color.setHex(0xe24848);
+      } else {
+        for (const o of originals) o.mat.color.setHex(o.hex);
+      }
+      this.ghost.userData.invalidTinted = wantTinted;
     }
 
     this.ghost.position.set(placement.x, placement.y, placement.z);
@@ -1653,6 +2013,10 @@ export class Game {
   private placeBlock() {
     const placement = this.computePlacement();
     if (!placement) return;
+    // Bridge previews can return a "raw" snapped position with invalid=true
+    // so the user can see where it would go in red. We must NOT actually
+    // place anything in that case.
+    if (placement.invalid) return;
     this.placeAtPosition(placement, placement.autoRotate);
   }
 
@@ -1671,6 +2035,9 @@ export class Game {
 
     if (this.blockType === 'minifig') {
       obj = createMinifigure(this.character);
+      obj.rotation.y = -totalRotStep * (Math.PI / 2);
+    } else if (this.blockType === 'dog') {
+      obj = createDogCharacter();
       obj.rotation.y = -totalRotStep * (Math.PI / 2);
     } else {
       const base = this.baseDims();
@@ -1845,8 +2212,13 @@ export class Game {
     // playAABBs snapshot.
     this.npcs = [];
     for (const child of this.brickGroup.children) {
-      const spec = child.userData.spec as { type?: BlockType } | undefined;
-      if (spec?.type === 'minifig' || child.userData.isMinifig) {
+      const spec = child.userData.spec as
+        | { w: number; d: number; type?: BlockType }
+        | undefined;
+      const isMinifigNpc =
+        spec?.type === 'minifig' || child.userData.isMinifig;
+      const isDogNpc = spec?.type === 'dog' || child.userData.isDog;
+      if (isMinifigNpc || isDogNpc) {
         const homePos = child.position.clone();
         const initYaw = child.rotation.y;
         this.npcs.push({
@@ -1860,8 +2232,45 @@ export class Game {
           // Stagger initial idle so NPCs don't all start moving on frame 1
           stateTimer: 0.5 + Math.random() * 2.5,
           greeting: '',
+          isDog: isDogNpc,
         });
         continue; // no static AABB for NPCs
+      }
+      // Archway variants: the getBlockAABB fallback would treat the
+      // entire extruded block as solid — walking through the opening
+      // would be impossible. Split the collider into left jamb + right
+      // jamb + top lintel so the opening is actually passable.
+      if (
+        spec?.type === 'archway' ||
+        spec?.type === 'archmid' ||
+        spec?.type === 'archlarge'
+      ) {
+        for (const box of this.archwayCollisionBoxes(child, spec)) {
+          this.playAABBs.push(box);
+          this.playAABBDoorRefs.push(null);
+        }
+        continue;
+      }
+      // Stairs: each step is its own AABB so auto-step-up can walk the
+      // player up one step at a time. A single full-height AABB would
+      // exceed STEP_MAX on the first frame.
+      if (spec?.type === 'stairs' || spec?.type === 'gentlestairs') {
+        for (const box of this.stairsCollisionBoxes(child, spec)) {
+          this.playAABBs.push(box);
+          this.playAABBDoorRefs.push(null);
+        }
+        continue;
+      }
+      // Small arch (1-brick tall, beam + two legs): decompose into two
+      // legs + the beam so the geometry matches the visual. At ground
+      // level the character still has to auto-step over it (the opening
+      // is only ~0.8 unit tall — well below head height).
+      if (spec?.type === 'arch') {
+        for (const box of this.archCollisionBoxes(child, spec)) {
+          this.playAABBs.push(box);
+          this.playAABBDoorRefs.push(null);
+        }
+        continue;
       }
       this.playAABBs.push(this.getBlockAABB(child));
       this.playAABBDoorRefs.push(spec?.type === 'door' ? child : null);
@@ -1876,11 +2285,17 @@ export class Game {
     // Add baseplate AABBs for collision so the player doesn't fall through.
     // Slab bottom is relative to the environment's plate thickness (0.4 for
     // the standard plate, larger for island / other thicker environments).
+    // The slab top is nudged DOWN by a tiny epsilon: THREE.Box3.intersectsBox
+    // treats face-touching boxes as intersecting (uses strict <), so a player
+    // whose feet sit exactly on the slab top (y=0) would otherwise be in
+    // permanent collision and X/Z movement would be blocked every frame.
+    // The visual baseplate stays at y=0; only the collision box is offset.
     const plateThickness = this.environment.baseplateThickness ?? 0.4;
+    const SLAB_TOP_EPS = 0.001;
     for (const tile of this.baseplates.values()) {
       const half = this.tileSize / 2;
       const slabBottom = tile.position.y - plateThickness;
-      const slabTop = tile.position.y;
+      const slabTop = tile.position.y - SLAB_TOP_EPS;
       this.playAABBs.push(
         new THREE.Box3(
           new THREE.Vector3(
@@ -2029,10 +2444,13 @@ export class Game {
     this.updateNpcs(dt);
     this.updateNpcHotspot();
 
-    const RUN_MULT = 1.7;
+    // Real Roblox-style run: significantly faster than walk. The walk
+    // cycle amplitude + body lean changes below make it *feel* like a
+    // full-on sprint, not just "faster walking".
+    const RUN_MULT = 2.4;
     const SPEED = 6 * (this.moveKeys.run ? RUN_MULT : 1);
     const GRAVITY = -22;
-    const JUMP = 9;
+    const JUMP = this.moveKeys.run ? 10.5 : 9;
     // Minifig footprint is 2×1 studs — the visible mesh (torso, arms,
     // shoulders) extends up to 1 unit from the player center. Using 0.45
     // lets arms/shoulders clip into walls and doorframes. 1.0 half-width
@@ -2164,16 +2582,21 @@ export class Game {
         while (delta < -Math.PI) delta += 2 * Math.PI;
         this.avatarYaw += delta * Math.min(1, dt * 12);
       }
-      this.playerAvatar.rotation.y = this.avatarYaw;
+
+      // Running state: holding Shift while actually moving on the ground
+      const isRunning =
+        this.moveKeys.run && isWalking && this.onGround;
 
       // Walking animation: hip-pivoted leg swing + opposite-phase arm swing.
       // Pivots are created in createMinifigure (blocks.ts) so rotations
-      // happen at the hip / shoulder rather than the mesh center.
+      // happen at the hip / shoulder rather than the mesh center. Running
+      // uses a faster cycle, a larger stride, and more arm swing.
       if (isWalking && this.onGround) {
-        this.walkTime += dt * (this.moveKeys.run ? 13 : 9);
+        this.walkTime += dt * (isRunning ? 15 : 9);
       }
+      const swingAmp = isRunning ? 0.7 : 0.32;
       const swing =
-        isWalking && this.onGround ? Math.sin(this.walkTime) * 0.32 : 0;
+        isWalking && this.onGround ? Math.sin(this.walkTime) * swingAmp : 0;
       const parts = this.playerAvatar.userData.parts as
         | {
             rightLeg?: THREE.Group | null;
@@ -2186,16 +2609,33 @@ export class Game {
         // Right leg forward ↔ left leg back
         if (parts.rightLeg) parts.rightLeg.rotation.x = swing;
         if (parts.leftLeg) parts.leftLeg.rotation.x = -swing;
-        // Arms swing opposite to legs (right arm back when right leg forward)
-        if (parts.rightArm) parts.rightArm.rotation.x = -swing * 0.85;
-        if (parts.leftArm) parts.leftArm.rotation.x = swing * 0.85;
+        // Arms swing opposite to legs, a bit bigger when sprinting
+        const armScale = isRunning ? 1.0 : 0.85;
+        if (parts.rightArm) parts.rightArm.rotation.x = -swing * armScale;
+        if (parts.leftArm) parts.leftArm.rotation.x = swing * armScale;
       }
-      // Subtle body bounce
+      // Body bounce — much more pronounced when sprinting
+      const bobAmp = isRunning ? 0.14 : 0.05;
       const bob =
         isWalking && this.onGround
-          ? Math.abs(Math.sin(this.walkTime)) * 0.05
+          ? Math.abs(Math.sin(this.walkTime)) * bobAmp
           : 0;
       this.playerAvatar.position.y += bob;
+
+      // Forward body lean when sprinting — gives that real "running"
+      // silhouette instead of "walking faster". Smoothly eases in/out so
+      // starting/stopping Shift doesn't snap the body.
+      // With YXZ rotation order the local X axis (after yaw) maps to the
+      // character's right, and a POSITIVE rotation.x tilts the head toward
+      // the character's forward direction — i.e. a forward lean.
+      this.playerAvatar.rotation.order = 'YXZ';
+      const targetLean = isRunning ? 0.28 : 0; // ~16° forward
+      const currentLean = this.playerAvatar.rotation.x;
+      const leanDelta = targetLean - currentLean;
+      this.playerAvatar.rotation.x =
+        currentLean + leanDelta * Math.min(1, dt * 8);
+      this.playerAvatar.rotation.y = this.avatarYaw;
+      this.playerAvatar.rotation.z = 0;
     }
 
     // ----- Camera positioning -----
@@ -2262,6 +2702,22 @@ export class Game {
       const door = this.playAABBDoorRefs[i];
       if (door && this.isDoorPassable(door)) continue;
       if (box.intersectsBox(this.playAABBs[i])) return true;
+    }
+    // Dynamic NPC collision — treat each NPC as a cylinder of radius
+    // NPC_BODY_R. Player can't walk through them.
+    const npcH = getMinifigHeight() || 2.5;
+    for (const npc of this.npcs) {
+      const npcY = npc.obj.position.y;
+      // Vertical overlap test
+      if (y + bh <= npcY + EPS) continue;
+      if (y >= npcY + npcH - EPS) continue;
+      // Circle-AABB: closest point on the player AABB to the NPC center
+      const px = Math.max(x - bw, Math.min(npc.obj.position.x, x + bw));
+      const pz = Math.max(z - bw, Math.min(npc.obj.position.z, z + bw));
+      const dx = npc.obj.position.x - px;
+      const dz = npc.obj.position.z - pz;
+      const r = Game.NPC_BODY_R;
+      if (dx * dx + dz * dz < r * r) return true;
     }
     return false;
   }
@@ -2488,6 +2944,248 @@ export class Game {
   }
 
   // ------------------------------------------------------------------
+  //  NPC AI (play mode)
+  // ------------------------------------------------------------------
+
+  /** NPC movement speed in world units per second. About a third of the
+   *  walking player — NPCs should feel like scenery, not competition. */
+  private static readonly NPC_SPEED = 2.2;
+  /** Maximum wander distance from the NPC's home (placement) position. */
+  private static readonly NPC_WANDER_RADIUS = 7.5;
+  /** Radius at which the NPC's capsule collides with walls / each other. */
+  private static readonly NPC_BODY_R = 0.7;
+  /** Range at which "[E] 대화하기" prompt appears near an NPC. */
+  private static readonly NPC_INTERACT_RANGE = 2.8;
+
+  private updateNpcs(dt: number) {
+    if (this.npcs.length === 0) return;
+    const npcHeight = getMinifigHeight() || 2.5;
+    for (const npc of this.npcs) {
+      // --- State machine ---
+      if (npc.state === 'greeting') {
+        npc.stateTimer -= dt;
+        if (npc.stateTimer <= 0) {
+          npc.state = 'idle';
+          npc.stateTimer = 0.6 + Math.random() * 1.8;
+          if (this.currentNpcHotspot === npc) {
+            this.getNpcBubble()?.classList.add('hidden');
+            this.renderNpcPrompt();
+          }
+        }
+        // Face the player while greeting — warm "looking at you" feel.
+        this.faceNpcToward(npc, this.playerPos.x, this.playerPos.z, dt * 6);
+        applyNpcLimbs(npc.obj, 0);
+        continue;
+      }
+
+      if (npc.state === 'idle') {
+        npc.stateTimer -= dt;
+        if (npc.stateTimer <= 0) {
+          this.pickNpcTarget(npc);
+          npc.state = 'walking';
+        }
+        applyNpcLimbs(npc.obj, 0);
+        continue;
+      }
+
+      // --- Walking ---
+      const tx = npc.target.x - npc.obj.position.x;
+      const tz = npc.target.z - npc.obj.position.z;
+      const distSq = tx * tx + tz * tz;
+      const ARRIVE = 0.5;
+      if (distSq < ARRIVE * ARRIVE) {
+        npc.state = 'idle';
+        npc.stateTimer = 1.2 + Math.random() * 2.2;
+        applyNpcLimbs(npc.obj, 0);
+        continue;
+      }
+
+      const inv = 1 / Math.sqrt(distSq);
+      const dirX = tx * inv;
+      const dirZ = tz * inv;
+      const step = Game.NPC_SPEED * dt;
+      const nextX = npc.obj.position.x + dirX * step;
+      const nextZ = npc.obj.position.z + dirZ * step;
+
+      if (this.npcCanMoveTo(nextX, nextZ, npc, npcHeight)) {
+        npc.obj.position.x = nextX;
+        npc.obj.position.z = nextZ;
+        this.faceNpcToward(
+          npc,
+          npc.obj.position.x + dirX,
+          npc.obj.position.z + dirZ,
+          dt * 7
+        );
+        // Walking limb animation
+        npc.walkTime += dt * 6.5;
+        const swing = Math.sin(npc.walkTime) * 0.3;
+        applyNpcLimbs(npc.obj, swing);
+      } else {
+        // Blocked — abort this target and retry shortly
+        npc.state = 'idle';
+        npc.stateTimer = 0.5 + Math.random() * 0.8;
+        applyNpcLimbs(npc.obj, 0);
+      }
+    }
+  }
+
+  /** Picks a new wander target inside a disk around the NPC's home. If
+   *  the target isn't reachable the NPC will abort mid-walk and retry. */
+  private pickNpcTarget(npc: NpcState) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = 1.5 + Math.random() * Game.NPC_WANDER_RADIUS;
+    npc.target.set(
+      npc.homePos.x + Math.cos(angle) * r,
+      npc.homePos.y,
+      npc.homePos.z + Math.sin(angle) * r
+    );
+  }
+
+  /** Smoothly rotates an NPC to face a world-space XZ target. */
+  private faceNpcToward(
+    npc: NpcState,
+    tx: number,
+    tz: number,
+    slerpFactor: number
+  ) {
+    const dx = tx - npc.obj.position.x;
+    const dz = tz - npc.obj.position.z;
+    if (dx * dx + dz * dz < 1e-6) return;
+    const targetYaw = Math.atan2(dx, dz);
+    let delta = targetYaw - npc.yaw;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta < -Math.PI) delta += 2 * Math.PI;
+    npc.yaw += delta * Math.min(1, slerpFactor);
+    npc.obj.rotation.y = npc.yaw;
+  }
+
+  /** True when the NPC's circular body at (x, z) doesn't overlap any
+   *  static block, the player, or another NPC. */
+  private npcCanMoveTo(
+    x: number,
+    z: number,
+    self: NpcState,
+    npcHeight: number
+  ): boolean {
+    const r = Game.NPC_BODY_R;
+    const y = self.obj.position.y;
+    const yTop = y + npcHeight;
+
+    // 1) Static blocks — circle-AABB test, skipping open doors.
+    for (let i = 0; i < this.playAABBs.length; i++) {
+      const door = this.playAABBDoorRefs[i];
+      if (door && this.isDoorPassable(door)) continue;
+      const b = this.playAABBs[i];
+      if (b.max.y <= y + 0.05) continue; // below feet
+      if (b.min.y >= yTop - 0.05) continue; // above head
+      const cx = Math.max(b.min.x, Math.min(x, b.max.x));
+      const cz = Math.max(b.min.z, Math.min(z, b.max.z));
+      const dx = x - cx;
+      const dz = z - cz;
+      if (dx * dx + dz * dz < r * r) return false;
+    }
+
+    // 2) Player — treat as radius-1.0 (matches BODY_W).
+    const dpx = x - this.playerPos.x;
+    const dpz = z - this.playerPos.z;
+    const playerR = 1.0;
+    if (dpx * dpx + dpz * dpz < (r + playerR) * (r + playerR)) return false;
+
+    // 3) Other NPCs.
+    for (const other of this.npcs) {
+      if (other === self) continue;
+      const odx = x - other.obj.position.x;
+      const odz = z - other.obj.position.z;
+      if (odx * odx + odz * odz < (r + r) * (r + r)) return false;
+    }
+
+    return true;
+  }
+
+  private updateNpcHotspot() {
+    if (this.npcs.length === 0) {
+      if (this.currentNpcHotspot) {
+        this.currentNpcHotspot = null;
+        this.renderNpcPrompt();
+      }
+      return;
+    }
+    const range = Game.NPC_INTERACT_RANGE;
+    let nearest: { npc: NpcState; dist: number } | null = null;
+    for (const npc of this.npcs) {
+      if (npc.isDog) continue; // dogs don't have a chat greeting
+      const dx = npc.obj.position.x - this.playerPos.x;
+      const dz = npc.obj.position.z - this.playerPos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < range && (!nearest || dist < nearest.dist)) {
+        nearest = { npc, dist };
+      }
+    }
+    const next = nearest?.npc ?? null;
+    if (this.currentNpcHotspot !== next) {
+      this.currentNpcHotspot = next;
+      this.renderNpcPrompt();
+    }
+  }
+
+  private renderNpcPrompt() {
+    const el = this.getNpcPrompt();
+    if (!el) return;
+    const npc = this.currentNpcHotspot;
+    if (!npc) {
+      el.classList.add('hidden');
+      return;
+    }
+    // Hide the prompt while the NPC is mid-greeting — the chat bubble
+    // takes over and showing both would be noisy.
+    if (npc.state === 'greeting') {
+      el.classList.add('hidden');
+      return;
+    }
+    if (this.npcPromptLabelEl) {
+      this.npcPromptLabelEl.textContent = '대화하기';
+    }
+    el.classList.remove('hidden');
+  }
+
+  /** Triggered by the E key when `currentNpcHotspot` is set and no door
+   *  is closer. The NPC switches to 'greeting' (stops, turns to face the
+   *  player) and the chat bubble shows for a few seconds. */
+  private interactWithCurrentNpc() {
+    const npc = this.currentNpcHotspot;
+    if (!npc) return;
+    const line =
+      NPC_GREETINGS[Math.floor(Math.random() * NPC_GREETINGS.length)];
+    npc.greeting = line;
+    npc.state = 'greeting';
+    npc.stateTimer = 3.2;
+    applyNpcLimbs(npc.obj, 0);
+
+    const bubble = this.getNpcBubble();
+    if (bubble && this.npcBubbleTextEl) {
+      this.npcBubbleTextEl.textContent = line;
+      bubble.classList.remove('hidden');
+    }
+    this.renderNpcPrompt();
+  }
+
+  private getNpcPrompt(): HTMLElement | null {
+    if (!this.npcPromptEl) {
+      this.npcPromptEl = document.getElementById('npc-prompt');
+      this.npcPromptLabelEl = document.getElementById('npc-prompt-label');
+    }
+    return this.npcPromptEl;
+  }
+
+  private getNpcBubble(): HTMLElement | null {
+    if (!this.npcBubbleEl) {
+      this.npcBubbleEl = document.getElementById('npc-bubble');
+      this.npcBubbleTextEl = document.getElementById('npc-bubble-text');
+    }
+    return this.npcBubbleEl;
+  }
+
+  // ------------------------------------------------------------------
   //  Render loop
   // ------------------------------------------------------------------
 
@@ -2523,4 +3221,41 @@ function findDoorHinge(obj: THREE.Object3D): THREE.Object3D | null {
     if (!result && c.userData.isDoorHinge) result = c;
   });
   return result;
+}
+
+/** Rotates hip/shoulder pivot groups (populated by `createMinifigure` /
+ *  `createDogCharacter` in blocks.ts via `userData.parts`) so the limbs
+ *  swing back and forth. Biped minifigs use the 2-leg+2-arm gait;
+ *  quadruped dogs use a diagonal-pair trot (front-right and back-left
+ *  forward, front-left and back-right back). Pass swing=0 to reset to
+ *  the neutral idle pose. */
+function applyNpcLimbs(obj: THREE.Object3D, swing: number) {
+  const parts = obj.userData.parts as
+    | {
+        // Biped minifig
+        rightLeg?: THREE.Group | null;
+        leftLeg?: THREE.Group | null;
+        rightArm?: THREE.Group | null;
+        leftArm?: THREE.Group | null;
+        // Quadruped dog
+        frontRightLeg?: THREE.Group | null;
+        frontLeftLeg?: THREE.Group | null;
+        backRightLeg?: THREE.Group | null;
+        backLeftLeg?: THREE.Group | null;
+      }
+    | undefined;
+  if (!parts) return;
+  // Quadruped: diagonal pairs move in phase (trot gait).
+  if (parts.frontRightLeg || parts.backLeftLeg) {
+    if (parts.frontRightLeg) parts.frontRightLeg.rotation.x = swing;
+    if (parts.backLeftLeg) parts.backLeftLeg.rotation.x = swing;
+    if (parts.frontLeftLeg) parts.frontLeftLeg.rotation.x = -swing;
+    if (parts.backRightLeg) parts.backRightLeg.rotation.x = -swing;
+    return;
+  }
+  // Biped: right leg forward ↔ left leg back, arms in opposite phase.
+  if (parts.rightLeg) parts.rightLeg.rotation.x = swing;
+  if (parts.leftLeg) parts.leftLeg.rotation.x = -swing;
+  if (parts.rightArm) parts.rightArm.rotation.x = -swing * 0.85;
+  if (parts.leftArm) parts.leftArm.rotation.x = swing * 0.85;
 }

@@ -781,6 +781,83 @@ body.remove-mode #viewer canvas {
   }
 }
 
+/* NPC interaction prompt — same visual language as the door prompt but
+   sits slightly higher so they don't overlap if both appear. */
+#play-overlay .npc-prompt {
+  position: absolute;
+  bottom: 156px;
+  left: 50%;
+  transform: translate(-50%, 0);
+  background: rgba(20, 22, 28, 0.88);
+  color: #fff;
+  padding: 11px 20px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: doorPromptIn 0.16s ease-out;
+}
+
+#play-overlay .npc-prompt.hidden {
+  display: none;
+}
+
+#play-overlay .npc-prompt kbd {
+  padding: 3px 8px;
+  font-size: 11.5px;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
+  margin-right: 4px;
+}
+
+/* NPC chat bubble — larger, softer card that temporarily replaces the
+   interaction prompt while an NPC is greeting the player. */
+#play-overlay .npc-bubble {
+  position: absolute;
+  bottom: 156px;
+  left: 50%;
+  transform: translate(-50%, 0);
+  background: #ffffff;
+  color: #1c1d22;
+  padding: 14px 22px;
+  border-radius: 16px 16px 16px 4px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.3),
+    0 2px 6px rgba(0, 0, 0, 0.15);
+  max-width: 520px;
+  white-space: normal;
+  text-align: center;
+  pointer-events: none;
+  animation: npcBubbleIn 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+#play-overlay .npc-bubble.hidden {
+  display: none;
+}
+
+@keyframes npcBubbleIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, -2px) scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
 /* Play mode: hide the sidebar completely and let the viewer go full-screen */
 body.playing #sidebar {
   display: none;

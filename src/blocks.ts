@@ -60,6 +60,8 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'brick':
     case 'tallbrick':
     case 'wallpanel':
+    case 'wallhigh':
+    case 'walltower':
       group = createBoxBlock(spec, type);
       break;
     case 'slope':
@@ -87,6 +89,8 @@ export function createBrick(spec: BlockSpec): THREE.Group {
       group = createWheelBlock(spec);
       break;
     case 'archway':
+    case 'archmid':
+    case 'archlarge':
       group = createArchwayBlock(spec);
       break;
     case 'stairs':
@@ -110,6 +114,21 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'bridge':
       group = createBridgeBlock(spec);
       break;
+    case 'slide':
+      group = createSlideBlock(spec);
+      break;
+    case 'swing':
+      group = createSwingBlock(spec);
+      break;
+    case 'seesaw':
+      group = createSeesawBlock(spec);
+      break;
+    case 'junglegym':
+      group = createJungleGymBlock(spec);
+      break;
+    case 'merrygoround':
+      group = createMerryGoRoundBlock(spec);
+      break;
     default:
       group = createBoxBlock(spec, 'brick');
   }
@@ -120,7 +139,14 @@ export function createBrick(spec: BlockSpec): THREE.Group {
 
 function createBoxBlock(
   spec: BlockSpec,
-  type: 'brick' | 'plate' | 'tile' | 'tallbrick' | 'wallpanel'
+  type:
+    | 'brick'
+    | 'plate'
+    | 'tile'
+    | 'tallbrick'
+    | 'wallpanel'
+    | 'wallhigh'
+    | 'walltower'
 ): THREE.Group {
   const group = new THREE.Group();
   const width = spec.w * GRID.X;
@@ -140,6 +166,12 @@ function createBoxBlock(
       break;
     case 'wallpanel':
       plates = 9;
+      break;
+    case 'wallhigh':
+      plates = 15; // matches door height
+      break;
+    case 'walltower':
+      plates = 18; // matches archway height
       break;
     case 'brick':
     default:
@@ -754,10 +786,23 @@ function createArchwayBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w;
   const d = spec.d;
-  // 18 plates (6 bricks, 7.2 units) — tall enough for a minifig to walk
-  // through under the arch crown. Keep in sync with bodyHeightPlates in
-  // config.ts.
-  const h = 18 * PLATE_HEIGHT;
+  // Height varies per archway type — keep in sync with bodyHeightPlates
+  // in config.ts. Default 'archway' = 18 plates; 'archmid' = 21; 'archlarge'
+  // = 24 (the latter two are wider and need taller crowns to keep their
+  // proportions sensible).
+  let plates: number;
+  switch (spec.type) {
+    case 'archmid':
+      plates = 21;
+      break;
+    case 'archlarge':
+      plates = 24;
+      break;
+    case 'archway':
+    default:
+      plates = 18;
+  }
+  const h = plates * PLATE_HEIGHT;
   const material = studMaterial(spec.colorHex);
 
   const width = w * GRID.X;
@@ -1052,11 +1097,17 @@ function createLampBlock(_spec: BlockSpec): THREE.Group {
 // ------------------------------------------------------------------
 function createLadderBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
-  const h = 12 * PLATE_HEIGHT;
+  // 18 plates (= 7.2 units) — taller than the minifig's ~4.8u so the
+  // climber actually has rungs above their head. Keep in sync with
+  // bodyHeightPlates in config.ts.
+  const h = 18 * PLATE_HEIGHT;
   const material = studMaterial(spec.colorHex);
 
-  const railW = 0.11;
-  const railX = 0.35;
+  const width = spec.w * GRID.X;
+  // Rails sit just inside the footprint edges so a 2-stud-wide ladder
+  // visually fills its full footprint and reads at minifig scale.
+  const railW = 0.14;
+  const railX = width / 2 - railW;
 
   const leftRail = new THREE.Mesh(
     new THREE.BoxGeometry(railW, h, railW),
@@ -1076,19 +1127,690 @@ function createLadderBlock(spec: BlockSpec): THREE.Group {
   rightRail.receiveShadow = true;
   group.add(rightRail);
 
-  const numRungs = 5;
+  // Rung count scales with height so spacing stays roughly constant
+  // (~1 unit between rungs).
+  const numRungs = Math.max(2, Math.round(h));
   const rungW = railX * 2;
   const topY = h - 0.35;
   const botY = 0.35;
   for (let i = 0; i < numRungs; i++) {
     const rung = new THREE.Mesh(
-      new THREE.BoxGeometry(rungW, 0.08, 0.11),
+      new THREE.BoxGeometry(rungW, 0.1, 0.13),
       material
     );
     const t = i / (numRungs - 1);
     rung.position.set(0, botY + t * (topY - botY), 0);
     rung.castShadow = true;
     group.add(rung);
+  }
+
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Slide — playground slide. Two triangular A-frame side panels carry a
+//  curved slide deck on the +Z half and a stair set with handrails on
+//  the -Z half.
+// ------------------------------------------------------------------
+function createSlideBlock(spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const w = spec.w; // 4
+  const d = spec.d; // 9
+  // 24 plates (= 9.6 units) tall — about 2× a minifig so the slide
+  // actually towers over them. Keep in sync with bodyHeightPlates in
+  // config.ts.
+  const h = 24 * PLATE_HEIGHT;
+  const frameMat = studMaterial(spec.colorHex);
+  const slideMat = new THREE.MeshStandardMaterial({
+    color: 0xc0c5cc, // light metallic gray for the slide surface
+    roughness: 0.32,
+    metalness: 0.45,
+  });
+  const railMat = new THREE.MeshStandardMaterial({
+    color: 0xf5cd30, // bright yellow handrails
+    roughness: 0.45,
+  });
+
+  const width = w * GRID.X;
+  const depth = d * GRID.Z;
+  const numSteps = 4;
+  const stepDepthZ = 1; // each step occupies 1 stud of depth
+  const stepRise = h / numSteps; // 2.4 units per step (~half minifig)
+  const stairsRunZ = numSteps * stepDepthZ; // 4
+  const stairsTopZ = -d / 2 + stairsRunZ; // front edge of the platform
+  const panelT = 0.18; // side panel thickness
+
+  // ----- Side panels (A-frame triangles) on ±X -----
+  // Triangle in shape XY where shape-X = world Z, shape-Y = world Y.
+  // Vertices: back-bottom → top-of-stairs → front-bottom.
+  const panelShape = new THREE.Shape();
+  panelShape.moveTo(-d / 2, 0);
+  panelShape.lineTo(stairsTopZ, h);
+  panelShape.lineTo(d / 2, 0);
+  panelShape.closePath();
+  const panelGeom = new THREE.ExtrudeGeometry(panelShape, {
+    depth: panelT,
+    bevelEnabled: false,
+  });
+  panelGeom.translate(0, 0, -panelT / 2);
+  panelGeom.rotateY(-Math.PI / 2);
+  panelGeom.computeVertexNormals();
+  for (const sx of [-1, 1]) {
+    const panel = new THREE.Mesh(panelGeom.clone(), frameMat);
+    panel.position.x = sx * (width / 2 - panelT / 2);
+    panel.castShadow = true;
+    panel.receiveShadow = true;
+    group.add(panel);
+  }
+
+  // ----- Stairs at -Z (numSteps stacked boxes between the side panels) -----
+  const stepWidth = width - 2 * panelT - 0.04;
+  for (let i = 0; i < numSteps; i++) {
+    const stepTopY = (i + 1) * stepRise;
+    const step = new THREE.Mesh(
+      new THREE.BoxGeometry(stepWidth, stepTopY, stepDepthZ * GRID.Z),
+      frameMat
+    );
+    step.position.set(0, stepTopY / 2, -depth / 2 + stepDepthZ * (i + 0.5));
+    step.castShadow = true;
+    step.receiveShadow = true;
+    group.add(step);
+  }
+
+  // ----- Stair handrails (yellow) -----
+  // Vertical post at the entrance + a sloped rail along the steps.
+  for (const sx of [-1, 1]) {
+    const handrailX = sx * (width / 2 - panelT - 0.06);
+    const postH = h * 0.55;
+    const postBottom = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, postH, 0.09),
+      railMat
+    );
+    postBottom.position.set(handrailX, postH / 2, -depth / 2 + 0.15);
+    postBottom.castShadow = true;
+    group.add(postBottom);
+    // Sloped rail running from the bottom post up to (and slightly past)
+    // the top of the stairs.
+    const railRiseY = h - postH;
+    const railRunZ = stairsRunZ - 0.3;
+    const railLen = Math.sqrt(railRunZ * railRunZ + railRiseY * railRiseY);
+    const railAngle = Math.atan2(railRiseY, railRunZ);
+    const slopedRail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.09, railLen),
+      railMat
+    );
+    slopedRail.position.set(
+      handrailX,
+      postH + railRiseY / 2,
+      -depth / 2 + 0.15 + railRunZ / 2
+    );
+    slopedRail.rotation.x = railAngle;
+    slopedRail.castShadow = true;
+    group.add(slopedRail);
+  }
+
+  // ----- Curved slide deck on the +Z half -----
+  // The slide starts at the top of the stairs (z = stairsTopZ, y = h)
+  // and curves down to the front edge of the block.
+  const slideHighZ = stairsTopZ;
+  const slideLowZ = d / 2 + 0.4;
+  const slideHighY = h;
+  const slideLowY = 0.4;
+  const slabT = 0.2;
+  const slideW = width - 2 * panelT - 0.06;
+  const segments = 18;
+
+  // Top edge of the deck (smooth curve from high to low)
+  const topPts: { z: number; y: number }[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    // Smoothstep ease: starts almost horizontal, accelerates, then
+    // levels out at the bottom — a real slide curve.
+    const eased = t * t * (3 - 2 * t);
+    topPts.push({
+      z: slideHighZ + (slideLowZ - slideHighZ) * t,
+      y: slideHighY + (slideLowY - slideHighY) * eased,
+    });
+  }
+  const slideShape = new THREE.Shape();
+  slideShape.moveTo(topPts[0].z, topPts[0].y);
+  for (let i = 1; i < topPts.length; i++) {
+    slideShape.lineTo(topPts[i].z, topPts[i].y);
+  }
+  // Underside (reverse, offset by slab thickness)
+  for (let i = topPts.length - 1; i >= 0; i--) {
+    slideShape.lineTo(topPts[i].z, topPts[i].y - slabT);
+  }
+  slideShape.closePath();
+
+  const slideGeom = new THREE.ExtrudeGeometry(slideShape, {
+    depth: slideW,
+    bevelEnabled: false,
+  });
+  slideGeom.translate(0, 0, -slideW / 2);
+  slideGeom.rotateY(-Math.PI / 2);
+  slideGeom.computeVertexNormals();
+  const slideMesh = new THREE.Mesh(slideGeom, slideMat);
+  slideMesh.castShadow = true;
+  slideMesh.receiveShadow = true;
+  group.add(slideMesh);
+
+  // ----- Slide side rails (yellow) — follow the same curve, offset to
+  // the X edges of the slide deck. Built from short segments connecting
+  // each pair of top points. -----
+  for (const sx of [-1, 1]) {
+    const railX = sx * (slideW / 2 + 0.04);
+    for (let i = 0; i < topPts.length - 1; i++) {
+      const a = topPts[i];
+      const b = topPts[i + 1];
+      const dz = b.z - a.z;
+      const dy = b.y - a.y;
+      const segLen = Math.sqrt(dz * dz + dy * dy);
+      const seg = new THREE.Mesh(
+        new THREE.BoxGeometry(0.09, 0.18, segLen),
+        railMat
+      );
+      seg.position.set(railX, (a.y + b.y) / 2 + 0.12, (a.z + b.z) / 2);
+      seg.rotation.x = Math.atan2(a.y - b.y, dz);
+      seg.castShadow = true;
+      group.add(seg);
+    }
+  }
+
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Swing — proper A-frame swing set. Two pairs of inward-leaning posts
+//  meet at a top horizontal bar, with two seats hanging on twin chains.
+// ------------------------------------------------------------------
+function createSwingBlock(spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const w = spec.w; // 8
+  const d = spec.d; // 3
+  // 24 plates (= 9.6 units) tall — 2× minifig so the bar is well above
+  // their head and the swing has real hang length. Keep in sync with
+  // bodyHeightPlates in config.ts.
+  const h = 24 * PLATE_HEIGHT;
+  const frameMat = studMaterial(spec.colorHex);
+  const chainMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4d52,
+    roughness: 0.45,
+    metalness: 0.65,
+  });
+  const seatMat = new THREE.MeshStandardMaterial({
+    color: 0xc4281c,
+    roughness: 0.5,
+  });
+
+  const width = w * GRID.X;
+  const depth = d * GRID.Z;
+  const postT = 0.24;
+  const apexInset = postT * 0.5; // top bar inset from each X edge
+
+  // ----- 4 leaned posts forming 2 A-frames -----
+  // Each A-frame has its apex at (±apexX, h, 0) and its feet at the
+  // four corners of the footprint. A post connects one foot to the
+  // nearest apex.
+  const apexY = h - 0.18;
+  const buildLeanedPost = (
+    footX: number,
+    footZ: number,
+    apexX: number,
+    apexZ: number
+  ) => {
+    const dx = apexX - footX;
+    const dy = apexY - 0;
+    const dz = apexZ - footZ;
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const post = new THREE.Mesh(
+      new THREE.BoxGeometry(postT, len, postT),
+      frameMat
+    );
+    // Center at midpoint
+    post.position.set((footX + apexX) / 2, (0 + apexY) / 2, (footZ + apexZ) / 2);
+    // Orient: default +Y to (dx, dy, dz)/len
+    // Rotation around X first to handle the Z-component (lean toward center on Z),
+    // then around Z to handle X-component. For our use the apex is on the same X
+    // as the foot (no X lean) and offset on Z, so only one rotation is needed.
+    post.rotation.x = Math.atan2(dz, dy);
+    post.rotation.z = Math.atan2(-dx, dy);
+    post.castShadow = true;
+    post.receiveShadow = true;
+    group.add(post);
+  };
+
+  // Left A-frame (apex at -X side)
+  const leftApexX = -width / 2 + apexInset + 0.6;
+  for (const sz of [-1, 1]) {
+    buildLeanedPost(
+      -width / 2 + postT * 0.6,
+      sz * (depth / 2 - postT * 0.6),
+      leftApexX,
+      0
+    );
+  }
+  // Right A-frame (apex at +X side)
+  const rightApexX = width / 2 - apexInset - 0.6;
+  for (const sz of [-1, 1]) {
+    buildLeanedPost(
+      width / 2 - postT * 0.6,
+      sz * (depth / 2 - postT * 0.6),
+      rightApexX,
+      0
+    );
+  }
+
+  // ----- Top horizontal bar (connects the two apexes) -----
+  const barLen = rightApexX - leftApexX;
+  const topBar = new THREE.Mesh(
+    new THREE.BoxGeometry(barLen + 0.2, 0.26, 0.26),
+    frameMat
+  );
+  topBar.position.set((leftApexX + rightApexX) / 2, apexY, 0);
+  topBar.castShadow = true;
+  group.add(topBar);
+
+  // ----- Three hanging swings — each with twin chains + seat + backrest.
+  // Spaced 25% / 50% / 75% along the top bar for an even pattern. -----
+  const chainLen = h * 0.6;
+  const seatY = apexY - chainLen;
+  const seatXs = [
+    leftApexX + (rightApexX - leftApexX) * 0.18,
+    leftApexX + (rightApexX - leftApexX) * 0.5,
+    leftApexX + (rightApexX - leftApexX) * 0.82,
+  ];
+  // Chain z-spread slightly less than seat depth so they sit on the seat.
+  const chainCz = depth / 2 - 0.45;
+  for (const sx of seatXs) {
+    for (const cz of [-chainCz, chainCz]) {
+      const chain = new THREE.Mesh(
+        new THREE.BoxGeometry(0.07, chainLen, 0.07),
+        chainMat
+      );
+      chain.position.set(sx, apexY - chainLen / 2 - 0.13, cz);
+      chain.castShadow = true;
+      group.add(chain);
+    }
+
+    // Seat — wider for the bigger swing
+    const seatW = 1.0;
+    const seatD = chainCz * 2 + 0.3;
+    const seat = new THREE.Mesh(
+      new THREE.BoxGeometry(seatW, 0.14, seatD),
+      seatMat
+    );
+    seat.position.set(sx, seatY - 0.07, 0);
+    seat.castShadow = true;
+    seat.receiveShadow = true;
+    group.add(seat);
+
+    const backrest = new THREE.Mesh(
+      new THREE.BoxGeometry(seatW, 0.7, 0.1),
+      seatMat
+    );
+    backrest.position.set(sx, seatY + 0.28, seatD / 2 - 0.05);
+    backrest.castShadow = true;
+    group.add(backrest);
+  }
+
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Seesaw — curved fulcrum + tilted plank with seat pads and handles
+//  on each end. The whole "plank assembly" is a single child group so
+//  the rotation cleanly tilts the plank, seats, and handles together.
+// ------------------------------------------------------------------
+function createSeesawBlock(spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const w = spec.w; // 10
+  const d = spec.d; // 3
+  const material = studMaterial(spec.colorHex);
+  const plankMat = new THREE.MeshStandardMaterial({
+    color: 0xc4281c,
+    roughness: 0.5,
+  });
+  const seatMat = new THREE.MeshStandardMaterial({
+    color: 0x0d69ac,
+    roughness: 0.5,
+  });
+
+  const width = w * GRID.X;
+  const depth = d * GRID.Z;
+
+  // ----- Curved fulcrum: half-cylinder lying on its side -----
+  // CylinderGeometry with thetaStart=0, thetaLength=π builds a half
+  // cylinder bulging in the +Z direction (default Y-axis up). Rotating
+  // by -π/2 around X re-orients the half-cylinder so its central axis
+  // runs along world Z (the seesaw's depth direction), the flat cut
+  // surface lies in the y=0 plane (sits on the ground), and the curved
+  // bulge points straight up along +Y.
+  const fulcrumR = 0.95;
+  const fulcrumLen = depth - 0.4;
+  const fulcrumGeom = new THREE.CylinderGeometry(
+    fulcrumR,
+    fulcrumR,
+    fulcrumLen,
+    24,
+    1,
+    false,
+    0,
+    Math.PI
+  );
+  fulcrumGeom.rotateX(-Math.PI / 2);
+  fulcrumGeom.computeVertexNormals();
+  const fulcrum = new THREE.Mesh(fulcrumGeom, material);
+  fulcrum.position.set(0, 0, 0);
+  fulcrum.castShadow = true;
+  fulcrum.receiveShadow = true;
+  group.add(fulcrum);
+
+  // Two base supports under the fulcrum to anchor it visually.
+  for (const sz of [-1, 1]) {
+    const support = new THREE.Mesh(
+      new THREE.BoxGeometry(fulcrumR * 1.7, 0.22, 0.4),
+      material
+    );
+    support.position.set(0, 0.11, sz * (fulcrumLen / 2 - 0.15));
+    support.castShadow = true;
+    support.receiveShadow = true;
+    group.add(support);
+  }
+
+  // ----- Plank assembly (sub-group that rotates as a unit) -----
+  const plankGroup = new THREE.Group();
+  const plankY = fulcrumR;
+  plankGroup.position.set(0, plankY, 0);
+  plankGroup.rotation.z = -0.14;
+  group.add(plankGroup);
+
+  // Long plank
+  const plankLen = width - 0.5;
+  const plankD = 1.3;
+  const plank = new THREE.Mesh(
+    new THREE.BoxGeometry(plankLen, 0.28, plankD),
+    plankMat
+  );
+  plank.position.y = 0.14;
+  plank.castShadow = true;
+  plank.receiveShadow = true;
+  plankGroup.add(plank);
+
+  // Seat pads + handles at each end of the plank (sized for a minifig
+  // who's 2 stud wide × 1 stud deep — pad needs to actually fit them).
+  for (const sx of [-1, 1]) {
+    const endX = sx * (plankLen / 2 - 0.7);
+
+    // Seat pad
+    const pad = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 0.12, 1.0),
+      seatMat
+    );
+    pad.position.set(endX, 0.34, 0);
+    pad.castShadow = true;
+    plankGroup.add(pad);
+
+    // Vertical handle post
+    const handlePost = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 1.0, 0.14),
+      material
+    );
+    handlePost.position.set(endX, 0.9, 0);
+    handlePost.castShadow = true;
+    plankGroup.add(handlePost);
+
+    // Horizontal grip bar at the top of the post
+    const handleGrip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.14, 0.7),
+      material
+    );
+    handleGrip.position.set(endX, 1.34, 0);
+    handleGrip.castShadow = true;
+    plankGroup.add(handleGrip);
+  }
+
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Jungle gym — 4 corner posts, 6 levels of climbing rungs on every
+//  side, a flat top platform with raised guard rails, and diagonal
+//  cross-bracing on two sides.
+// ------------------------------------------------------------------
+function createJungleGymBlock(spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const w = spec.w; // 5
+  const d = spec.d; // 5
+  // 24 plates (= 9.6 units) tall — 2× minifig so they can climb up
+  // multiple levels and reach the platform. Keep in sync with
+  // bodyHeightPlates in config.ts.
+  const h = 24 * PLATE_HEIGHT;
+  const material = studMaterial(spec.colorHex);
+
+  const width = w * GRID.X;
+  const depth = d * GRID.Z;
+  const postT = 0.28;
+  const barT = 0.16;
+
+  // ----- 4 vertical corner posts -----
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const post = new THREE.Mesh(
+        new THREE.BoxGeometry(postT, h, postT),
+        material
+      );
+      post.position.set(
+        sx * (width / 2 - postT / 2),
+        h / 2,
+        sz * (depth / 2 - postT / 2)
+      );
+      post.castShadow = true;
+      post.receiveShadow = true;
+      group.add(post);
+    }
+  }
+
+  // ----- Horizontal climbing rungs at 8 evenly-spaced levels.
+  // The top level coincides with the platform top. With 9.6u of height
+  // 8 rungs gives ~1.2u (1 brick) spacing — proper minifig climb step. -----
+  const levels: number[] = [];
+  const numLevels = 8;
+  for (let i = 1; i <= numLevels; i++) {
+    levels.push((h * i) / numLevels - 0.08);
+  }
+
+  for (const y of levels) {
+    // -X side bar (along Z)
+    const barXL = new THREE.Mesh(
+      new THREE.BoxGeometry(barT, barT, depth - postT),
+      material
+    );
+    barXL.position.set(-width / 2 + postT / 2, y, 0);
+    barXL.castShadow = true;
+    group.add(barXL);
+    // +X side
+    const barXR = new THREE.Mesh(
+      new THREE.BoxGeometry(barT, barT, depth - postT),
+      material
+    );
+    barXR.position.set(width / 2 - postT / 2, y, 0);
+    barXR.castShadow = true;
+    group.add(barXR);
+    // -Z side bar (along X)
+    const barZL = new THREE.Mesh(
+      new THREE.BoxGeometry(width - postT, barT, barT),
+      material
+    );
+    barZL.position.set(0, y, -depth / 2 + postT / 2);
+    barZL.castShadow = true;
+    group.add(barZL);
+    // +Z side
+    const barZR = new THREE.Mesh(
+      new THREE.BoxGeometry(width - postT, barT, barT),
+      material
+    );
+    barZR.position.set(0, y, depth / 2 - postT / 2);
+    barZR.castShadow = true;
+    group.add(barZR);
+  }
+
+  // ----- Top platform: a thin flat slab spanning the full footprint -----
+  const platformT = 0.18;
+  const platform = new THREE.Mesh(
+    new THREE.BoxGeometry(width - postT, platformT, depth - postT),
+    material
+  );
+  platform.position.set(0, h - platformT / 2, 0);
+  platform.castShadow = true;
+  platform.receiveShadow = true;
+  group.add(platform);
+
+  // ----- Diagonal cross-bracing on the -X and +X sides for visual
+  // structure. Two diagonals per side forming an X pattern. The brace
+  // box has its length along local +Z; rotating around X by -braceAngle
+  // tilts that local +Z to point along (0, +sin(braceAngle), +cos(braceAngle))
+  // = (+Y, +Z) — the diagonal that goes from low-Z low-Y to high-Z
+  // high-Y. The OTHER diagonal is built by additionally rotating the
+  // brace 180° around Y, which negates its Z direction.
+  const braceLen = Math.sqrt(
+    (depth - postT) * (depth - postT) + h * h
+  );
+  const braceAngle = Math.atan2(h, depth - postT);
+  for (const sx of [-1, 1]) {
+    const braceX = sx * (width / 2 - postT - 0.04);
+    // Diagonal 1: from (-Z, y=0) to (+Z, y=h)
+    const brace1 = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.08, braceLen),
+      material
+    );
+    brace1.position.set(braceX, h / 2, 0);
+    brace1.rotation.x = -braceAngle;
+    brace1.castShadow = true;
+    group.add(brace1);
+    // Diagonal 2: from (+Z, y=0) to (-Z, y=h). Three.js applies Euler
+    // rotations as Rx*Ry*Rz to a vector, so rotation.y=π fires first
+    // (flipping the box's local +Z to -Z), and then rotation.x=+braceAngle
+    // tilts that flipped Z up to (0, +sin α, -cos α) — the desired
+    // diagonal direction.
+    const brace2 = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.08, braceLen),
+      material
+    );
+    brace2.position.set(braceX, h / 2, 0);
+    brace2.rotation.x = braceAngle;
+    brace2.rotation.y = Math.PI;
+    brace2.castShadow = true;
+    group.add(brace2);
+  }
+
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Merry-go-round — round disc base, central pole, 4 radial handles
+// ------------------------------------------------------------------
+function createMerryGoRoundBlock(spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const w = spec.w; // 6
+  const d = spec.d; // 6
+  // 9 plates (= 3.6 units) tall — about chest height on a minifig.
+  // Big enough for 4 minifigs to ride around the rim. Keep in sync
+  // with bodyHeightPlates in config.ts.
+  const h = 9 * PLATE_HEIGHT;
+  const material = studMaterial(spec.colorHex);
+  const seatMat = new THREE.MeshStandardMaterial({
+    color: 0xf5cd30, // yellow seats
+    roughness: 0.5,
+  });
+
+  const radius = Math.min(w, d) * 0.5 - 0.1;
+
+  // Round disc base — flat cylinder
+  const baseH = 0.3;
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, baseH, 24),
+    material
+  );
+  base.position.y = baseH / 2;
+  base.castShadow = true;
+  base.receiveShadow = true;
+  group.add(base);
+
+  // Inner support disc (slightly raised)
+  const support = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius * 0.85, radius * 0.95, 0.12, 24),
+    material
+  );
+  support.position.y = baseH + 0.06;
+  support.castShadow = true;
+  group.add(support);
+
+  // Central vertical pole
+  const poleH = h - baseH;
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, poleH, 16),
+    material
+  );
+  pole.position.y = baseH + poleH / 2;
+  pole.castShadow = true;
+  group.add(pole);
+
+  // Top cap on the pole
+  const topCap = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 14, 10),
+    material
+  );
+  topCap.position.y = baseH + poleH;
+  group.add(topCap);
+
+  // 4 radial handle bars going from the pole top out to the rim
+  for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2;
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+
+    // Horizontal handle bar (from center to rim)
+    const handleLen = radius - 0.2;
+    const handle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.08, handleLen),
+      material
+    );
+    handle.position.set(
+      cosA * (handleLen / 2 + 0.1),
+      h - 0.25,
+      sinA * (handleLen / 2 + 0.1)
+    );
+    handle.rotation.y = -angle;
+    handle.castShadow = true;
+    group.add(handle);
+
+    // Vertical drop from handle end to disc rim
+    const drop = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, h - baseH - 0.5, 0.08),
+      material
+    );
+    drop.position.set(
+      cosA * (radius - 0.15),
+      baseH + (h - baseH - 0.5) / 2,
+      sinA * (radius - 0.15)
+    );
+    drop.castShadow = true;
+    group.add(drop);
+
+    // Small seat block on the disc at this rim position
+    const seat = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.18, 0.5),
+      seatMat
+    );
+    seat.position.set(
+      cosA * (radius - 0.45),
+      baseH + 0.21,
+      sinA * (radius - 0.45)
+    );
+    seat.rotation.y = -angle;
+    seat.castShadow = true;
+    group.add(seat);
   }
 
   return group;
@@ -1376,12 +2098,12 @@ const TARGET_FOOT_SPACING = 1.0;
 /** Fallback height if the GLB doesn't have two recognizable foot meshes. */
 const FALLBACK_HEIGHT = 4.8;
 /** Manual forward (positive Z) shift applied to the centered character.
- *  Compensates for the asymmetric heel↔toe shape of the bezier-curve foot
- *  in `people.glb`: the bbox center of the bottom slice sits a few mm
- *  behind the visual foot center, so when placed on a baseplate the feet
- *  look slightly back of the stud. Tweak this if a different model is
- *  swapped in — positive = forward, negative = back. */
-const MINIFIG_FORWARD_OFFSET = 0.28;
+ *  Historically used to compensate when the XZ centering fell back to the
+ *  full-body bbox (sole anchors couldn't be found). Now that sole anchors
+ *  work correctly the natural shift is ~0, but leaving a small forward
+ *  nudge because the bottom-slice bbox center of the bezier foot is
+ *  slightly behind the visible foot tip. Positive = forward, negative = back. */
+const MINIFIG_FORWARD_OFFSET = 0.08;
 
 /** Compute the TIGHT world AABB of every mesh under `obj` by transforming
  *  each vertex through the mesh's matrixWorld (precise=true). The default
@@ -1403,8 +2125,12 @@ function fullBoundingBox(obj: THREE.Object3D): THREE.Box3 {
   return result;
 }
 
-/** Names of the foot/leg meshes in the GLB. Drives XZ centering. */
-const FOOT_NAMES = new Set(['BezierCurve', 'BezierCurve.001']);
+/** Names of the foot/leg meshes in the GLB. Drives XZ centering.
+ *  three.js's GLTFLoader sanitizes node names via PropertyBinding —
+ *  the `[].:/ ` chars are stripped — so the GLB's `BezierCurve.001`
+ *  becomes `BezierCurve001` after loading. Use the post-sanitization
+ *  names here to match what's actually on the loaded mesh. */
+const FOOT_NAMES = new Set(['BezierCurve', 'BezierCurve001']);
 
 /** Compute the (x, y, z) anchor of a leg/foot mesh's SOLE — the GEOMETRIC
  *  CENTER (bbox midpoint) of all vertices in the bottom slice of the mesh.
@@ -2160,5 +2886,205 @@ export function createMinifigGhost(preset: MinifigPreset): THREE.Group {
   group.userData.isMinifigGhost = true;
   delete group.userData.isBrick;
   delete group.userData.isMinifig;
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Dog — procedural quadruped NPC character.
+//
+//  Built from simple primitives so no external model is required.
+//  Footprint: 1 stud wide × 2 studs deep (the body is 2 studs long,
+//  head and tail extend slightly outside that footprint — same pattern
+//  as the minifig whose arms stick out beyond its 2×1 footprint).
+//  Each leg is wrapped in its own THREE.Group pivot so the walk
+//  animation in game.ts can rotate the legs around their hip/shoulder.
+// ------------------------------------------------------------------
+export function createDogCharacter(): THREE.Group {
+  const group = new THREE.Group();
+
+  const furHex = 0xb07645; // caramel brown
+  const furMat = new THREE.MeshStandardMaterial({
+    color: furHex,
+    roughness: 0.75,
+  });
+  const noseMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a,
+    roughness: 0.4,
+  });
+  const darkFurMat = new THREE.MeshStandardMaterial({
+    color: 0x6a4528,
+    roughness: 0.75,
+  });
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+  // ----- Legs (create first so we can measure hip height) -----
+  const legLen = 0.7;
+  const legR = 0.14;
+  const bodyBottomY = legLen; // body sits on top of the leg reach
+
+  const legGeom = new THREE.CylinderGeometry(legR, legR, legLen, 12);
+  // Each leg is a pivot Group whose origin is at the HIP (shoulder).
+  // The mesh hangs below the pivot, so rotating the pivot around X
+  // swings the whole leg forward/back — the foot traces an arc.
+  const makeLeg = (x: number, z: number): THREE.Group => {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, bodyBottomY, z);
+    const mesh = new THREE.Mesh(legGeom, darkFurMat);
+    mesh.position.y = -legLen / 2;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    pivot.add(mesh);
+    group.add(pivot);
+    return pivot;
+  };
+
+  const bodyW = 0.75; // narrower than 1 stud so the footprint snap feels tight
+  const bodyH = 0.7;
+  const bodyD = 1.8;
+  const legHalfX = bodyW / 2 - legR * 0.2; // tiny inset
+  const legHalfZ = bodyD / 2 - legR - 0.1; // inside the body's Z extent
+
+  const frontRightLeg = makeLeg(+legHalfX, +legHalfZ);
+  const frontLeftLeg = makeLeg(-legHalfX, +legHalfZ);
+  const backRightLeg = makeLeg(+legHalfX, -legHalfZ);
+  const backLeftLeg = makeLeg(-legHalfX, -legHalfZ);
+
+  // ----- Body -----
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(bodyW, bodyH, bodyD),
+    furMat
+  );
+  body.position.set(0, bodyBottomY + bodyH / 2, 0);
+  body.castShadow = true;
+  body.receiveShadow = true;
+  group.add(body);
+
+  // ----- Head (slightly higher than the body, forward in +Z) -----
+  const headW = 0.7;
+  const headH = 0.7;
+  const headD = 0.7;
+  const headCenterZ = bodyD / 2 + headD / 2 - 0.2;
+  const headCenterY = bodyBottomY + bodyH + 0.05;
+  const head = new THREE.Mesh(
+    new THREE.BoxGeometry(headW, headH, headD),
+    furMat
+  );
+  head.position.set(0, headCenterY, headCenterZ);
+  head.castShadow = true;
+  group.add(head);
+
+  // Snout sticks out the front of the head
+  const snout = new THREE.Mesh(
+    new THREE.BoxGeometry(0.4, 0.32, 0.3),
+    furMat
+  );
+  snout.position.set(
+    0,
+    headCenterY - 0.12,
+    headCenterZ + headD / 2 + 0.15
+  );
+  snout.castShadow = true;
+  group.add(snout);
+
+  // Nose (small dark square on the end of the snout)
+  const nose = new THREE.Mesh(
+    new THREE.BoxGeometry(0.16, 0.14, 0.08),
+    noseMat
+  );
+  nose.position.set(
+    0,
+    snout.position.y + 0.03,
+    snout.position.z + 0.18
+  );
+  group.add(nose);
+
+  // Eyes — two black dots on the front face of the head
+  const eyeGeom = new THREE.SphereGeometry(0.065, 10, 8);
+  const eyeY = headCenterY + 0.13;
+  const eyeZ = headCenterZ + headD / 2 - 0.03;
+  const leftEye = new THREE.Mesh(eyeGeom, eyeMat);
+  leftEye.position.set(-0.16, eyeY, eyeZ);
+  group.add(leftEye);
+  const rightEye = new THREE.Mesh(eyeGeom, eyeMat);
+  rightEye.position.set(0.16, eyeY, eyeZ);
+  group.add(rightEye);
+
+  // Floppy ears on top of the head, tilted outward + forward
+  const earGeom = new THREE.BoxGeometry(0.15, 0.42, 0.12);
+  const leftEar = new THREE.Mesh(earGeom, darkFurMat);
+  leftEar.position.set(
+    -0.32,
+    headCenterY + headH / 2 - 0.05,
+    headCenterZ - headD / 4
+  );
+  leftEar.rotation.set(0.15, 0, -0.35);
+  leftEar.castShadow = true;
+  group.add(leftEar);
+  const rightEar = new THREE.Mesh(earGeom, darkFurMat);
+  rightEar.position.set(
+    0.32,
+    headCenterY + headH / 2 - 0.05,
+    headCenterZ - headD / 4
+  );
+  rightEar.rotation.set(0.15, 0, 0.35);
+  rightEar.castShadow = true;
+  group.add(rightEar);
+
+  // ----- Tail — tilted up and back, slim cylinder -----
+  const tailLen = 0.7;
+  const tail = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.05, tailLen, 8),
+    furMat
+  );
+  // Position the tail's bottom at the back of the body, then rotate up
+  // around X so the whole thing points backwards and upwards.
+  tail.position.set(
+    0,
+    bodyBottomY + bodyH * 0.75,
+    -bodyD / 2 - 0.05
+  );
+  tail.rotation.x = -1.1; // flip cylinder from +Y to backward/up
+  tail.castShadow = true;
+  group.add(tail);
+
+  // ----- Metadata -----
+  // userData.isBrick: dogs participate in the brickGroup (can be removed,
+  //   block count, etc.) same as minifigs.
+  // userData.isDog: lets the NPC / collision loops pick them out.
+  // userData.parts: hip pivots for the 4 legs. Consumed by applyNpcLimbs
+  //   in game.ts to drive the walk cycle — quadruped gait rotates the
+  //   diagonal pairs (FR+BL / FL+BR) in opposite phase.
+  group.userData.isBrick = true;
+  group.userData.isDog = true;
+  group.userData.parts = {
+    frontRightLeg,
+    frontLeftLeg,
+    backRightLeg,
+    backLeftLeg,
+  };
+  return group;
+}
+
+/** Translucent dog for placement preview. Mirrors createMinifigGhost. */
+export function createDogGhost(): THREE.Group {
+  const group = createDogCharacter();
+  group.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      const mat = child.material as THREE.Material & {
+        transparent: boolean;
+        opacity: number;
+        depthWrite: boolean;
+      };
+      mat.transparent = true;
+      mat.opacity = 0.5;
+      mat.depthWrite = false;
+      child.castShadow = false;
+      child.receiveShadow = false;
+    }
+  });
+  group.userData.isGhost = true;
+  group.userData.isDogGhost = true;
+  delete group.userData.isBrick;
+  delete group.userData.isDog;
   return group;
 }
