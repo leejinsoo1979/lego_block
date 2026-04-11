@@ -298,17 +298,14 @@ export class Game {
       }
     ).RIGHT = null;
 
-    // Touch bindings: one finger is reserved for block drag-and-drop (the
-    // game's own pointer handlers). Two fingers handle the camera — pinch
-    // to zoom, drag to rotate. This matches Minecraft PE / Procreate / most
-    // mobile builders.
-    (
-      this.controls.touches as unknown as {
-        ONE: number | null;
-        TWO: number | null;
-      }
-    ).ONE = null;
-    this.controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+    // Touch bindings — natural tablet feel: 1 finger rotates the camera
+    // (every tablet app does this), 2 fingers pinch-zoom / pan. Block
+    // placement on touch uses a "tap anywhere = place at screen center"
+    // pattern (see updatePointer and the build-mode reticle) so the
+    // finger never needs to touch the target cell, and camera orbit
+    // stays the primary gesture.
+    this.controls.touches.ONE = THREE.TOUCH.ROTATE;
+    this.controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
 
     this.setupLights();
     this.createBaseplate();
