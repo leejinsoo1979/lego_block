@@ -3123,6 +3123,207 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
       }
       break;
     }
+    case 'twintails': {
+      // Dome cap + two thick pigtails hanging on each side
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.62, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.45),
+        mat
+      );
+      dome.position.y = 0.04;
+      dome.castShadow = true;
+      group.add(dome);
+      // Bangs
+      const bangs = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.18, 0.25), mat
+      );
+      bangs.position.set(0, -0.06, 0.48);
+      bangs.castShadow = true;
+      group.add(bangs);
+      // Two tails
+      for (const sx of [-1, 1]) {
+        const tail = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.16, 0.1, 1.2, 12), mat
+        );
+        tail.position.set(sx * 0.55, -0.55, -0.15);
+        tail.rotation.z = sx * -0.15;
+        tail.castShadow = true;
+        group.add(tail);
+        // Hair tie
+        const tie = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.2, 0.2, 0.08, 14),
+          new THREE.MeshStandardMaterial({ color: 0xe03050, roughness: 0.4 })
+        );
+        tie.position.set(sx * 0.52, -0.02, -0.15);
+        tie.rotation.z = sx * -0.15;
+        group.add(tie);
+      }
+      break;
+    }
+    case 'updo': {
+      // Elegant updo — dome + tall bun on top
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.63, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
+        mat
+      );
+      dome.castShadow = true;
+      group.add(dome);
+      // Swept sides
+      for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.5, 0.75), mat
+        );
+        side.position.set(sx * 0.55, -0.15, -0.1);
+        side.castShadow = true;
+        group.add(side);
+      }
+      // Bun on top-back
+      const bun = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 16, 12), mat
+      );
+      bun.position.set(0, 0.35, -0.25);
+      bun.castShadow = true;
+      group.add(bun);
+      // Bangs
+      const bangs = new THREE.Mesh(
+        new THREE.BoxGeometry(0.85, 0.14, 0.22), mat
+      );
+      bangs.position.set(0, -0.04, 0.5);
+      bangs.castShadow = true;
+      group.add(bangs);
+      break;
+    }
+    case 'sidepart': {
+      // Side-parted hair — asymmetric volume, more on one side
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.63, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48),
+        mat
+      );
+      dome.position.y = 0.02;
+      dome.castShadow = true;
+      group.add(dome);
+      // Thicker left side (the "sweep" side)
+      const leftPanel = new THREE.Mesh(
+        new THREE.BoxGeometry(0.28, 0.6, 0.85), mat
+      );
+      leftPanel.position.set(-0.52, -0.2, -0.05);
+      leftPanel.castShadow = true;
+      group.add(leftPanel);
+      // Thinner right side
+      const rightPanel = new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 0.45, 0.8), mat
+      );
+      rightPanel.position.set(0.55, -0.12, -0.05);
+      rightPanel.castShadow = true;
+      group.add(rightPanel);
+      // Swept bangs — angled across forehead
+      const bangs = new THREE.Mesh(
+        new THREE.BoxGeometry(0.7, 0.2, 0.25), mat
+      );
+      bangs.position.set(-0.15, -0.04, 0.48);
+      bangs.rotation.z = 0.15;
+      bangs.castShadow = true;
+      group.add(bangs);
+      // Back
+      const back = new THREE.Mesh(
+        new THREE.BoxGeometry(1.05, 0.5, 0.24), mat
+      );
+      back.position.set(0, -0.15, -0.46);
+      back.castShadow = true;
+      group.add(back);
+      break;
+    }
+    case 'pixie': {
+      // Short pixie cut — compact, textured, slightly tousled
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.6, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.42),
+        mat
+      );
+      dome.position.y = 0.06;
+      dome.castShadow = true;
+      group.add(dome);
+      // Very short sides
+      for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(
+          new THREE.BoxGeometry(0.18, 0.3, 0.7), mat
+        );
+        side.position.set(sx * 0.52, -0.06, -0.08);
+        side.castShadow = true;
+        group.add(side);
+      }
+      // Wispy bangs — small angled piece
+      const bangs = new THREE.Mesh(
+        new THREE.BoxGeometry(0.6, 0.14, 0.22), mat
+      );
+      bangs.position.set(0.1, 0.0, 0.47);
+      bangs.rotation.z = -0.1;
+      bangs.castShadow = true;
+      group.add(bangs);
+      // Short back
+      const back = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.28, 0.2), mat
+      );
+      back.position.set(0, -0.04, -0.44);
+      back.castShadow = true;
+      group.add(back);
+      break;
+    }
+    case 'braid': {
+      // Single thick braid down the back — dome + braided cylinder
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.64, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48),
+        mat
+      );
+      dome.position.y = 0.02;
+      dome.castShadow = true;
+      group.add(dome);
+      // Side volume
+      for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.45, 0.8), mat
+        );
+        side.position.set(sx * 0.55, -0.12, -0.05);
+        side.castShadow = true;
+        group.add(side);
+      }
+      // Bangs
+      const bangs = new THREE.Mesh(
+        new THREE.BoxGeometry(0.85, 0.16, 0.22), mat
+      );
+      bangs.position.set(0, -0.05, 0.49);
+      bangs.castShadow = true;
+      group.add(bangs);
+      // Braid — segmented look with alternating slight offsets
+      for (let i = 0; i < 8; i++) {
+        const seg = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22, 0.18, 0.2), mat
+        );
+        seg.position.set(
+          (i % 2 === 0 ? 0.04 : -0.04),
+          -0.1 - i * 0.16,
+          -0.52
+        );
+        seg.castShadow = true;
+        group.add(seg);
+      }
+      // Tie at the end
+      const tie = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14, 0.14, 0.06, 12),
+        new THREE.MeshStandardMaterial({ color: 0xe03050, roughness: 0.4 })
+      );
+      tie.position.set(0, -1.35, -0.52);
+      group.add(tie);
+      break;
+    }
+    case 'afro': {
+      // Big round afro — large sphere covering the whole head
+      const afro = new THREE.Mesh(
+        new THREE.SphereGeometry(0.85, 24, 18), mat
+      );
+      afro.position.y = 0.1;
+      afro.castShadow = true;
+      group.add(afro);
+      break;
+    }
   }
   return group;
 }
