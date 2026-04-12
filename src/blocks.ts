@@ -138,6 +138,28 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'merrygoround':
       group = createMerryGoRoundBlock(spec);
       break;
+    // 도로 / 철도
+    case 'road_straight':
+      group = createRoadStraightBlock(spec);
+      break;
+    case 'road_curve':
+      group = createRoadCurveBlock(spec);
+      break;
+    case 'road_cross':
+      group = createRoadCrossBlock(spec);
+      break;
+    case 'road_tee':
+      group = createRoadTeeBlock(spec);
+      break;
+    case 'rail_straight':
+      group = createRailStraightBlock(spec);
+      break;
+    case 'rail_curve':
+      group = createRailCurveBlock(spec);
+      break;
+    case 'rail_crossing':
+      group = createRailCrossingBlock(spec);
+      break;
     // 가구
     case 'chair':
       group = createChairBlock(spec);
@@ -183,16 +205,28 @@ export function createBrick(spec: BlockSpec): THREE.Group {
       group = createSignpostBlock(spec);
       break;
     case 'hydrant':
+      group = createHydrantBlock(spec);
+      break;
     case 'barrel':
+      group = createBarrelBlock(spec);
+      break;
     case 'campfire':
+      group = createCampfireBlock(spec);
+      break;
     case 'fountain':
+      group = createFountainBlock(spec);
+      break;
     case 'trafficcone':
+      group = createTrafficConeBlock(spec);
+      break;
     case 'barricade':
+      group = createBarricadeBlock(spec);
+      break;
     case 'well':
+      group = createWellBlock(spec);
+      break;
     case 'tent':
-      // Placeholder — these block types were added externally but
-      // don't have dedicated factories yet. Fall back to a basic box.
-      group = createBoxBlock(spec, 'brick');
+      group = createTentBlock(spec);
       break;
     default:
       group = createBoxBlock(spec, 'brick');
@@ -2186,6 +2220,391 @@ function createMerryGoRoundBlock(spec: BlockSpec): THREE.Group {
 //  Bridge — long plank walkway with railings, designed to span a gap
 //  between two separated baseplate tiles. Fixed size 2 × 44 studs.
 // ------------------------------------------------------------------
+// ------------------------------------------------------------------
+//  Road tile factories — flat 8×8 stud tiles placed ON the baseplate.
+//  All tiles share a common asphalt-gray base slab (1 plate thick)
+//  with painted road markings (white center line, yellow edge lines)
+//  or rail geometry (brown sleepers + silver rails) on top.
+// ------------------------------------------------------------------
+
+/** Shared asphalt base slab for all road/rail tiles. */
+function roadBase(w: number, d: number): { group: THREE.Group; mat: THREE.MeshStandardMaterial } {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.85 });
+  const slab = new THREE.Mesh(
+    new THREE.BoxGeometry(w * GRID.X, PLATE_HEIGHT, d * GRID.Z),
+    mat
+  );
+  slab.position.y = PLATE_HEIGHT / 2;
+  slab.receiveShadow = true;
+  slab.castShadow = true;
+  group.add(slab);
+  return { group, mat };
+}
+
+const ROAD_W = 4.5; // road-surface width in studs (leaves 1.75 sidewalk on each side)
+const LINE_H = PLATE_HEIGHT + 0.01; // line Y just above the slab surface
+
+/** White dashed center line running along Z axis. */
+function addCenterLine(group: THREE.Group, length: number) {
+  const lineMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
+  const dashLen = 0.8;
+  const gapLen = 0.6;
+  const step = dashLen + gapLen;
+  const count = Math.floor(length / step);
+  const startZ = -length / 2 + (length - count * step + dashLen) / 2;
+  for (let i = 0; i < count; i++) {
+    const dash = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.02, dashLen),
+      lineMat
+    );
+    dash.position.set(0, LINE_H, startZ + i * step);
+    group.add(dash);
+  }
+}
+
+/** Yellow solid edge lines on both sides of the road, running along Z. */
+function addEdgeLines(group: THREE.Group, length: number) {
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xddb832, roughness: 0.6 });
+  for (const sx of [-1, 1]) {
+    const line = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.02, length - 0.2),
+      edgeMat
+    );
+    line.position.set(sx * (ROAD_W / 2), LINE_H, 0);
+    group.add(line);
+  }
+}
+
+/** Sidewalk curb strips on both sides. */
+function addSidewalks(group: THREE.Group, w: number, d: number) {
+  const curbMat = new THREE.MeshStandardMaterial({ color: 0xa0a3a8, roughness: 0.75 });
+  const totalW = w * GRID.X;
+  const totalD = d * GRID.Z;
+  const curbW = (totalW - ROAD_W) / 2;
+  for (const sx of [-1, 1]) {
+    const curb = new THREE.Mesh(
+      new THREE.BoxGeometry(curbW, PLATE_HEIGHT + 0.08, totalD),
+      curbMat
+    );
+    curb.position.set(sx * (ROAD_W / 2 + curbW / 2), (PLATE_HEIGHT + 0.08) / 2, 0);
+    curb.receiveShadow = true;
+    group.add(curb);
+  }
+}
+
+function createRoadStraightBlock(spec: BlockSpec): THREE.Group {
+  const { group } = roadBase(spec.w, spec.d);
+  const len = spec.d * GRID.Z;
+  addSidewalks(group, spec.w, spec.d);
+  addCenterLine(group, len);
+  addEdgeLines(group, len);
+  return group;
+}
+
+function createRoadCurveBlock(spec: BlockSpec): THREE.Group {
+  const { group } = roadBase(spec.w, spec.d);
+  const half = (spec.w * GRID.X) / 2; // 4
+  const lineMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xddb832, roughness: 0.6 });
+  const curbMat = new THREE.MeshStandardMaterial({ color: 0xa0a3a8, roughness: 0.75 });
+
+  // 90° curve: road enters from the -Z edge center (x=0, z=-half) and
+  // exits from the +X edge center (x=+half, z=0). Arc center sits at
+  // the bottom-right corner (half, -half) with radius = half, so the
+  // openings line up exactly with adjacent straight tiles.
+  const arcCx = half;
+  const arcCz = -half;
+  const R = half;
+
+  // Dashed white center line along the arc (angle π → π/2)
+  const dashCount = 8;
+  for (let i = 0; i < dashCount; i++) {
+    const t = (i + 0.5) / dashCount;
+    const a = Math.PI - t * (Math.PI / 2);
+    const dash = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.02, 0.6),
+      lineMat
+    );
+    dash.position.set(
+      arcCx + R * Math.cos(a),
+      LINE_H,
+      arcCz + R * Math.sin(a)
+    );
+    dash.rotation.y = -(a - Math.PI / 2);
+    group.add(dash);
+  }
+
+  // Yellow edge arcs (inner + outer)
+  for (const rOffset of [-ROAD_W / 2, ROAD_W / 2]) {
+    const r = R + rOffset;
+    if (r <= 0) continue;
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 32; i++) {
+      const t = i / 32;
+      const a = Math.PI - t * (Math.PI / 2);
+      pts.push(new THREE.Vector3(
+        arcCx + r * Math.cos(a),
+        LINE_H,
+        arcCz + r * Math.sin(a)
+      ));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const tube = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 32, 0.05, 4, false),
+      edgeMat
+    );
+    group.add(tube);
+  }
+
+  // Sidewalk: inner corner fill near the arc center (bottom-right)
+  const innerR = R - ROAD_W / 2;
+  if (innerR > 0.3) {
+    const sz = innerR - 0.2;
+    const inner = new THREE.Mesh(
+      new THREE.BoxGeometry(sz, PLATE_HEIGHT + 0.08, sz),
+      curbMat
+    );
+    inner.position.set(half - sz / 2, (PLATE_HEIGHT + 0.08) / 2, -half + sz / 2);
+    inner.receiveShadow = true;
+    group.add(inner);
+  }
+
+  // Sidewalk: outer corner fill (top-left, opposite the curve)
+  const outerR = R + ROAD_W / 2;
+  const outerSz = half * 2 - outerR - 0.2;
+  if (outerSz > 0.3) {
+    const outer = new THREE.Mesh(
+      new THREE.BoxGeometry(outerSz, PLATE_HEIGHT + 0.08, outerSz),
+      curbMat
+    );
+    outer.position.set(-half + outerSz / 2, (PLATE_HEIGHT + 0.08) / 2, half - outerSz / 2);
+    outer.receiveShadow = true;
+    group.add(outer);
+  }
+
+  return group;
+}
+
+function createRoadCrossBlock(spec: BlockSpec): THREE.Group {
+  const { group } = roadBase(spec.w, spec.d);
+  const len = spec.d * GRID.Z;
+  const wid = spec.w * GRID.X;
+  const lineMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
+  // Crosswalk stripes on all 4 approaches
+  for (let axis = 0; axis < 2; axis++) {
+    for (const sign of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.35, 0.02, ROAD_W),
+          lineMat
+        );
+        const offset = sign * ((axis === 0 ? len : wid) / 2 - 0.8) + sign * (-i * 0.5);
+        if (axis === 0) {
+          stripe.position.set(0, LINE_H, offset);
+        } else {
+          stripe.rotation.y = Math.PI / 2;
+          stripe.position.set(offset, LINE_H, 0);
+        }
+        group.add(stripe);
+      }
+    }
+  }
+  return group;
+}
+
+function createRoadTeeBlock(spec: BlockSpec): THREE.Group {
+  const { group } = roadBase(spec.w, spec.d);
+  const len = spec.d * GRID.Z;
+  // Main road along Z + branch toward +X
+  addCenterLine(group, len);
+  addEdgeLines(group, len);
+  // Cut opening in +X edge line (already done by not extending it)
+  // T-junction: add crosswalk stripes at the branch
+  const lineMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
+  for (let i = 0; i < 4; i++) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.35, 0.02, ROAD_W),
+      lineMat
+    );
+    stripe.rotation.y = Math.PI / 2;
+    stripe.position.set((spec.w * GRID.X) / 2 - 0.8 - i * 0.5, LINE_H, 0);
+    group.add(stripe);
+  }
+  // Sidewalk on -X side only (the non-branch side)
+  const curbMat = new THREE.MeshStandardMaterial({ color: 0xa0a3a8, roughness: 0.75 });
+  const totalW = spec.w * GRID.X;
+  const curbW = (totalW - ROAD_W) / 2;
+  const curb = new THREE.Mesh(
+    new THREE.BoxGeometry(curbW, PLATE_HEIGHT + 0.08, len),
+    curbMat
+  );
+  curb.position.set(-(ROAD_W / 2 + curbW / 2), (PLATE_HEIGHT + 0.08) / 2, 0);
+  curb.receiveShadow = true;
+  group.add(curb);
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Rail tile factories
+// ------------------------------------------------------------------
+
+/** Shared rail-bed: gravel-textured slab. */
+function railBase(w: number, d: number): THREE.Group {
+  const group = new THREE.Group();
+  const gravelMat = new THREE.MeshStandardMaterial({ color: 0x6e6b63, roughness: 0.95 });
+  const slab = new THREE.Mesh(
+    new THREE.BoxGeometry(w * GRID.X, PLATE_HEIGHT, d * GRID.Z),
+    gravelMat
+  );
+  slab.position.y = PLATE_HEIGHT / 2;
+  slab.receiveShadow = true;
+  slab.castShadow = true;
+  group.add(slab);
+  return group;
+}
+
+const RAIL_GAUGE = 2.4; // distance between the two rails in studs
+const SLEEPER_SPACING = 1.0;
+
+/** Two parallel silver rails running along Z. */
+function addRails(group: THREE.Group, length: number) {
+  const railMat = new THREE.MeshStandardMaterial({
+    color: 0xb0b5bc,
+    roughness: 0.3,
+    metalness: 0.7,
+  });
+  for (const sx of [-1, 1]) {
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.12, length - 0.1),
+      railMat
+    );
+    rail.position.set(sx * (RAIL_GAUGE / 2), PLATE_HEIGHT + 0.06, 0);
+    rail.castShadow = true;
+    group.add(rail);
+  }
+}
+
+/** Wooden sleepers (ties) across the track, running along Z. */
+function addSleepers(group: THREE.Group, length: number) {
+  const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x6b4226, roughness: 0.8 });
+  const count = Math.floor(length / SLEEPER_SPACING);
+  const startZ = -(count - 1) * SLEEPER_SPACING / 2;
+  for (let i = 0; i < count; i++) {
+    const sleeper = new THREE.Mesh(
+      new THREE.BoxGeometry(RAIL_GAUGE + 1.2, 0.1, 0.4),
+      sleeperMat
+    );
+    sleeper.position.set(0, PLATE_HEIGHT + 0.01, startZ + i * SLEEPER_SPACING);
+    sleeper.receiveShadow = true;
+    group.add(sleeper);
+  }
+}
+
+function createRailStraightBlock(spec: BlockSpec): THREE.Group {
+  const group = railBase(spec.w, spec.d);
+  const len = spec.d * GRID.Z;
+  addSleepers(group, len);
+  addRails(group, len);
+  return group;
+}
+
+function createRailCurveBlock(spec: BlockSpec): THREE.Group {
+  const group = railBase(spec.w, spec.d);
+  const half = (spec.w * GRID.X) / 2;
+  const cR = half * 0.6; // curve radius
+  const railMat = new THREE.MeshStandardMaterial({
+    color: 0xb0b5bc,
+    roughness: 0.3,
+    metalness: 0.7,
+  });
+  const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x6b4226, roughness: 0.8 });
+  const segments = 16;
+  // Sleepers along arc
+  for (let i = 0; i <= segments; i++) {
+    const a = (i / segments) * (Math.PI / 2);
+    const cx = -half + cR + Math.sin(a) * cR;
+    const cz = -half + cR - Math.cos(a) * cR;
+    const sleeper = new THREE.Mesh(
+      new THREE.BoxGeometry(RAIL_GAUGE + 1.2, 0.1, 0.4),
+      sleeperMat
+    );
+    sleeper.position.set(cx, PLATE_HEIGHT + 0.01, cz);
+    sleeper.rotation.y = a;
+    sleeper.receiveShadow = true;
+    group.add(sleeper);
+  }
+  // Rails — two arc tubes (inner + outer)
+  for (const rOffset of [-RAIL_GAUGE / 2, RAIL_GAUGE / 2]) {
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 32; i++) {
+      const a = (i / 32) * (Math.PI / 2);
+      pts.push(
+        new THREE.Vector3(
+          -half + cR + Math.sin(a) * (cR + rOffset),
+          PLATE_HEIGHT + 0.06,
+          -half + cR - Math.cos(a) * (cR + rOffset)
+        )
+      );
+    }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const tube = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 32, 0.07, 6, false),
+      railMat
+    );
+    tube.castShadow = true;
+    group.add(tube);
+  }
+  return group;
+}
+
+function createRailCrossingBlock(spec: BlockSpec): THREE.Group {
+  const { group } = roadBase(spec.w, spec.d);
+  const len = spec.d * GRID.Z;
+  // Road goes along Z, rails cross along X
+  addCenterLine(group, len);
+  addEdgeLines(group, len);
+  addSidewalks(group, spec.w, spec.d);
+  // Rails crossing perpendicular (along X)
+  const railMat = new THREE.MeshStandardMaterial({
+    color: 0xb0b5bc,
+    roughness: 0.3,
+    metalness: 0.7,
+  });
+  const totalW = spec.w * GRID.X;
+  for (const sz of [-1, 1]) {
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(totalW, 0.12, 0.14),
+      railMat
+    );
+    rail.position.set(0, PLATE_HEIGHT + 0.06, sz * (RAIL_GAUGE / 2));
+    rail.castShadow = true;
+    group.add(rail);
+  }
+  // Crossing planks across the road
+  const plankMat = new THREE.MeshStandardMaterial({ color: 0x8b7355, roughness: 0.7 });
+  const plank = new THREE.Mesh(
+    new THREE.BoxGeometry(ROAD_W + 0.4, 0.06, RAIL_GAUGE + 1.6),
+    plankMat
+  );
+  plank.position.y = PLATE_HEIGHT + 0.03;
+  plank.receiveShadow = true;
+  group.add(plank);
+  // Warning stripes
+  const warnMat = new THREE.MeshStandardMaterial({ color: 0xddb832, roughness: 0.6 });
+  for (const sz of [-1, 1]) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(ROAD_W + 0.4, 0.02, 0.15),
+      warnMat
+    );
+    stripe.position.set(0, PLATE_HEIGHT + 0.07, sz * (RAIL_GAUGE / 2 + 1.0));
+    group.add(stripe);
+  }
+  return group;
+}
+
+// ------------------------------------------------------------------
+
 function createBridgeBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
   const w = spec.w;
@@ -4020,6 +4439,614 @@ export function createGhost(spec: GhostSpec): THREE.Mesh {
   return mesh;
 }
 
+// ------------------------------------------------------------------
+//  Furniture & prop blocks — visually recognizable Lego assemblies
+// ------------------------------------------------------------------
+
+/** Helper: positioned box mesh with castShadow */
+function _b(
+  geo: THREE.BufferGeometry,
+  x: number, y: number, z: number,
+  mat: THREE.Material
+): THREE.Mesh {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  return m;
+}
+function _box(
+  w: number, h: number, d: number,
+  x: number, y: number, z: number,
+  mat: THREE.Material
+): THREE.Mesh {
+  return _b(new THREE.BoxGeometry(w, h, d), x, y, z, mat);
+}
+function _cyl(
+  r: number, h: number,
+  x: number, y: number, z: number,
+  mat: THREE.Material, seg = 16
+): THREE.Mesh {
+  return _b(new THREE.CylinderGeometry(r, r, h, seg), x, y, z, mat);
+}
+
+// ---- FURNITURE ----
+
+// 1. Chair — 2×2 footprint, 6 plates tall
+function createChairBlock(_spec: BlockSpec): THREE.Group {
+  const PH = PLATE_HEIGHT;
+  const group = new THREE.Group();
+  const legMat = new THREE.MeshStandardMaterial({ color: 0xcc8833, roughness: 0.6 });
+  const seatMat = new THREE.MeshStandardMaterial({ color: 0xe8b84b, roughness: 0.5 });
+  const backMat = new THREE.MeshStandardMaterial({ color: 0xcc8833, roughness: 0.6 });
+  // 4 thin legs at corners with 0.25 inset — visible gaps
+  for (const [ox, oz] of [[-0.75, -0.75], [0.75, -0.75], [-0.75, 0.75], [0.75, 0.75]] as [number, number][]) {
+    group.add(_box(0.5, 1.2, 0.5, ox, 0.6, oz, legMat));
+  }
+  // Seat plate on top of legs
+  group.add(_box(2, 0.4, 2, 0, 1.4, 0, seatMat));
+  // Backrest at back edge on top of seat
+  group.add(_box(2, 1.2, 0.4, 0, 2.2, -0.8, backMat));
+  return group;
+}
+
+// 2. Table — 4×4 footprint, 6 plates tall
+function createTableBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7 });
+  const topMat = new THREE.MeshStandardMaterial({ color: 0xcc8833, roughness: 0.5 });
+  // 4 thin legs at corners with 0.3 inset
+  for (const [ox, oz] of [[-1.7, -1.7], [1.7, -1.7], [-1.7, 1.7], [1.7, 1.7]] as [number, number][]) {
+    group.add(_box(0.6, 2.0, 0.6, ox, 1.0, oz, legMat));
+  }
+  // Tabletop
+  group.add(_box(4, 0.4, 4, 0, 2.2, 0, topMat));
+  return group;
+}
+
+// 3. Sofa — 4×2 footprint, 6 plates tall
+function createSofaBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.6 });
+  const cushMat = new THREE.MeshStandardMaterial({ color: 0xdd3333, roughness: 0.5 });
+  const backMat = new THREE.MeshStandardMaterial({ color: 0x991111, roughness: 0.65 });
+  const armMat = new THREE.MeshStandardMaterial({ color: 0xaa1818, roughness: 0.65 });
+  // Base box
+  group.add(_box(4, 0.8, 2, 0, 0.4, 0, baseMat));
+  // Seat cushion slightly inset
+  group.add(_box(3.2, 0.4, 1.6, 0, 1.0, 0, cushMat));
+  // Backrest at back
+  group.add(_box(4, 1.2, 0.5, 0, 1.4, -0.75, backMat));
+  // Armrests on sides
+  group.add(_box(0.4, 0.8, 1.6, -1.8, 1.2, 0, armMat));
+  group.add(_box(0.4, 0.8, 1.6, 1.8, 1.2, 0, armMat));
+  return group;
+}
+
+// 4. Bed — 4×6 footprint, 4 plates tall
+function createBedBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7 });
+  const mattMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.5 });
+  const pillowMat = new THREE.MeshStandardMaterial({ color: 0xaaccee, roughness: 0.4 });
+  // 4 short legs at corners under frame
+  for (const [ox, oz] of [[-1.75, -2.75], [1.75, -2.75], [-1.75, 2.75], [1.75, 2.75]] as [number, number][]) {
+    group.add(_box(0.5, 0.4, 0.5, ox, 0.2, oz, frameMat));
+  }
+  // Frame
+  group.add(_box(4, 0.4, 6, 0, 0.6, 0, frameMat));
+  // Mattress slightly inset
+  group.add(_box(3.6, 0.5, 5, 0, 1.05, 0.5, mattMat));
+  // Pillow at head end
+  group.add(_box(3, 0.4, 1, 0, 1.5, -2.0, pillowMat));
+  // Headboard
+  group.add(_box(4, 1.6, 0.4, 0, 1.6, -2.8, frameMat));
+  return group;
+}
+
+// 5. Bookshelf — 4×1 footprint, 12 plates tall
+function createBookshelfBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7 });
+  const shelfMat = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.6 });
+  const totalH = 4.8; // 12 plates
+  // Side panels
+  group.add(_box(0.4, totalH, 1.0, -1.8, totalH / 2, 0, woodMat));
+  group.add(_box(0.4, totalH, 1.0, 1.8, totalH / 2, 0, woodMat));
+  // 4 shelf plates
+  const shelfYs = [0.0, 1.2, 2.4, 3.6];
+  for (const sy of shelfYs) {
+    group.add(_box(3.2, 0.2, 1.0, 0, sy + 0.1, 0, shelfMat));
+  }
+  // Top shelf
+  group.add(_box(3.2, 0.2, 1.0, 0, totalH - 0.1, 0, shelfMat));
+  // Books on each shelf
+  const bookColors = [0x2244aa, 0xcc3333, 0x33aa44, 0xddaa22, 0x8833aa, 0x33aaaa, 0xdd6622, 0x4466bb, 0xbb2288];
+  for (let si = 0; si < 3; si++) {
+    const shelfTop = shelfYs[si] + 0.2;
+    for (let bi = 0; bi < 4; bi++) {
+      const bMat = new THREE.MeshStandardMaterial({ color: bookColors[(si * 4 + bi) % bookColors.length], roughness: 0.6 });
+      group.add(_box(0.3, 0.8, 0.8, -1.2 + bi * 0.7, shelfTop + 0.4, 0, bMat));
+    }
+  }
+  return group;
+}
+
+// 6. Desk — 4×2 footprint, 6 plates tall
+function createDeskBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const panelMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7 });
+  const topMat = new THREE.MeshStandardMaterial({ color: 0xcc8833, roughness: 0.5 });
+  const drawerMat = new THREE.MeshStandardMaterial({ color: 0x503018, roughness: 0.65 });
+  // 2 side panels
+  group.add(_box(0.5, 1.6, 2.0, -1.75, 0.8, 0, panelMat));
+  group.add(_box(0.5, 1.6, 2.0, 1.75, 0.8, 0, panelMat));
+  // Top surface on panels
+  group.add(_box(4, 0.3, 2, 0, 1.75, 0, topMat));
+  // Drawer block between panels, slightly recessed
+  group.add(_box(1.5, 0.8, 1.8, 0, 0.4, 0.05, drawerMat));
+  return group;
+}
+
+// 7. Cabinet — 2×2 footprint, 9 plates tall
+function createCabinetBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7 });
+  const frontMat = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.55 });
+  const lineMat = new THREE.MeshStandardMaterial({ color: 0x3a2210, roughness: 0.6 });
+  const knobMat = new THREE.MeshStandardMaterial({ color: 0xccaa44, roughness: 0.4, metalness: 0.3 });
+  const totalH = 3.6; // 9 plates
+  // Body
+  group.add(_box(2, totalH, 2, 0, totalH / 2, 0, bodyMat));
+  // Front face slightly inset
+  group.add(_box(1.8, 3.4, 0.1, 0, totalH / 2, 1.0, frontMat));
+  // 3 drawer lines
+  for (let i = 0; i < 3; i++) {
+    const ly = 0.6 + i * 1.1;
+    group.add(_box(1.6, 0.05, 0.1, 0, ly, 1.06, lineMat));
+    // Small knob on each drawer
+    group.add(_cyl(0.08, 0.15, 0, ly + 0.4, 1.1, knobMat, 8));
+  }
+  return group;
+}
+
+// 8. TV Set — 4×1 footprint, 9 plates tall
+function createTvSetBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const standMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.5 });
+  const screenMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.3, metalness: 0.1 });
+  const displayMat = new THREE.MeshStandardMaterial({ color: 0x112244, roughness: 0.2, metalness: 0.1 });
+  // Stand base
+  group.add(_box(2, 0.4, 1, 0, 0.2, 0, standMat));
+  // Stand neck
+  group.add(_cyl(0.2, 0.8, 0, 0.8, 0, standMat));
+  // Screen
+  group.add(_box(4, 2.8, 0.2, 0, 2.6, 0, screenMat));
+  // Display area on front
+  group.add(_box(3.6, 2.4, 0.05, 0, 2.6, 0.13, displayMat));
+  return group;
+}
+
+// 9. Fridge — 2×2 footprint, 15 plates tall
+function createFridgeBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4 });
+  const freezerMat = new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.45 });
+  const fridgeMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.42 });
+  const lineMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.5 });
+  const handleMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.4, metalness: 0.2 });
+  const totalH = 6.0; // 15 plates
+  // Main body
+  group.add(_box(2, totalH, 2, 0, totalH / 2, 0, whiteMat));
+  // Freezer door at top (front, slightly inset)
+  group.add(_box(1.9, 1.8, 0.1, 0, totalH - 0.9, 1.0, freezerMat));
+  // Fridge door below
+  group.add(_box(1.9, 3.8, 0.1, 0, 2.1, 1.0, fridgeMat));
+  // Divider line between doors
+  group.add(_box(1.9, 0.08, 0.1, 0, 4.2, 1.0, lineMat));
+  // Handles on right side of each door
+  group.add(_cyl(0.05, 0.6, 0.7, 5.1, 1.1, handleMat, 8));
+  group.add(_cyl(0.05, 0.6, 0.7, 2.1, 1.1, handleMat, 8));
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Prop blocks
+// ------------------------------------------------------------------
+
+// 10. Bench — 6×2 footprint, 4 plates tall
+function createBenchBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.5, metalness: 0.2 });
+  const seatMat = new THREE.MeshStandardMaterial({ color: 0xcc8833, roughness: 0.6 });
+  // 2 leg pairs: inverted T shape
+  for (const xOff of [-2, 2]) {
+    // Base of T
+    group.add(_box(0.8, 0.4, 1.5, xOff, 0.2, 0, legMat));
+    // Vertical of T
+    group.add(_box(0.3, 1.2, 0.3, xOff, 0.8, 0, legMat));
+  }
+  // 3 seat slats
+  for (let i = 0; i < 3; i++) {
+    group.add(_box(5.4, 0.2, 0.4, 0, 1.5, -0.5 + i * 0.5, seatMat));
+  }
+  // 2 backrest slats tilted slightly
+  for (let i = 0; i < 2; i++) {
+    const slat = _box(5.4, 0.2, 0.3, 0, 2.0 + i * 0.4, -0.7, seatMat);
+    slat.rotation.x = -0.15;
+    group.add(slat);
+  }
+  return group;
+}
+
+// 11. Flowerpot — 2×2 footprint, 4 plates tall
+function createFlowerpotBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const potMat = new THREE.MeshStandardMaterial({ color: 0xb5651d, roughness: 0.7 });
+  const soilMat = new THREE.MeshStandardMaterial({ color: 0x3a2210, roughness: 0.8 });
+  const plantMat = new THREE.MeshStandardMaterial({ color: 0x33aa44, roughness: 0.6 });
+  // Truncated cone pot
+  const pot = _b(new THREE.CylinderGeometry(0.65, 0.85, 1.0, 16), 0, 0.5, 0, potMat);
+  group.add(pot);
+  // Soil on top
+  group.add(_cyl(0.6, 0.15, 0, 1.08, 0, soilMat));
+  // Plant bush spheres
+  const bush1 = _b(new THREE.SphereGeometry(0.7, 12, 10), 0, 1.8, 0, plantMat);
+  group.add(bush1);
+  const bush2 = _b(new THREE.SphereGeometry(0.4, 10, 8), 0.35, 2.2, 0.2, plantMat);
+  group.add(bush2);
+  return group;
+}
+
+// 12. Trashcan — 2×2 footprint, 6 plates tall
+function createTrashcanBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.5 });
+  const lidMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.45 });
+  // Cylinder body
+  group.add(_cyl(0.8, 2.0, 0, 1.0, 0, bodyMat));
+  // Lid slightly wider
+  group.add(_cyl(0.85, 0.2, 0, 2.1, 0, lidMat));
+  // Lid handle
+  group.add(_box(0.3, 0.15, 0.08, 0, 2.28, 0, lidMat));
+  return group;
+}
+
+// 13. Mailbox — 2×1 footprint, 9 plates tall
+function createMailboxBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5 });
+  const boxMat = new THREE.MeshStandardMaterial({ color: 0x2255bb, roughness: 0.5 });
+  const topMat = new THREE.MeshStandardMaterial({ color: 0x3366cc, roughness: 0.5 });
+  const slotMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
+  // Post
+  group.add(_cyl(0.15, 2.0, 0, 1.0, 0, poleMat));
+  // Box on top of post
+  group.add(_box(1.6, 1.2, 0.8, 0, 2.6, 0, boxMat));
+  // Rounded top lip
+  group.add(_box(1.7, 0.15, 0.85, 0, 3.28, 0, topMat));
+  // Mail slot on front
+  group.add(_box(1.0, 0.06, 0.05, 0, 2.6, 0.43, slotMat));
+  return group;
+}
+
+// 14. Signpost — 2×1 footprint, 12 plates tall
+function createSignpostBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.5 });
+  const borderMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.5 });
+  const signMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4 });
+  // Pole
+  group.add(_cyl(0.12, 4.0, 0, 2.0, 0, poleMat));
+  // Sign border (slightly larger, behind)
+  group.add(_box(2.1, 1.3, 0.1, 0, 4.15, -0.05, borderMat));
+  // Sign face
+  group.add(_box(2, 1.2, 0.15, 0, 4.15, 0.03, signMat));
+  return group;
+}
+
+// 15. Hydrant — 1×1 footprint, 5 plates tall
+function createHydrantBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const redMat = new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.5 });
+  // Base
+  group.add(_cyl(0.35, 0.3, 0, 0.15, 0, redMat));
+  // Body
+  group.add(_cyl(0.3, 1.2, 0, 0.75, 0, redMat));
+  // Top dome
+  const dome = _b(new THREE.SphereGeometry(0.3, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), 0, 1.35, 0, redMat);
+  group.add(dome);
+  // Side nozzles (horizontal cylinders)
+  for (const side of [-1, 1]) {
+    const nozzle = _b(new THREE.CylinderGeometry(0.12, 0.12, 0.3, 8), side * 0.45, 0.9, 0, redMat);
+    nozzle.rotation.z = Math.PI / 2;
+    group.add(nozzle);
+  }
+  // Top bonnet
+  group.add(_cyl(0.15, 0.15, 0, 1.6, 0, redMat));
+  return group;
+}
+
+// 16. Barrel — 2×2 footprint, 6 plates tall
+function createBarrelBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.7 });
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x5a3a10, roughness: 0.6 });
+  const lidMat = new THREE.MeshStandardMaterial({ color: 0x7a5912, roughness: 0.65 });
+  // Slightly tapered body
+  const barrel = _b(new THREE.CylinderGeometry(0.75, 0.8, 2.2, 16), 0, 1.1, 0, woodMat);
+  group.add(barrel);
+  // 2 bands at 1/3 and 2/3 height
+  const band1 = _b(new THREE.TorusGeometry(0.78, 0.04, 8, 24), 0, 0.73, 0, bandMat);
+  band1.rotation.x = Math.PI / 2;
+  group.add(band1);
+  const band2 = _b(new THREE.TorusGeometry(0.78, 0.04, 8, 24), 0, 1.47, 0, bandMat);
+  band2.rotation.x = Math.PI / 2;
+  group.add(band2);
+  // Lid
+  group.add(_cyl(0.7, 0.1, 0, 2.25, 0, lidMat));
+  return group;
+}
+
+// 17. Campfire — 3×3 footprint, 3 plates tall
+function createCampfireBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const logMat = new THREE.MeshStandardMaterial({ color: 0x5a3018, roughness: 0.8 });
+  const charMat = new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 0.9 });
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.7 });
+
+  // Stone ring: 12 stones in a circle r=1.8
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2;
+    const sx = Math.cos(angle) * 1.8;
+    const sz = Math.sin(angle) * 1.8;
+    const s = _box(0.55, 0.4, 0.5, sx, 0.2, sz, stoneMat);
+    s.rotation.y = angle + 0.3;
+    group.add(s);
+  }
+
+  // Charred ground base
+  group.add(_cyl(1.3, 0.1, 0, 0.05, 0, charMat));
+
+  // 8 logs: thick horizontal cylinders in a teepee-like crossed pattern
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const log = _b(new THREE.CylinderGeometry(0.18, 0.12, 2.0, 8), 0, 0.5, 0, logMat);
+    log.rotation.z = Math.PI / 2 - 0.3;
+    log.rotation.y = angle;
+    log.position.set(
+      Math.cos(angle) * 0.3,
+      0.5,
+      Math.sin(angle) * 0.3
+    );
+    group.add(log);
+  }
+
+  // Flames: many emissive cones of varying sizes — looks like roaring fire
+  const flameGroup = new THREE.Group();
+  flameGroup.userData.isCampfireFlame = true;
+  const flameDefs: { x: number; z: number; r: number; h: number; color: number }[] = [
+    { x: 0, z: 0, r: 0.35, h: 2.2, color: 0xff4400 },
+    { x: 0.25, z: 0.2, r: 0.25, h: 1.8, color: 0xff6600 },
+    { x: -0.3, z: 0.15, r: 0.22, h: 1.6, color: 0xff8800 },
+    { x: 0.15, z: -0.25, r: 0.28, h: 2.0, color: 0xff5500 },
+    { x: -0.2, z: -0.2, r: 0.2, h: 1.5, color: 0xffaa00 },
+    { x: 0, z: 0.3, r: 0.18, h: 1.3, color: 0xffcc00 },
+    { x: 0.35, z: -0.1, r: 0.15, h: 1.1, color: 0xffdd22 },
+    { x: -0.35, z: -0.05, r: 0.18, h: 1.4, color: 0xff7700 },
+  ];
+  for (const f of flameDefs) {
+    const mat = new THREE.MeshStandardMaterial({
+      color: f.color,
+      emissive: f.color,
+      emissiveIntensity: 1.2,
+      transparent: true,
+      opacity: 0.85,
+      roughness: 0.2,
+    });
+    const cone = _b(new THREE.ConeGeometry(f.r, f.h, 8), f.x, 0.6 + f.h / 2, f.z, mat);
+    flameGroup.add(cone);
+  }
+  group.add(flameGroup);
+
+  // Point light for warm glow
+  const fireLight = new THREE.PointLight(0xff6622, 5, 18);
+  fireLight.position.set(0, 2.5, 0);
+  group.add(fireLight);
+
+  // Scale up to fill 8×8 footprint
+  group.scale.setScalar(1.6);
+
+  return group;
+}
+
+// 18. Fountain — 8×8 footprint, 12 plates tall
+function createFountainBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.6 });
+  const darkStoneMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.65 });
+  const waterMat = new THREE.MeshStandardMaterial({
+    color: 0x3388cc,
+    roughness: 0.1,
+    transparent: true,
+    opacity: 0.55,
+    metalness: 0.1,
+  });
+
+  // Octagonal base platform
+  group.add(_cyl(3.8, 0.4, 0, 0.2, 0, darkStoneMat, 8));
+
+  // Basin wall: thick octagonal ring
+  const wallR = 3.2;
+  for (let i = 0; i < 16; i++) {
+    const angle = (i / 16) * Math.PI * 2;
+    const bx = Math.cos(angle) * wallR;
+    const bz = Math.sin(angle) * wallR;
+    const wall = _box(0.7, 1.0, 0.5, bx, 0.9, bz, stoneMat);
+    wall.rotation.y = angle;
+    group.add(wall);
+  }
+
+  // Basin rim (torus)
+  const rim = _b(new THREE.TorusGeometry(wallR, 0.18, 8, 16), 0, 1.45, 0, stoneMat);
+  rim.rotation.x = Math.PI / 2;
+  group.add(rim);
+
+  // Water surface inside basin
+  group.add(_cyl(2.8, 0.15, 0, 0.6, 0, waterMat, 24));
+
+  // Center pillar — tiered
+  group.add(_cyl(0.5, 1.2, 0, 1.0, 0, stoneMat, 8));  // bottom tier
+  group.add(_cyl(0.35, 1.0, 0, 1.9, 0, stoneMat, 8));  // middle tier
+
+  // Middle bowl
+  group.add(_b(new THREE.CylinderGeometry(0.8, 0.3, 0.35, 12), 0, 2.55, 0, stoneMat));
+  // Water in middle bowl
+  group.add(_cyl(0.65, 0.08, 0, 2.62, 0, waterMat, 12));
+
+  // Top pillar
+  group.add(_cyl(0.2, 0.8, 0, 3.1, 0, stoneMat, 8));
+
+  // Top bowl (small)
+  group.add(_b(new THREE.CylinderGeometry(0.45, 0.15, 0.25, 10), 0, 3.6, 0, stoneMat));
+
+  // Water jets — multiple translucent cones shooting upward
+  const jetGroup = new THREE.Group();
+  jetGroup.userData.isFountainJet = true;
+  const jetMat = new THREE.MeshStandardMaterial({
+    color: 0x88ccff,
+    emissive: 0x4488cc,
+    emissiveIntensity: 0.3,
+    transparent: true,
+    opacity: 0.5,
+    roughness: 0.05,
+  });
+  // Main center jet
+  jetGroup.add(_b(new THREE.ConeGeometry(0.06, 1.2, 8), 0, 4.3, 0, jetMat));
+  // Side jets from middle bowl
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const jx = Math.cos(a) * 0.5;
+    const jz = Math.sin(a) * 0.5;
+    jetGroup.add(_b(new THREE.ConeGeometry(0.04, 0.6, 6), jx, 3.0, jz, jetMat));
+  }
+  // Falling water streams from middle bowl edge (downward cylinders)
+  const streamMat = new THREE.MeshStandardMaterial({
+    color: 0x88ccff,
+    transparent: true,
+    opacity: 0.3,
+    roughness: 0.05,
+  });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const sx = Math.cos(a) * 0.7;
+    const sz = Math.sin(a) * 0.7;
+    jetGroup.add(_cyl(0.03, 1.6, sx, 1.7, sz, streamMat, 6));
+  }
+  group.add(jetGroup);
+
+  // Scale up to fill 12×12 footprint
+  group.scale.setScalar(1.5);
+
+  return group;
+}
+
+// 19. Traffic Cone — 1×1 footprint, 3 plates tall
+function createTrafficConeBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 });
+  const orangeMat = new THREE.MeshStandardMaterial({ color: 0xff6600, roughness: 0.5 });
+  const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+  // Black base
+  group.add(_box(0.9, 0.15, 0.9, 0, 0.075, 0, baseMat));
+  // Orange cone
+  group.add(_b(new THREE.ConeGeometry(0.3, 1.0, 12), 0, 0.65, 0, orangeMat));
+  // White stripe at mid height
+  group.add(_cyl(0.28, 0.1, 0, 0.55, 0, stripeMat, 12));
+  return group;
+}
+
+// 20. Barricade — 4×1 footprint, 6 plates tall
+function createBarricadeBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xff6600, roughness: 0.5 });
+  const orangeMat = new THREE.MeshStandardMaterial({ color: 0xff6600, roughness: 0.5 });
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+  // 2 A-frame legs at ends
+  for (const xOff of [-1.5, 1.5]) {
+    // Left leg of A
+    const legL = _box(0.2, 2.0, 0.15, xOff - 0.3, 1.0, 0, frameMat);
+    legL.rotation.z = 0.15;
+    group.add(legL);
+    // Right leg of A
+    const legR = _box(0.2, 2.0, 0.15, xOff + 0.3, 1.0, 0, frameMat);
+    legR.rotation.z = -0.15;
+    group.add(legR);
+    // A crossbar
+    group.add(_box(0.6, 0.15, 0.15, xOff, 0.6, 0, frameMat));
+  }
+  // Horizontal bar across top: alternating orange/white stripes
+  group.add(_box(2, 0.3, 0.15, -1, 2.2, 0, orangeMat));
+  group.add(_box(2, 0.3, 0.15, 1, 2.2, 0, whiteMat));
+  return group;
+}
+
+// 21. Well — 4×4 footprint, 9 plates tall
+function createWellBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.7 });
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7 });
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0xc2a870, roughness: 0.8 });
+  const bucketMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.6 });
+  // Base
+  group.add(_cyl(1.8, 0.4, 0, 0.2, 0, stoneMat));
+  // Wall: 8 boxes octagonal
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const wx = Math.cos(angle) * 1.5;
+    const wz = Math.sin(angle) * 1.5;
+    const wall = _box(0.6, 1.6, 0.4, wx, 1.2, wz, stoneMat);
+    wall.rotation.y = angle;
+    group.add(wall);
+  }
+  // 2 vertical posts
+  group.add(_box(0.3, 3.0, 0.3, 0, 1.9, -1.0, woodMat));
+  group.add(_box(0.3, 3.0, 0.3, 0, 1.9, 1.0, woodMat));
+  // Crossbar at top
+  group.add(_box(0.3, 0.3, 2.5, 0, 3.55, 0, woodMat));
+  // Rope hanging from crossbar
+  group.add(_cyl(0.04, 1.2, 0, 2.8, 0, ropeMat, 6));
+  // Bucket at rope bottom
+  group.add(_box(0.4, 0.35, 0.4, 0, 2.03, 0, bucketMat));
+  return group;
+}
+
+// 22. Tent — 6×6 footprint, 12 plates tall
+function createTentBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const canvasMat = new THREE.MeshStandardMaterial({ color: 0xc2b280, roughness: 0.7, side: THREE.DoubleSide });
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x5a3a10, roughness: 0.7 });
+  const totalH = 4.8; // 12 plates
+  // 4 corner poles
+  group.add(_cyl(0.15, totalH, -2.85, totalH / 2, -2.85, poleMat, 8));
+  group.add(_cyl(0.15, totalH, 2.85, totalH / 2, -2.85, poleMat, 8));
+  group.add(_cyl(0.15, totalH, -2.85, totalH / 2, 2.85, poleMat, 8));
+  group.add(_cyl(0.15, totalH, 2.85, totalH / 2, 2.85, poleMat, 8));
+  // Ridge pole along z-axis at top
+  const ridge = _b(new THREE.CylinderGeometry(0.12, 0.12, 6, 8), 0, totalH, 0, poleMat);
+  ridge.rotation.x = Math.PI / 2;
+  group.add(ridge);
+  // 2 canvas slopes tilted ±35 degrees from ridge
+  const slopeAngle = 35 * Math.PI / 180;
+  const leftSlope = _box(6.0, 0.08, 3.5, -1.4, totalH - 0.9, 0, canvasMat);
+  leftSlope.rotation.z = slopeAngle;
+  group.add(leftSlope);
+  const rightSlope = _box(6.0, 0.08, 3.5, 1.4, totalH - 0.9, 0, canvasMat);
+  rightSlope.rotation.z = -slopeAngle;
+  group.add(rightSlope);
+  // Back wall: tall thin box approximating triangle
+  group.add(_box(5.5, totalH * 0.8, 0.08, 0, totalH * 0.4, -2.85, canvasMat));
+  return group;
+}
 /**
  * Translucent preview built from the real block geometry — this is how
  * ghost shapes match slopes/arches/round/cone/window/door/fence/wheel/etc.

@@ -231,12 +231,34 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 3.6, 0);
       break;
     case 'bridge':
-      // 6×44×2.4 — wide road bridge. Rotate 45° around Y so the full
-      // length packs diagonally into the square thumbnail, then pull the
-      // camera further back to fit both the wider deck and the long span.
       obj.rotation.y = Math.PI / 4;
       camera!.position.set(24, 19, 28);
       camera!.lookAt(0, 1.2, 0);
+      break;
+    // ------------------------------------------------------------------
+    //  Road / Rail tiles — top-down angled view to show markings/rails
+    // ------------------------------------------------------------------
+    case 'road_straight':
+    case 'road_tee':
+      camera!.position.set(6, 10, 8);
+      camera!.lookAt(0, 0, 0);
+      break;
+    case 'road_curve':
+      camera!.position.set(6, 10, 6);
+      camera!.lookAt(0, 0, 0);
+      break;
+    case 'road_cross':
+      camera!.position.set(0, 12, 6);
+      camera!.lookAt(0, 0, 0);
+      break;
+    case 'rail_straight':
+    case 'rail_crossing':
+      camera!.position.set(6, 10, 8);
+      camera!.lookAt(0, 0, 0);
+      break;
+    case 'rail_curve':
+      camera!.position.set(6, 10, 6);
+      camera!.lookAt(0, 0, 0);
       break;
     // ------------------------------------------------------------------
     //  Playground modules
@@ -274,6 +296,100 @@ export function renderBlockTypeThumbnail(
       // 16-stud diameter and 12.8-tall pole + finial all fit in frame.
       camera!.position.set(34, 22, 34);
       camera!.lookAt(0, 5.0, 0);
+      break;
+    // ------------------------------------------------------------------
+    //  Furniture
+    // ------------------------------------------------------------------
+    case 'chair':
+      camera!.position.set(4, 3.5, 4);
+      camera!.lookAt(0, 1.0, 0);
+      break;
+    case 'table':
+      camera!.position.set(6, 4, 6);
+      camera!.lookAt(0, 1.0, 0);
+      break;
+    case 'sofa':
+      camera!.position.set(5.5, 3.5, 5.5);
+      camera!.lookAt(0, 1.0, 0);
+      break;
+    case 'bed':
+      camera!.position.set(7, 4, 7);
+      camera!.lookAt(0, 0.8, 0);
+      break;
+    case 'bookshelf':
+      camera!.position.set(7, 5, 7);
+      camera!.lookAt(0, 2.4, 0);
+      break;
+    case 'desk':
+      camera!.position.set(6, 4, 6);
+      camera!.lookAt(0, 1.0, 0);
+      break;
+    case 'cabinet':
+      camera!.position.set(5.5, 4, 5.5);
+      camera!.lookAt(0, 1.8, 0);
+      break;
+    case 'tvset':
+      camera!.position.set(0, 3.5, 10);
+      camera!.lookAt(0, 1.8, 0);
+      break;
+    case 'fridge':
+      camera!.position.set(7, 5.5, 7);
+      camera!.lookAt(0, 3.0, 0);
+      break;
+    // ------------------------------------------------------------------
+    //  Props
+    // ------------------------------------------------------------------
+    case 'bench':
+      camera!.position.set(7, 3.5, 7);
+      camera!.lookAt(0, 0.8, 0);
+      break;
+    case 'flowerpot':
+      camera!.position.set(3.5, 3, 3.5);
+      camera!.lookAt(0, 0.8, 0);
+      break;
+    case 'trashcan':
+      camera!.position.set(4, 3.5, 4);
+      camera!.lookAt(0, 1.2, 0);
+      break;
+    case 'mailbox':
+      camera!.position.set(5.5, 4, 5.5);
+      camera!.lookAt(0, 1.8, 0);
+      break;
+    case 'signpost':
+      camera!.position.set(7, 5, 7);
+      camera!.lookAt(0, 2.4, 0);
+      break;
+    case 'hydrant':
+      camera!.position.set(3.5, 2.8, 3.5);
+      camera!.lookAt(0, 1.0, 0);
+      break;
+    case 'barrel':
+      camera!.position.set(4.5, 3.5, 4.5);
+      camera!.lookAt(0, 1.2, 0);
+      break;
+    case 'campfire':
+      camera!.position.set(5, 3.5, 5);
+      camera!.lookAt(0, 0.6, 0);
+      break;
+    case 'fountain':
+      camera!.position.set(12, 7, 12);
+      camera!.lookAt(0, 1.8, 0);
+      break;
+    case 'trafficcone':
+      camera!.position.set(2.8, 2.4, 2.8);
+      camera!.lookAt(0, 0.6, 0);
+      break;
+    case 'barricade':
+      camera!.position.set(6, 3.5, 6);
+      camera!.lookAt(0, 1.2, 0);
+      break;
+    case 'well':
+      camera!.position.set(8, 5, 8);
+      camera!.lookAt(0, 1.8, 0);
+      break;
+    case 'tent':
+      camera!.position.set(10, 6, 10);
+      camera!.lookAt(0, 2.4, 0);
       break;
     default:
       camera!.position.set(3.8, 3.2, 3.8);

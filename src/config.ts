@@ -187,7 +187,15 @@ export type BlockType =
   | 'trafficcone'
   | 'barricade'
   | 'well'
-  | 'tent';
+  | 'tent'
+  // 도로 / 철도
+  | 'road_straight'
+  | 'road_curve'
+  | 'road_cross'
+  | 'road_tee'
+  | 'rail_straight'
+  | 'rail_curve'
+  | 'rail_crossing';
 
 export type BlockCategory =
   | 'basic'
@@ -197,6 +205,7 @@ export type BlockCategory =
   | 'playground'
   | 'furniture'
   | 'prop'
+  | 'road'
   | 'character';
 
 export interface CategoryDef {
@@ -299,12 +308,21 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'signpost', label: '표지판', category: 'prop', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 2, d: 1 } },
   { type: 'hydrant', label: '소화전', category: 'prop', ghostHeightPlates: 5, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'barrel', label: '나무통', category: 'prop', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 2 } },
-  { type: 'campfire', label: '캠프파이어', category: 'prop', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 3, d: 3 } },
-  { type: 'fountain', label: '분수', category: 'prop', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 6, d: 6 } },
+  { type: 'campfire', label: '캠프파이어', category: 'prop', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  { type: 'fountain', label: '분수', category: 'prop', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 12, d: 12 } },
   { type: 'trafficcone', label: '라바콘', category: 'prop', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'barricade', label: '바리케이드', category: 'prop', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 4, d: 1 } },
   { type: 'well', label: '우물', category: 'prop', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 4, d: 4 } },
   { type: 'tent', label: '텐트', category: 'prop', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 6, d: 6 } },
+  // 도로 / 철도 — 바닥판 위에 깔리는 flat 타일 (1 plate 높이).
+  // 8×8 스터드 정사각형으로 통일해서 타일끼리 정확히 맞물림.
+  { type: 'road_straight', label: '직선 도로', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  { type: 'road_curve', label: '커브 도로', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  { type: 'road_cross', label: '교차로', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  { type: 'road_tee', label: 'T자 도로', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  { type: 'rail_straight', label: '직선 레일', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  { type: 'rail_curve', label: '커브 레일', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  { type: 'rail_crossing', label: '건널목', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
   // 캐릭터
   { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
   { type: 'dog', label: '강아지', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 1, d: 2 } },

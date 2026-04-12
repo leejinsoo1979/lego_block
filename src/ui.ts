@@ -42,6 +42,7 @@ const PANEL_TITLES: Record<string, string> = {
   playground: '놀이터',
   furniture: '가구',
   prop: '소품',
+  road: '도로/철도',
   character: '캐릭터',
   env: '환경',
 };

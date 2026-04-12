@@ -5627,8 +5627,39 @@ export class Game {
     // Animate sharks (island environment)
     if (this.sharks.length > 0) this.updateSharks(dt);
 
+    // Animate campfires and fountains placed in the scene
+    this.animateEffects(now);
+
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** Animate campfire flames (flicker/scale) and fountain jets (bobbing). */
+  private animateEffects(now: number) {
+    const t = now * 0.001;
+    this.brickGroup.traverse((obj) => {
+      // Campfire flames: random flicker via scale + slight position jitter
+      if (obj.userData.isCampfireFlame) {
+        for (let i = 0; i < obj.children.length; i++) {
+          const flame = obj.children[i];
+          const seed = i * 1.7;
+          const scaleY = 0.8 + Math.sin(t * 8 + seed) * 0.25 + Math.sin(t * 13 + seed * 2) * 0.15;
+          const scaleXZ = 0.85 + Math.sin(t * 6 + seed * 3) * 0.15;
+          flame.scale.set(scaleXZ, scaleY, scaleXZ);
+          flame.position.x += Math.sin(t * 10 + seed) * 0.002;
+          flame.position.z += Math.cos(t * 11 + seed) * 0.002;
+        }
+      }
+      // Fountain jets: gentle bobbing + scale pulse
+      if (obj.userData.isFountainJet) {
+        for (let i = 0; i < obj.children.length; i++) {
+          const jet = obj.children[i];
+          const seed = i * 2.3;
+          const pulse = 0.85 + Math.sin(t * 4 + seed) * 0.2;
+          jet.scale.set(pulse, 0.9 + Math.sin(t * 3 + seed) * 0.15, pulse);
+        }
+      }
+    });
+  }
 }
 
 /** Walks `obj`'s descendant tree and returns the first child tagged with
