@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@phosphor-icons/core": "^2.1.1",
     "three": "^0.164.1"
   },
   "devDependencies": {

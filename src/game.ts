@@ -122,12 +122,33 @@ export class Game {
   private baseplate!: THREE.Group;
   private ghost!: THREE.Object3D;
   private hoverBox: THREE.LineSegments;
+  /** Block currently tinted as the remove-mode ghost (or null). When
+   *  the cursor leaves the block / mode changes / play starts, we
+   *  restore the block's original materials using hoverRemoveSaved. */
+  private hoverRemoveTarget: THREE.Object3D | null = null;
+  private hoverRemoveSaved: Array<{
+    mesh: THREE.Mesh;
+    original: THREE.Material | THREE.Material[];
+    renderOrder: number;
+  }> = [];
+  /** Shared translucent red material applied to every mesh of the
+   *  currently-hovered block while in remove mode. One instance is
+   *  reused across hovers — cheaper than making one per mesh. */
+  private removeHoverMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff2233,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+  });
   private pointerDownPos = new THREE.Vector2();
   private wasDrag = false;
-  // Tablet long-press → rotate block (touch-only substitute for right click)
-  private longPressTimer: number | null = null;
-  private longPressFired = false;
   private lastPointerType: string = 'mouse';
+  /** True while the user is actively dragging from a sidebar thumbnail
+   *  onto the canvas (touch only). Routes pointer position to the actual
+   *  finger XY instead of the screen-center reticle, disables OrbitControls
+   *  so 1-finger drag doesn't fight with placement, and skips the long-press
+   *  rotate path. Cleared on commit / cancel. */
+  private thumbnailDragActive = false;
   private sound = new SoundManager();
   private lastFrameTime = performance.now();
 
@@ -138,6 +159,9 @@ export class Game {
   rotationStep = 0;
   blockType: BlockType = 'brick';
   character: MinifigPreset = MINIFIG_PRESETS[0];
+  /** Bumped every time any editor field changes so the ghost cache can
+   *  detect "same preset id but different customization". */
+  characterVersion = 0;
   mode: Mode = 'place';
   /** Default tile size in studs. The map is now built from a grid of tiles
    *  rather than a single resizable plate, so this is per-tile, not the
@@ -147,6 +171,56 @@ export class Game {
   static readonly TILE_LEVEL_HEIGHT = 4.0;
   private baseplates = new Map<string, THREE.Group>();
   private sunLight: THREE.DirectionalLight | null = null;
+  /** Visible billboarded sun disc (bright sphere with halos). Updated
+   *  each time the time-of-day slider moves so it tracks the directional
+   *  sun's direction; hidden when the sun drops below the horizon. */
+  private sunDisc: THREE.Group | null = null;
+  /** Per-layer sprite materials for the sun. Stored so setTimeOfDay can
+   *  tint the core / inner halo / outer glow / soft flare independently
+   *  as the sun rises and sets (white-gold at zenith, deep orange-red
+   *  at the horizon). */
+  private sunDiscLayers: {
+    core: THREE.SpriteMaterial;
+    halo: THREE.SpriteMaterial;
+    glow: THREE.SpriteMaterial;
+    flare: THREE.SpriteMaterial;
+    coreSprite: THREE.Sprite;
+    haloSprite: THREE.Sprite;
+    glowSprite: THREE.Sprite;
+    flareSprite: THREE.Sprite;
+  } | null = null;
+  /** Billboarded moon — same layered-sprite approach as the sun, smaller
+   *  and tinted pale blue-white. Visible only when the sun is below the
+   *  horizon, positioned opposite the sun in the sky. */
+  private moonDisc: THREE.Group | null = null;
+  private moonDiscLayers: {
+    core: THREE.SpriteMaterial;
+    halo: THREE.SpriteMaterial;
+  } | null = null;
+  /** Starfield (~2000 random points on the upper hemisphere) — rendered
+   *  with a transparent PointsMaterial whose opacity fades in at night
+   *  and out during the day. */
+  private starField: THREE.Points | null = null;
+  /** Time of day in 24-hour float (e.g. 6.5 = 6:30am, 18.0 = 6pm).
+   *  Drives sun position, intensity, color, sky color, and HDRI fill
+   *  brightness via setTimeOfDay(). Default = noon. */
+  private timeOfDay: number = 12;
+  /** Compass direction the sun "tracks across" in radians, 0..2π. At
+   *  azimuth 0 the sun rises in the +X direction (east) and sets in
+   *  -X (west); rotating this around the world Y axis swings the
+   *  whole arc — useful for choosing where shadows land. */
+  private sunAzimuth: number = 0;
+  /** Multiplier on the directional sun light intensity (1.0 = normal).
+   *  Lets the user dial the scene brighter or dimmer without affecting
+   *  the day/night curve itself. */
+  private sunIntensityScale: number = 1;
+  /** UI callback fired whenever the time-of-day changes (slider, code,
+   *  etc.) so the slider label can re-render. */
+  onTimeOfDayChange: (time: number) => void = () => {};
+  /** UI callback for sun azimuth (radians). */
+  onSunAzimuthChange: (rad: number) => void = () => {};
+  /** UI callback for sun intensity multiplier. */
+  onSunIntensityChange: (mult: number) => void = () => {};
   /** Active environment preset (baseplate color + surround). */
   environment: EnvironmentDef = ENVIRONMENTS[0];
   /** Large plane or Water object that sits under/around the baseplate
@@ -258,6 +332,10 @@ export class Game {
   /** When true, no ghost is rendered and clicks don't place anything.
    *  Cleared the moment the user picks a block type or switches mode. */
   private placementSuspended = false;
+  /** Keyboard cursor for arrow-key ghost placement in build mode.
+   *  When active, computePlacement uses a downward raycast from this
+   *  world-space XZ instead of the pointer-based camera raycast. */
+  private kbCursor = { x: 0, z: 0, active: false };
   /** True while the player has active dogs following them — toggled by
    *  `whistleDogs()`. Only meaningful during play mode. */
   private dogsFollowing = false;
@@ -397,14 +475,12 @@ export class Game {
     dom.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     dom.addEventListener('pointerup', (e) => this.onPointerUp(e));
     dom.addEventListener('pointercancel', () => {
-      this.cancelLongPress();
-      this.longPressFired = false;
       this.wasDrag = false;
     });
     dom.addEventListener('pointerleave', () => {
       this.ghost.visible = false;
       this.hoverBox.visible = false;
-      this.cancelLongPress();
+      this.clearRemoveHover();
     });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener(
@@ -446,54 +522,548 @@ export class Game {
     this.updateSunShadowBounds();
     this.scene.add(sun);
 
+    // Make sure the directional light has a target IN the scene so its
+    // world matrix updates whenever we move the target.position. Three's
+    // DirectionalLight aims at sun.position − sun.target.position, so
+    // keeping the target at world origin gives a clean light direction.
+    this.scene.add(sun.target);
+
     // Visible sun disc — a billboarded bright sphere with soft halos so
     // the sun is actually IN the scene, not just an invisible shader light.
     // Positioned along the directional light's direction, far enough away
     // that it stays put as the camera orbits.
     const sunDisc = this.createSunDisc();
     sunDisc.position.copy(sun.position).normalize().multiplyScalar(300);
+    this.sunDisc = sunDisc;
     this.scene.add(sunDisc);
+
+    // Moon disc — pale, smaller, follows the sun's antipode.
+    const moonDisc = this.createMoonDisc();
+    this.moonDisc = moonDisc;
+    this.scene.add(moonDisc);
+
+    // Starfield — 2000 white points scattered on the upper hemisphere.
+    const stars = this.createStarfield();
+    this.starField = stars;
+    this.scene.add(stars);
+
+    // Apply the default time-of-day so sun position/intensity/sky/HDRI
+    // are all in sync from the start. Subsequent slider drags call this
+    // again to re-light the scene.
+    this.setTimeOfDay(this.timeOfDay);
   }
 
-  /** Visible sun: bright core + two layered translucent halos. */
+  /** A small white-blue moon — two layered sprites (bright core + soft
+   *  halo). Same additive technique as the sun but smaller and cooler. */
+  private createMoonDisc(): THREE.Group {
+    const group = new THREE.Group();
+    const baseRenderOrder = 1000;
+
+    const coreTex = this.makeRadialTexture(
+      'rgba(245, 250, 255, 1.0)',
+      'rgba(220, 230, 255, 0.0)',
+      0.4
+    );
+    const coreMat = new THREE.SpriteMaterial({
+      map: coreTex,
+      color: 0xffffff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+      opacity: 0,
+    });
+    const core = new THREE.Sprite(coreMat);
+    core.scale.set(20, 20, 1);
+    core.renderOrder = baseRenderOrder + 2;
+    group.add(core);
+
+    const haloTex = this.makeRadialTexture(
+      'rgba(180, 200, 255, 0.5)',
+      'rgba(120, 150, 230, 0.0)'
+    );
+    const haloMat = new THREE.SpriteMaterial({
+      map: haloTex,
+      color: 0xffffff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+      opacity: 0,
+    });
+    const halo = new THREE.Sprite(haloMat);
+    halo.scale.set(46, 46, 1);
+    halo.renderOrder = baseRenderOrder + 1;
+    group.add(halo);
+
+    this.moonDiscLayers = { core: coreMat, halo: haloMat };
+    group.visible = false;
+    return group;
+  }
+
+  /** ~2000 white points on a large upper hemisphere. Stars are rendered
+   *  as fixed-pixel points (no perspective falloff) so they look like
+   *  the night sky from any camera angle. Opacity = 0 by day, fades in
+   *  as the sun drops below the horizon. */
+  private createStarfield(): THREE.Points {
+    const count = 2000;
+    const radius = 290;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      // Uniform on upper hemisphere
+      const u = Math.random();
+      const v = Math.random();
+      const theta = 2 * Math.PI * u;
+      const phi = Math.acos(v); // 0..π/2 → upper hemisphere
+      const x = Math.sin(phi) * Math.cos(theta);
+      const y = Math.cos(phi);
+      const z = Math.sin(phi) * Math.sin(theta);
+      positions[i * 3] = x * radius;
+      positions[i * 3 + 1] = y * radius;
+      positions[i * 3 + 2] = z * radius;
+      // Slight color variety: most white, some warm/cool
+      const tint = 0.85 + Math.random() * 0.15;
+      const cool = Math.random() < 0.2;
+      colors[i * 3] = cool ? tint * 0.85 : tint;
+      colors[i * 3 + 1] = tint;
+      colors[i * 3 + 2] = cool ? 1 : tint * (0.92 + Math.random() * 0.08);
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.PointsMaterial({
+      size: 1.6,
+      sizeAttenuation: false,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+    });
+    const points = new THREE.Points(geom, mat);
+    points.renderOrder = 998;
+    return points;
+  }
+
+  /** Drives the entire day/night cycle from a single 0..24 time value.
+   *
+   *  - Sun position is placed on a great-circle through the sky: rising
+   *    at +X (east) at 06:00, peaking overhead near 12:00, setting at
+   *    -X (west) at 18:00, and dropping below the horizon at night.
+   *  - Sun intensity goes to ~0 below the horizon, peaks at noon.
+   *  - Sun color shifts from warm orange (horizon) to neutral white
+   *    (zenith), and a cool moonlight tone at deep night.
+   *  - Sky background lerps blue → orange (sunset) → dark blue (night).
+   *  - HDRI environment fill drops at night so the scene doesn't read
+   *    as fully lit when the sun is gone. */
+  setTimeOfDay(time: number) {
+    // Wrap into [0, 24) so dragging or scripting past midnight works.
+    const t = ((time % 24) + 24) % 24;
+    this.timeOfDay = t;
+
+    // Solar angle: 0 at sunrise (+X horizon), π/2 at noon (zenith),
+    // π at sunset (-X horizon), 3π/2 at midnight (-Y, below ground).
+    const sunAngle = ((t - 6) / 24) * Math.PI * 2;
+    const elev = Math.sin(sunAngle); // -1..+1
+    const azim = -Math.cos(sunAngle); // +1 east at sunrise, -1 west at sunset
+
+    // Place the directional light along (azim, elev, slight north tilt).
+    // Use a far distance so the rays read as parallel across the board.
+    // Then rotate the whole arc around the world Y axis by sunAzimuth
+    // so the user can swing where sunrise/sunset come from.
+    const distance = 80;
+    const localX = azim * distance;
+    const localY = elev * distance;
+    const localZ = -distance * 0.4; // small north offset → diagonal shadows
+    const cosAz = Math.cos(this.sunAzimuth);
+    const sinAz = Math.sin(this.sunAzimuth);
+    const sunX = localX * cosAz + localZ * sinAz;
+    const sunY = localY;
+    const sunZ = -localX * sinAz + localZ * cosAz;
+    if (this.sunLight) {
+      this.sunLight.position.set(sunX, sunY, sunZ);
+
+      // Intensity: smooth ramp from horizon (0) to zenith (full),
+      // with a tiny floor so deep night isn't pitch black. Scaled by
+      // the user's manual intensity multiplier on top of that.
+      const dayFactor = Math.max(0, elev);
+      this.sunLight.intensity =
+        (0.05 + dayFactor * 3.55) * this.sunIntensityScale;
+
+      // Color: warm at horizon → neutral at zenith → cool moonlight at
+      // deep night. Lerp via THREE.Color.
+      const cNoon = new THREE.Color(0xfff4d6);
+      const cHorizon = new THREE.Color(0xff8a3a);
+      const cMoon = new THREE.Color(0x6a86c0);
+      let sunColor: THREE.Color;
+      if (elev > 0.2) {
+        const k = Math.min(1, (elev - 0.2) / 0.7);
+        sunColor = cHorizon.clone().lerp(cNoon, k);
+      } else if (elev > 0) {
+        sunColor = cHorizon.clone();
+      } else {
+        const k = Math.min(1, -elev / 0.4);
+        sunColor = cHorizon.clone().lerp(cMoon, k);
+      }
+      this.sunLight.color.copy(sunColor);
+    }
+
+    // Sun disc: track the directional light's direction at large radius
+    // and hide it once the sun is below the horizon. Also tint each
+    // layer to match the time of day (white-gold at noon, deep orange
+    // at sunset).
+    const sunDirNorm = new THREE.Vector3(sunX, sunY, sunZ);
+    if (sunDirNorm.lengthSq() > 0) sunDirNorm.normalize();
+    if (this.sunDisc) {
+      this.sunDisc.position.copy(sunDirNorm).multiplyScalar(300);
+      this.sunDisc.visible = elev > -0.1;
+    }
+    this.updateSunDiscAppearance(elev);
+
+    // Moon disc: lives at the antipode of the sun. Visible only when
+    // the sun is below the horizon (so we always have ONE celestial
+    // body in the sky), with opacity ramping in over the dusk window.
+    if (this.moonDisc && this.moonDiscLayers) {
+      this.moonDisc.position.copy(sunDirNorm).multiplyScalar(-300);
+      const moonVis = Math.max(0, Math.min(1, (-elev + 0.05) / 0.2));
+      this.moonDisc.visible = moonVis > 0;
+      this.moonDiscLayers.core.opacity = moonVis;
+      this.moonDiscLayers.halo.opacity = moonVis * 0.85;
+    }
+
+    // Starfield: opacity follows -elev, fading in across dusk.
+    if (this.starField) {
+      const starVis = Math.max(0, Math.min(1, (-elev + 0.05) / 0.25));
+      const starMat = this.starField.material as THREE.PointsMaterial;
+      starMat.opacity = starVis;
+      this.starField.visible = starVis > 0;
+    }
+
+    // Tone-mapping exposure: dim slightly at night for a moodier look.
+    // Day = 1.0, deep night = 0.55. Smooth lerp on dayFactor.
+    {
+      const dayK = Math.max(0, Math.min(1, (elev + 0.1) / 0.4));
+      this.renderer.toneMappingExposure = 0.55 + dayK * 0.55;
+    }
+
+    // HDRI environment rotation tracks the sun azimuth so the bricks'
+    // PBR reflections agree with the sun direction. (Three's
+    // environmentRotation was added in r163.)
+    const envRot = (this.scene as THREE.Scene & {
+      environmentRotation?: THREE.Euler;
+    }).environmentRotation;
+    if (envRot) envRot.set(0, this.sunAzimuth, 0);
+
+    // Sky color: bright daytime → orange sunset/sunrise → dark night.
+    const skyDay = new THREE.Color(0xeef0f3);
+    const skySunset = new THREE.Color(0xff8a55);
+    const skyNight = new THREE.Color(0x07091e);
+    let sky: THREE.Color;
+    if (elev > 0.3) {
+      sky = skyDay.clone();
+    } else if (elev > 0) {
+      const k = elev / 0.3;
+      sky = skySunset.clone().lerp(skyDay, k);
+    } else {
+      const k = Math.min(1, -elev / 0.3);
+      sky = skySunset.clone().lerp(skyNight, k);
+    }
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.copy(sky);
+    } else {
+      this.scene.background = sky;
+    }
+
+    // HDRI fill brightness — drops to a low floor at night so the scene
+    // is dim but not invisible.
+    const envDay = 0.55;
+    const envNight = 0.08;
+    this.scene.environmentIntensity =
+      envNight + Math.max(0, elev) * (envDay - envNight);
+
+    // Lamps glow + cast PointLight illumination at night. Compute the
+    // night factor (0 = full day, 1 = deep night) from the same solar
+    // elevation we already use for sun/sky and apply it to every lamp.
+    this.currentNightFactor = Math.max(0, Math.min(1, -elev * 2));
+    this.updateAllLamps();
+
+    this.onTimeOfDayChange(t);
+  }
+
+  /** 0..1 — used by lamps and any other emissive blocks to fade their
+   *  glow in/out smoothly with the time-of-day slider. Updated by
+   *  setTimeOfDay() and read by updateLampForTime(). */
+  private currentNightFactor = 0;
+
+  /** Iterate every placed block and apply current-night lamp lighting
+   *  to any lamp blocks. Cheap because lamps are tagged with
+   *  userData.isLamp at creation. */
+  private updateAllLamps() {
+    for (const child of this.brickGroup.children) {
+      if (child.userData.isLamp) {
+        this.updateLampForTime(child);
+      }
+    }
+  }
+
+  /** Apply the current night factor to a single lamp's bulb material
+   *  and SpotLight. Used by updateAllLamps and also called when a new
+   *  lamp is placed so it picks up the live time-of-day immediately. */
+  private updateLampForTime(lamp: THREE.Object3D) {
+    const n = this.currentNightFactor;
+
+    // Bulb emissive — visibly glows in the dark scene
+    const mat = lamp.userData.lampBulbMaterial as
+      | THREE.MeshStandardMaterial
+      | undefined;
+    if (mat) {
+      // 0.5 daytime → 4.5 deep night (very bright in night scene)
+      mat.emissiveIntensity = 0.5 + n * 4.0;
+    }
+
+    // SpotLight — pours warm light onto the surrounding ground.
+    // Three.js r155+ physical lighting expects candela. A real
+    // streetlight ranges from a few hundred to a few thousand cd; we
+    // use 600 so the floor pool clearly reads against the dim night
+    // ambient (sun ~0.05, env ~0.08) without any fake decal helper.
+    const light = lamp.userData.lampLight as THREE.SpotLight | undefined;
+    if (light) {
+      light.intensity = n * 600;
+    }
+  }
+
+  /** Read-only accessor for the current time-of-day (0..24 float). */
+  getTimeOfDay(): number {
+    return this.timeOfDay;
+  }
+
+  /** Sets the sun's compass direction (radians) and re-applies the
+   *  full lighting state so the slider feels live. */
+  setSunAzimuth(rad: number) {
+    // Wrap into [0, 2π) so dragging past full rotation works.
+    const a = ((rad % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    this.sunAzimuth = a;
+    this.setTimeOfDay(this.timeOfDay);
+    this.onSunAzimuthChange(a);
+  }
+
+  /** Read-only accessor for sun azimuth in radians. */
+  getSunAzimuth(): number {
+    return this.sunAzimuth;
+  }
+
+  /** Sets the user-facing sun intensity multiplier (clamped 0..3) and
+   *  re-applies the lighting state. */
+  setSunIntensityScale(mult: number) {
+    const m = Math.max(0, Math.min(3, mult));
+    this.sunIntensityScale = m;
+    this.setTimeOfDay(this.timeOfDay);
+    this.onSunIntensityChange(m);
+  }
+
+  /** Read-only accessor for the sun intensity multiplier. */
+  getSunIntensityScale(): number {
+    return this.sunIntensityScale;
+  }
+
+  /** Builds a soft radial-gradient texture for use as a sun-glow sprite.
+   *  `innerStop` is how far from the center the gradient stays at full
+   *  opacity (0 = pure radial, 0.4 = hard disc with soft falloff). */
+  private makeRadialTexture(
+    innerColor: string,
+    outerColor: string,
+    innerStop = 0
+  ): THREE.CanvasTexture {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const grad = ctx.createRadialGradient(
+        size / 2,
+        size / 2,
+        0,
+        size / 2,
+        size / 2,
+        size / 2
+      );
+      grad.addColorStop(0, innerColor);
+      if (innerStop > 0) grad.addColorStop(innerStop, innerColor);
+      grad.addColorStop(1, outerColor);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /** Visible sun: layered additive sprites — a hard bright core plus
+   *  three increasingly soft halos. Uses additive blending so the
+   *  layers stack into a real glow against any sky color, and screen-
+   *  facing sprites so the sun looks round from every camera angle.
+   *
+   *  Each layer's tint is updated by setTimeOfDay so the sun goes from
+   *  white-gold at noon to a deep red-orange ball at the horizon. */
   private createSunDisc(): THREE.Group {
     const group = new THREE.Group();
 
-    const core = new THREE.Mesh(
-      new THREE.SphereGeometry(9, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0xfffaea, fog: false })
+    // Render LAST so the glow always wins against the gray sky.
+    const baseRenderOrder = 1000;
+
+    // 1) Hard bright core — small, near-opaque, mostly white.
+    const coreTex = this.makeRadialTexture(
+      'rgba(255, 255, 245, 1.0)',
+      'rgba(255, 240, 200, 0.0)',
+      0.35
     );
+    const coreMat = new THREE.SpriteMaterial({
+      map: coreTex,
+      color: 0xffffff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+    });
+    const core = new THREE.Sprite(coreMat);
+    core.scale.set(28, 28, 1);
+    core.renderOrder = baseRenderOrder + 3;
     group.add(core);
 
-    const halo = new THREE.Mesh(
-      new THREE.SphereGeometry(15, 32, 32),
-      new THREE.MeshBasicMaterial({
-        color: 0xffeaad,
-        transparent: true,
-        opacity: 0.5,
-        depthWrite: false,
-        fog: false,
-      })
+    // 2) Inner halo — twice the core, warm gold.
+    const haloTex = this.makeRadialTexture(
+      'rgba(255, 220, 150, 0.85)',
+      'rgba(255, 180, 80, 0.0)'
     );
+    const haloMat = new THREE.SpriteMaterial({
+      map: haloTex,
+      color: 0xffffff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+    });
+    const halo = new THREE.Sprite(haloMat);
+    halo.scale.set(70, 70, 1);
+    halo.renderOrder = baseRenderOrder + 2;
     group.add(halo);
 
-    const glow = new THREE.Mesh(
-      new THREE.SphereGeometry(26, 32, 32),
-      new THREE.MeshBasicMaterial({
-        color: 0xffd778,
-        transparent: true,
-        opacity: 0.2,
-        depthWrite: false,
-        fog: false,
-      })
+    // 3) Outer glow — broad orange falloff (atmospheric glow).
+    const glowTex = this.makeRadialTexture(
+      'rgba(255, 170, 80, 0.55)',
+      'rgba(255, 110, 50, 0.0)'
     );
+    const glowMat = new THREE.SpriteMaterial({
+      map: glowTex,
+      color: 0xffffff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+    });
+    const glow = new THREE.Sprite(glowMat);
+    glow.scale.set(150, 150, 1);
+    glow.renderOrder = baseRenderOrder + 1;
     group.add(glow);
+
+    // 4) Soft lens-flare bloom — very wide, very faint.
+    const flareTex = this.makeRadialTexture(
+      'rgba(255, 200, 120, 0.25)',
+      'rgba(255, 150, 60, 0.0)'
+    );
+    const flareMat = new THREE.SpriteMaterial({
+      map: flareTex,
+      color: 0xffffff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+    });
+    const flare = new THREE.Sprite(flareMat);
+    flare.scale.set(280, 280, 1);
+    flare.renderOrder = baseRenderOrder;
+    group.add(flare);
+
+    this.sunDiscLayers = {
+      core: coreMat,
+      halo: haloMat,
+      glow: glowMat,
+      flare: flareMat,
+      coreSprite: core,
+      haloSprite: halo,
+      glowSprite: glow,
+      flareSprite: flare,
+    };
 
     return group;
   }
 
-  /** Match the shadow frustum to the union of every placed baseplate tile
-   *  so large multi-tile maps still receive crisp shadows. */
+  /** Tint and scale the sun disc layers based on the current sun
+   *  elevation. Mid-day the sun is a bright white-gold ball with a
+   *  modest halo; near the horizon (sunrise/sunset) it bloats into a
+   *  large red-orange disc; below the horizon it fades out. */
+  private updateSunDiscAppearance(elev: number) {
+    const layers = this.sunDiscLayers;
+    if (!layers) return;
+
+    // dayK ramps 0..1 as the sun rises from the horizon.
+    const dayK = Math.max(0, Math.min(1, (elev + 0.05) / 0.5));
+
+    // Core color: warm gold at horizon → near-white at zenith.
+    const cHorizon = new THREE.Color(0xffb060);
+    const cNoon = new THREE.Color(0xfff7d0);
+    layers.core.color.copy(cHorizon).lerp(cNoon, dayK);
+
+    // Halo color: deep orange at horizon → soft yellow at zenith.
+    const haloHorizon = new THREE.Color(0xff7a30);
+    const haloNoon = new THREE.Color(0xffd070);
+    layers.halo.color.copy(haloHorizon).lerp(haloNoon, dayK);
+
+    // Outer glow color: red at horizon → faint amber at zenith.
+    const glowHorizon = new THREE.Color(0xff5520);
+    const glowNoon = new THREE.Color(0xffaa50);
+    layers.glow.color.copy(glowHorizon).lerp(glowNoon, dayK);
+
+    // Lens-flare color: same family, very subtle.
+    const flareHorizon = new THREE.Color(0xff7030);
+    const flareNoon = new THREE.Color(0xffc880);
+    layers.flare.color.copy(flareHorizon).lerp(flareNoon, dayK);
+
+    // Bloat the disc near the horizon (atmospheric refraction look) and
+    // shrink it as the sun climbs. Multiply each layer by the same
+    // bloatK so the proportions stay the same.
+    const bloatK = 1 + (1 - dayK) * 0.7;
+    layers.coreSprite.scale.set(28 * bloatK, 28 * bloatK, 1);
+    layers.haloSprite.scale.set(70 * bloatK, 70 * bloatK, 1);
+    layers.glowSprite.scale.set(150 * bloatK, 150 * bloatK, 1);
+    layers.flareSprite.scale.set(280 * bloatK, 280 * bloatK, 1);
+
+    // Fade everything out under the horizon — already hidden via
+    // sunDisc.visible in setTimeOfDay, but also fade material opacity
+    // for the brief moments around sunrise/sunset transitions.
+    const visK = Math.max(0, Math.min(1, (elev + 0.1) / 0.15));
+    layers.core.opacity = visK;
+    layers.halo.opacity = visK;
+    layers.glow.opacity = visK;
+    layers.flare.opacity = visK;
+  }
+
+  /** Recompute the directional-light shadow frustum so it covers every
+   *  baseplate tile from ANY sun angle. We use a sphere-based bound:
+   *  the LRTB are set to a square that inscribes the world bounding
+   *  sphere, and the sun's `target` is moved to the world center so
+   *  the orthographic camera always points at the scene mid-point.
+   *  This way the same frustum works whether the sun is overhead or
+   *  on the horizon. */
   private updateSunShadowBounds() {
     if (!this.sunLight) return;
     let minX = -this.tileSize / 2;
@@ -509,15 +1079,26 @@ export class Game {
       if (cz - half < minZ) minZ = cz - half;
       if (cz + half > maxZ) maxZ = cz + half;
     }
-    const cx = (minX + maxX) / 2;
-    const cz = (minZ + maxZ) / 2;
-    const halfSpan = Math.max(maxX - minX, maxZ - minZ) / 2 + 8;
+    const centerX = (minX + maxX) / 2;
+    const centerZ = (minZ + maxZ) / 2;
+    // Bounding sphere radius in world XZ + a vertical safety margin for
+    // tall block stacks. sqrt of (half-diagonal)² + verticalReach².
+    const halfDiag = Math.hypot(maxX - minX, maxZ - minZ) / 2;
+    const verticalReach = 30; // generous: tall jungle gym + minifig
+    const radius = Math.sqrt(halfDiag * halfDiag + verticalReach * verticalReach) + 6;
+
     const cam = this.sunLight.shadow.camera;
-    cam.left = cx - halfSpan;
-    cam.right = cx + halfSpan;
-    cam.top = cz + halfSpan;
-    cam.bottom = cz - halfSpan;
+    cam.left = -radius;
+    cam.right = radius;
+    cam.top = radius;
+    cam.bottom = -radius;
     cam.updateProjectionMatrix();
+
+    // Aim the directional light at the world center so the orthographic
+    // frustum's local axes are centered on the scene rather than on the
+    // origin (matters when the player has moved off-tile).
+    this.sunLight.target.position.set(centerX, 0, centerZ);
+    this.sunLight.target.updateMatrixWorld();
   }
 
   /** Builds one stud-board tile group. The geometry is local to the tile —
@@ -765,6 +1346,7 @@ export class Game {
       this.rebuildBaseplateSlots();
       this.ghost.visible = false;
       this.hoverBox.visible = false;
+      this.clearRemoveHover();
     } else {
       this.disposeSlotsGroup();
       this.currentSlot = null;
@@ -1126,18 +1708,30 @@ export class Game {
     // finger is — the user orbits the camera (1-finger drag) to move the
     // ghost around the world, then taps anywhere to commit. This avoids
     // finger occlusion entirely and matches Minecraft PE classic.
-    if (e.pointerType === 'touch') {
+    //
+    // EXCEPTION: while a thumbnail drag is in progress, the user IS
+    // dragging the ghost itself with their finger, so use the real
+    // finger position so the ghost tracks under the fingertip.
+    if (e.pointerType === 'touch' && !this.thumbnailDragActive) {
       this.pointer.x = 0;
       this.pointer.y = 0;
       return;
     }
+    this.setPointerFromClient(e.clientX, e.clientY);
+  }
+
+  /** Convert raw client coords to NDC and store in `this.pointer`. Used by
+   *  the thumbnail-drag pipeline (whose pointer events come from a button
+   *  outside the canvas). */
+  private setPointerFromClient(clientX: number, clientY: number) {
     const rect = this.renderer.domElement.getBoundingClientRect();
-    this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   }
 
   private onPointerMove(e: PointerEvent) {
     if (this.isPlaying) return;
+    this.kbCursor.active = false;
     this.updatePointer(e);
     if (e.buttons > 0) {
       const dx = e.clientX - this.pointerDownPos.x;
@@ -1148,8 +1742,6 @@ export class Game {
       const dragThresholdSq = e.pointerType === 'touch' ? 400 : 25;
       if (dx * dx + dy * dy > dragThresholdSq) {
         this.wasDrag = true;
-        // Dragging cancels the pending long-press rotation on touch
-        this.cancelLongPress();
       }
     }
     if (this.addBaseplateMode) {
@@ -1178,29 +1770,6 @@ export class Game {
       if (!this.addBaseplateMode && !this.shiftLineStart) {
         this.updatePreview();
       }
-    }
-
-    // Touch: start a long-press timer that rotates the block on hold.
-    // Right-click doesn't exist on tablets, so this is the touch substitute
-    // for "right click → rotate".
-    this.cancelLongPress();
-    this.longPressFired = false;
-    if (e.pointerType === 'touch' && e.button === 0) {
-      this.longPressTimer = window.setTimeout(() => {
-        // Only fire if still holding in place (no drag, no release)
-        if (!this.wasDrag && !this.placementSuspended) {
-          this.rotateClockwise();
-          this.longPressFired = true;
-          // Haptic nudge so the user knows rotation fired
-          if (
-            typeof navigator !== 'undefined' &&
-            typeof navigator.vibrate === 'function'
-          ) {
-            navigator.vibrate(25);
-          }
-        }
-        this.longPressTimer = null;
-      }, 450);
     }
 
     // Shift + left click starts a line-placement drag
@@ -1232,9 +1801,6 @@ export class Game {
   private onPointerUp(e: PointerEvent) {
     if (this.isPlaying) return;
 
-    // Clear any pending long-press regardless of whether it fired
-    this.cancelLongPress();
-
     // End line-placement drag
     if (this.shiftLineStart) {
       this.shiftLineStart = null;
@@ -1242,12 +1808,6 @@ export class Game {
       this.controls.enabled = true;
       this.wasDrag = false;
       this.updatePreview();
-      return;
-    }
-
-    // If a long press already rotated the block, don't also place on release
-    if (this.longPressFired) {
-      this.longPressFired = false;
       return;
     }
 
@@ -1276,13 +1836,6 @@ export class Game {
       this.rotateClockwise();
     }
     // Middle click is camera-drag only; no tap action
-  }
-
-  private cancelLongPress() {
-    if (this.longPressTimer !== null) {
-      clearTimeout(this.longPressTimer);
-      this.longPressTimer = null;
-    }
   }
 
   private onKeyDown(e: KeyboardEvent) {
@@ -1360,11 +1913,77 @@ export class Game {
 
     if (inTextInput) return;
 
+    // Arrow keys: move ghost via keyboard cursor
+    if (e.code === 'ArrowUp' || e.code === 'ArrowDown' ||
+        e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      e.preventDefault();
+      if (!this.kbCursor.active) {
+        // Initialize from the current ghost position so movement
+        // starts where the user is already looking.
+        if (this.ghost.visible) {
+          this.kbCursor.x = this.ghost.position.x;
+          this.kbCursor.z = this.ghost.position.z;
+        } else {
+          this.kbCursor.x = 0;
+          this.kbCursor.z = 0;
+        }
+        this.kbCursor.active = true;
+        this.placementSuspended = false;
+      }
+      // Compute camera-relative forward/right on the XZ plane so arrow
+      // keys move the ghost relative to the user's current viewpoint.
+      const camDir = new THREE.Vector3();
+      this.camera.getWorldDirection(camDir);
+      camDir.y = 0;
+      camDir.normalize();
+      // If camera looks straight down, fall back to -Z as forward.
+      if (camDir.lengthSq() < 0.001) { camDir.set(0, 0, -1); }
+      const camRight = new THREE.Vector3().crossVectors(
+        new THREE.Vector3(0, 1, 0), camDir
+      ).normalize();
+
+      // Map arrow to a camera-relative direction, then snap to the
+      // dominant world axis so movement stays on the stud grid.
+      let dx = 0, dz = 0;
+      switch (e.code) {
+        case 'ArrowUp':    dx = camDir.x;   dz = camDir.z;   break;
+        case 'ArrowDown':  dx = -camDir.x;  dz = -camDir.z;  break;
+        case 'ArrowLeft':  dx = camRight.x; dz = camRight.z; break;
+        case 'ArrowRight': dx = -camRight.x; dz = -camRight.z; break;
+      }
+      // Snap to dominant axis: move exactly 1 stud along whichever
+      // world axis (X or Z) the camera-relative direction most aligns with.
+      const prevX = this.kbCursor.x;
+      const prevZ = this.kbCursor.z;
+      if (Math.abs(dx) >= Math.abs(dz)) {
+        this.kbCursor.x += Math.sign(dx);
+      } else {
+        this.kbCursor.z += Math.sign(dz);
+      }
+      // Clamp: revert if the new position would push the footprint off
+      // all baseplates (keeps the ghost visible at the edge).
+      const eff = this.effectiveSize();
+      const snappedX = this.snapXZ(this.kbCursor.x, eff.w);
+      const snappedZ = this.snapXZ(this.kbCursor.z, eff.d);
+      if (!this.isFootprintOnBaseplate(snappedX, snappedZ, eff.w / 2, eff.d / 2)) {
+        this.kbCursor.x = prevX;
+        this.kbCursor.z = prevZ;
+      }
+      this.updatePreview();
+      return;
+    }
+
     if (e.key === 'Tab' && !e.repeat) {
       e.preventDefault();
       this.rotateClockwise();
     } else if (e.key === 'x' || e.key === 'X') {
       this.setMode(this.mode === 'remove' ? 'place' : 'remove');
+    } else if (e.code === 'Space' && !e.repeat) {
+      e.preventDefault();
+      if (!this.placementSuspended && this.ghost.visible) {
+        if (this.mode === 'remove') this.removeBlock();
+        else this.placeBlock();
+      }
     } else if (e.key === 'Escape') {
       // Esc cancels add-baseplate mode first; otherwise clears the
       // current block selection.
@@ -1375,6 +1994,7 @@ export class Game {
       this.placementSuspended = true;
       this.ghost.visible = false;
       this.hoverBox.visible = false;
+      this.clearRemoveHover();
       this.onSelectionCleared();
     }
   }
@@ -1477,8 +2097,20 @@ export class Game {
 
   setCharacter(preset: MinifigPreset) {
     this.character = preset;
+    this.characterVersion++;
     this.placementSuspended = false;
     this.onCharacterChange(preset);
+    this.updatePreview();
+  }
+
+  /** Merge partial editor changes into the current character preset
+   *  without replacing the whole object. Used by the character editor
+   *  UI to update individual fields (shirt color, face.eyes, etc.)
+   *  while keeping the rest of the preset intact. */
+  applyEditorCharacter(partial: Partial<MinifigPreset>) {
+    Object.assign(this.character, partial);
+    this.characterVersion++;
+    this.onCharacterChange(this.character);
     this.updatePreview();
   }
 
@@ -1491,7 +2123,101 @@ export class Game {
     this.updatePreview();
   }
 
+  // ------------------------------------------------------------------
+  //  Touch drag-from-thumbnail pipeline.
+  //
+  //  On a tablet the user starts a placement by pressing on a sidebar
+  //  thumbnail and dragging onto the canvas. We can't rely on the
+  //  canvas's own pointermove events for that — implicit pointer capture
+  //  pins the pointer stream to the originating button — so ui.ts hooks
+  //  document-level move/up listeners and forwards the events here.
+  //
+  //  beginThumbnailDrag()   — called on the thumbnail's pointerdown.
+  //                           Switches the block type, suppresses the
+  //                           screen-center reticle, and disables
+  //                           OrbitControls so 1-finger drag doesn't
+  //                           also rotate the camera.
+  //  updateThumbnailDrag()  — called on document pointermove with the
+  //                           raw client coordinates. Updates the ghost.
+  //  commitThumbnailDrag()  — called on pointerup. If the finger landed
+  //                           inside the canvas it places the block.
+  //  cancelThumbnailDrag()  — clean teardown without placing.
+  // ------------------------------------------------------------------
+  beginThumbnailDrag(clientX: number, clientY: number) {
+    this.thumbnailDragActive = true;
+    document.body.classList.add('thumbnail-dragging');
+    // OrbitControls would otherwise eat the 1-finger drag and rotate the
+    // camera while the user is trying to position the ghost.
+    this.controls.enabled = false;
+    this.placementSuspended = false;
+    this.setPointerFromClient(clientX, clientY);
+    this.updatePreview();
+    this.ghost.visible = true;
+  }
+
+  updateThumbnailDrag(clientX: number, clientY: number) {
+    if (!this.thumbnailDragActive) return;
+    this.setPointerFromClient(clientX, clientY);
+    if (this.addBaseplateMode) {
+      this.updateBaseplateGhost();
+    } else {
+      this.updatePreview();
+    }
+  }
+
+  commitThumbnailDrag(clientX: number, clientY: number): boolean {
+    if (!this.thumbnailDragActive) {
+      return false;
+    }
+    this.setPointerFromClient(clientX, clientY);
+
+    // Only place if the finger actually ended over the canvas.
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const overCanvas =
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom;
+
+    let placed = false;
+    if (overCanvas && this.mode === 'place' && !this.placementSuspended) {
+      if (this.addBaseplateMode) {
+        this.updateBaseplateGhost();
+        this.commitBaseplateGhost();
+        placed = true;
+      } else {
+        this.updatePreview();
+        const before = this.brickGroup.children.length;
+        this.placeBlock();
+        placed = this.brickGroup.children.length > before;
+      }
+    }
+
+    this.endThumbnailDrag();
+    return placed;
+  }
+
+  cancelThumbnailDrag() {
+    if (!this.thumbnailDragActive) return;
+    this.endThumbnailDrag();
+  }
+
+  private endThumbnailDrag() {
+    this.thumbnailDragActive = false;
+    document.body.classList.remove('thumbnail-dragging');
+    this.controls.enabled = true;
+    // Restore the screen-center reticle aim for the next plain tap.
+    this.pointer.x = 0;
+    this.pointer.y = 0;
+    this.updatePreview();
+  }
+
   clearAll() {
+    // Drop the hover reference before we wipe brickGroup — otherwise
+    // we'd leave hoverRemoveTarget pointing at a removed object and
+    // try to restore materials on it later.
+    this.hoverRemoveTarget = null;
+    this.hoverRemoveSaved = [];
     while (this.brickGroup.children.length > 0) {
       this.brickGroup.remove(this.brickGroup.children[0]);
     }
@@ -1554,6 +2280,35 @@ export class Game {
      *  show a "red, can't place" preview). */
     invalid: boolean;
   } | null {
+    // Keyboard cursor: downward raycast from above the cursor XZ to find
+    // the landing surface, then feed into the normal tryPlacementAt path.
+    if (this.kbCursor.active) {
+      const origin = new THREE.Vector3(this.kbCursor.x, 200, this.kbCursor.z);
+      const dir = new THREE.Vector3(0, -1, 0);
+      this.raycaster.set(origin, dir);
+      const targets: THREE.Object3D[] = [
+        ...this.baseplates.values(),
+        this.brickGroup,
+      ];
+      const hits = this.raycaster.intersectObjects(targets, true);
+      const eff = this.effectiveSize();
+      if (hits.length === 0) {
+        // No surface — place at baseplate level if over the board
+        const pt = new THREE.Vector3(this.kbCursor.x, 0, this.kbCursor.z);
+        const primary = this.tryPlacementAt(pt, eff.w, eff.d);
+        if (primary) return { ...primary, autoRotate: false, invalid: false };
+        return null;
+      }
+      const pt = hits[0].point.clone();
+      const primary = this.tryPlacementAt(pt, eff.w, eff.d);
+      if (primary) return { ...primary, autoRotate: false, invalid: false };
+      if (eff.w !== eff.d) {
+        const swapped = this.tryPlacementAt(pt, eff.d, eff.w);
+        if (swapped) return { ...swapped, autoRotate: true, invalid: false };
+      }
+      return null;
+    }
+
     this.raycaster.setFromCamera(this.pointer, this.camera);
     // For the bridge, the user needs to be able to point at the EMPTY GAP
     // between two baseplates (e.g. open water in island mode) so the
@@ -2045,6 +2800,52 @@ export class Game {
     return boxes;
   }
 
+  /** Returns collision AABBs for a swing block: just the two A-frame
+   *  side panels that sit at the ±X ends of the footprint. The entire
+   *  interior (where the seats hang and the dismounted rider stands) is
+   *  deliberately left open so the player can walk out after pressing
+   *  E to dismount. Build-mode/factory constants must stay in sync with
+   *  createSwingBlock in blocks.ts. */
+  private swingCollisionBoxes(
+    obj: THREE.Object3D,
+    spec: { w: number; d: number; type?: BlockType }
+  ): THREE.Box3[] {
+    // Recover BASE (pre-rotation) dims so the panel edges map to the
+    // geometry's actual X axis, then let obj.matrixWorld rotate the
+    // resulting AABBs back into world space.
+    const k = Math.round(-obj.rotation.y / (Math.PI / 2));
+    const rotSwap = ((k % 2) + 2) % 2 === 1;
+    const baseW = rotSwap ? spec.d : spec.w;
+    const baseD = rotSwap ? spec.w : spec.d;
+
+    // Match createSwingBlock in blocks.ts
+    const h = 24 * PLATE_HEIGHT; // 9.6
+    const panelT = 0.28;
+
+    obj.updateMatrixWorld(true);
+    const boxes: THREE.Box3[] = [];
+    // Left triangle panel: x = [-baseW/2, -baseW/2 + panelT]
+    const leftLocal = new THREE.Box3(
+      new THREE.Vector3(-baseW / 2, 0, -baseD / 2),
+      new THREE.Vector3(-baseW / 2 + panelT, h, baseD / 2)
+    );
+    leftLocal.applyMatrix4(obj.matrixWorld);
+    boxes.push(leftLocal);
+
+    // Right triangle panel: x = [baseW/2 - panelT, baseW/2]
+    const rightLocal = new THREE.Box3(
+      new THREE.Vector3(baseW / 2 - panelT, 0, -baseD / 2),
+      new THREE.Vector3(baseW / 2, h, baseD / 2)
+    );
+    rightLocal.applyMatrix4(obj.matrixWorld);
+    boxes.push(rightLocal);
+
+    // Top beam is at y ≈ 9.44 — well above even a 5-unit-tall minifig
+    // standing on elevated ground, so we skip it to keep the interior
+    // fully walkable.
+    return boxes;
+  }
+
   // ------------------------------------------------------------------
   //  Preview
   // ------------------------------------------------------------------
@@ -2054,6 +2855,7 @@ export class Game {
     if (this.placementSuspended) {
       this.ghost.visible = false;
       this.hoverBox.visible = false;
+      this.clearRemoveHover();
       return;
     }
     if (this.mode === 'remove') {
@@ -2061,6 +2863,7 @@ export class Game {
       this.updateHoverBox();
     } else {
       this.hoverBox.visible = false;
+      this.clearRemoveHover();
       this.updateGhost();
     }
   }
@@ -2108,6 +2911,7 @@ export class Game {
       // so any rotation change requires a full rebuild.
       (isMinifig &&
         (u.characterId !== this.character.id ||
+          u.characterVersion !== this.characterVersion ||
           u.totalRotStep !== totalRotStep)) ||
       (isDog && u.totalRotStep !== totalRotStep) ||
       (isShaped &&
@@ -2153,6 +2957,7 @@ export class Game {
       this.ghost.userData.heightPlates = heightPlates;
       this.ghost.userData.colorHex = this.color.hex;
       this.ghost.userData.characterId = this.character.id;
+      this.ghost.userData.characterVersion = this.characterVersion;
       this.ghost.userData.totalRotStep = totalRotStep;
       // Snapshot original colors so the invalid-state red tint can be
       // restored cleanly when the placement becomes valid again.
@@ -2204,29 +3009,66 @@ export class Game {
   }
 
   private updateHoverBox() {
+    // Legacy name kept for the call sites in updatePreview — this now
+    // tints the hovered block's materials into a translucent red ghost
+    // instead of positioning a line-outline box.
+    this.hoverBox.visible = false; // old outline stays hidden
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObjects(
       this.brickGroup.children,
       true
     );
     if (hits.length === 0) {
-      this.hoverBox.visible = false;
+      this.clearRemoveHover();
       return;
     }
     let obj: THREE.Object3D | null = hits[0].object;
     while (obj && !obj.userData.isBrick) obj = obj.parent;
     if (!obj || obj.parent !== this.brickGroup) {
-      this.hoverBox.visible = false;
+      this.clearRemoveHover();
       return;
     }
-    const bbox = new THREE.Box3().setFromObject(obj);
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    bbox.getSize(size);
-    bbox.getCenter(center);
-    this.hoverBox.scale.copy(size).addScalar(0.06);
-    this.hoverBox.position.copy(center);
-    this.hoverBox.visible = true;
+    if (obj === this.hoverRemoveTarget) return; // already tinted — no change
+    this.tintForRemove(obj);
+  }
+
+  /** Swap every mesh's material inside `obj` with the shared red ghost
+   *  material, saving the originals so clearRemoveHover() can restore
+   *  them exactly. The previous hover target (if any) is restored first. */
+  private tintForRemove(obj: THREE.Object3D) {
+    this.clearRemoveHover();
+    const saved: Array<{
+      mesh: THREE.Mesh;
+      original: THREE.Material | THREE.Material[];
+      renderOrder: number;
+    }> = [];
+    obj.traverse((c) => {
+      const m = c as THREE.Mesh;
+      if (!m.isMesh || !m.material) return;
+      saved.push({
+        mesh: m,
+        original: m.material,
+        renderOrder: m.renderOrder,
+      });
+      m.material = this.removeHoverMaterial;
+      // Draw the ghost on top of everything so studs / intersecting
+      // blocks don't punch holes through it.
+      m.renderOrder = 999;
+    });
+    this.hoverRemoveTarget = obj;
+    this.hoverRemoveSaved = saved;
+  }
+
+  /** Restore the currently-tinted block's original materials and clear
+   *  the hover target. Safe to call when nothing is tinted. */
+  private clearRemoveHover() {
+    if (!this.hoverRemoveTarget) return;
+    for (const entry of this.hoverRemoveSaved) {
+      entry.mesh.material = entry.original;
+      entry.mesh.renderOrder = entry.renderOrder;
+    }
+    this.hoverRemoveTarget = null;
+    this.hoverRemoveSaved = [];
   }
 
   // ------------------------------------------------------------------
@@ -2306,6 +3148,10 @@ export class Game {
     }
     obj.position.set(p.x, p.y, p.z);
     this.brickGroup.add(obj);
+    // If this is a lamp, immediately apply the current night factor so the
+    // bulb glow / point light reflect the live time-of-day rather than
+    // popping in only after the next slider drag.
+    if (obj.userData.isLamp) this.updateLampForTime(obj);
     this.sound.playClick();
     this.onCountChange(this.brickGroup.children.length);
   }
@@ -2356,6 +3202,11 @@ export class Game {
   }
 
   private removeBlock() {
+    // Restore any lingering remove-mode material tint first. The click
+    // target is almost always the tinted block, but clearing
+    // unconditionally keeps the state sane even if hover and click
+    // point at different objects.
+    this.clearRemoveHover();
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObjects(
       this.brickGroup.children,
@@ -2407,9 +3258,11 @@ export class Game {
     this.savedCam.position.copy(this.camera.position);
     this.savedCam.target.copy(this.controls.target);
 
-    // Hide build previews
+    // Hide build previews + restore any remove-mode hover tint so the
+    // placed block renders normally in play mode.
     this.ghost.visible = false;
     this.hoverBox.visible = false;
+    this.clearRemoveHover();
 
     // Disable orbit controls
     this.controls.enabled = false;
@@ -2506,6 +3359,18 @@ export class Game {
         }
         continue;
       }
+      // Swing: only the two A-frame side panels are solid — the entire
+      // interior between them (where the seats hang) must be walkable
+      // so the rider can dismount and walk out. Without this decomp,
+      // getBlockAABB treats the whole 12×9.6×3 shell as solid and the
+      // dismounted player is stuck inside.
+      if (spec?.type === 'swing') {
+        for (const box of this.swingCollisionBoxes(child, spec)) {
+          this.playAABBs.push(box);
+          this.playAABBDoorRefs.push(null);
+        }
+        continue;
+      }
       this.playAABBs.push(this.getBlockAABB(child));
       this.playAABBDoorRefs.push(spec?.type === 'door' ? child : null);
     }
@@ -2551,6 +3416,12 @@ export class Game {
 
     // Create the visible avatar (used in 3rd-person view)
     this.playerAvatar = createMinifigure(this.character);
+    // YXZ order: yaw (Y) is applied first, then any X/Z tilts in the
+    // yaw-rotated frame. This matters for ride poses (e.g. swing ride
+    // tilts the body forward/back along the swing direction by setting
+    // rotation.x). With XYZ order the X tilt would happen in WORLD space
+    // and would not align with the avatar's facing direction.
+    this.playerAvatar.rotation.order = 'YXZ';
     this.playerAvatar.position.copy(this.playerPos);
     this.playerAvatar.rotation.y = this.avatarYaw;
     this.playerAvatar.visible = this.viewMode === 'third';
@@ -2638,6 +3509,27 @@ export class Game {
       this.fpsControls.unlock();
     }
 
+    // If a playground ride is active, reset the avatar pose AND any
+    // animated equipment parts BEFORE we despawn the avatar (otherwise
+    // the next play session inherits a frozen mid-swing/mid-rock state
+    // on the equipment).
+    if (this.playgroundRide) {
+      const ride = this.playgroundRide;
+      const rparts = ride.obj.userData.parts as
+        | { swingPivots?: THREE.Group[]; plankGroup?: THREE.Group }
+        | undefined;
+      if (ride.type === 'swing' && rparts?.swingPivots) {
+        for (const p of rparts.swingPivots) p.rotation.x = 0;
+      } else if (ride.type === 'seesaw' && rparts?.plankGroup) {
+        rparts.plankGroup.rotation.z = -0.14;
+      }
+      if (this.playerAvatar) {
+        this.playerAvatar.rotation.x = 0;
+        this.applySitPose(false);
+      }
+      this.playgroundRide = null;
+    }
+
     // Despawn avatar
     if (this.playerAvatar) {
       this.scene.remove(this.playerAvatar);
@@ -2667,12 +3559,6 @@ export class Game {
     this.getNpcPrompt()?.classList.add('hidden');
     this.getNpcBubble()?.classList.add('hidden');
 
-    // Drop any active playground ride and reset the avatar pose so the
-    // build-mode preview shows the minifig in a neutral stance.
-    if (this.playgroundRide) {
-      this.playgroundRide = null;
-      if (this.playerAvatar) this.applySitPose(false);
-    }
     this.playgroundHotspot = null;
     this.getPlaygroundPrompt()?.classList.add('hidden');
 
@@ -2946,8 +3832,14 @@ export class Game {
         if (parts.rightArm) parts.rightArm.rotation.x = -swing * armScale;
         if (parts.leftArm) parts.leftArm.rotation.x = swing * armScale;
       }
-      // Body bounce — much more pronounced when sprinting
-      const bobAmp = isRunning ? 0.14 : 0.05;
+      // Body bounce — the whole avatar rises/falls on every step. This
+      // is the ONLY reason the rigged shoulder pivots appear to move
+      // vertically during the walk cycle, because the pivots live
+      // inside the body group and inherit its Y. Keep bob for running
+      // (the extra motion reads as effort and doesn't look wrong
+      // against the big arm swing), but ZERO it for walking so the
+      // shoulder axis stays pinned while the arms swing.
+      const bobAmp = isRunning ? 0.1 : 0;
       const bob =
         isWalking && this.onGround
           ? Math.abs(Math.sin(this.walkTime)) * bobAmp
@@ -3609,6 +4501,14 @@ export class Game {
    *  playerPos.y = seatY - SIT_HIP_OFFSET. */
   private static readonly SIT_HIP_OFFSET = 1.6;
 
+  /** When riding a swing, shift the rider this far back (-Z in swing
+   *  local) from the chain attachment point so they sit at the BACK
+   *  of the seat rather than perched on its front edge. Kept small —
+   *  the chains pass right beside the rider's body at hand X, so a
+   *  modest back-shift reads as "sitting properly" without breaking
+   *  the visual contact between hand and chain. */
+  private static readonly SWING_SEAT_BACK = 0.15;
+
   private isPlaygroundType(t: BlockType | undefined): t is PlaygroundType {
     return (
       t === 'slide' ||
@@ -3786,15 +4686,22 @@ export class Game {
         ride.swingSeatIdx = bestIdx;
         const apexY = swingParams.apexY;
         const chainLen = swingParams.chainLen;
-        const seatSurfaceY = apexY - chainLen; // top of the seat slab
+        // Initial pose at angle = 0: avatar hangs straight down from
+        // the pivot at extended length (chainLen + SIT_HIP_OFFSET),
+        // shifted back on the seat by SWING_SEAT_BACK.
+        // updateSwingRide will animate the same pendulum each frame
+        // and also raise the arms to grip the chains.
+        const fullLen = chainLen + Game.SIT_HIP_OFFSET;
         const wp = this.localToWorld(
           obj,
           bestX,
-          seatSurfaceY - Game.SIT_HIP_OFFSET,
-          0
+          apexY - fullLen,
+          -Game.SWING_SEAT_BACK
         );
         this.playerPos.set(wp.x, wp.y, wp.z);
         this.avatarYaw = obj.rotation.y;
+        // Body upright at start; updateSwingRide tilts each frame.
+        if (this.playerAvatar) this.playerAvatar.rotation.x = 0;
         break;
       }
       case 'seesaw': {
@@ -3841,30 +4748,43 @@ export class Game {
         break;
       }
       case 'merrygoround': {
-        const w = (obj.userData.spec as { w: number }).w;
-        const radius = w * 0.5 - 0.15 - 0.55;
-        const dx = this.playerPos.x - obj.position.x;
-        const dz = this.playerPos.z - obj.position.z;
-        const cosY = Math.cos(-obj.rotation.y);
-        const sinY = Math.sin(-obj.rotation.y);
-        const localX = dx * cosY + dz * sinY;
-        const localZ = -dx * sinY + dz * cosY;
-        const angle = Math.atan2(localZ, localX);
-        const idx = ((Math.round((angle / (Math.PI * 2)) * 4) % 4) + 4) % 4;
-        ride.merrySeatIdx = idx;
-        const seatAngle = (idx / 4) * Math.PI * 2;
-        const sx = Math.cos(seatAngle) * radius;
-        const sz = Math.sin(seatAngle) * radius;
-        // Seat pad surface = baseH + ~0.32 + padHeight ≈ 0.78
-        const seatSurfaceY = 0.32 + 0.32 + 0.14;
-        const wp = this.localToWorld(
-          obj,
-          sx,
-          seatSurfaceY - Game.SIT_HIP_OFFSET,
-          sz
-        );
-        this.playerPos.set(wp.x, wp.y, wp.z);
-        this.avatarYaw = obj.rotation.y - seatAngle;
+        // Read seat layout that createMerryGoRoundBlock baked in.
+        const data = obj.userData.merryGoRound as
+          | {
+              rotor: THREE.Object3D;
+              seats: { x: number; y: number; z: number; angle: number }[];
+              seatBottomY: number;
+              spinSpeed: number;
+            }
+          | undefined;
+        if (!data || data.seats.length === 0) break;
+
+        // Find the seat closest to the player (in the rotor's CURRENT
+        // orientation, since the rotor may have already spun some).
+        const rotorY = data.rotor.rotation.y;
+        const cosR = Math.cos(rotorY);
+        const sinR = Math.sin(rotorY);
+        let bestIdx = 0;
+        let bestDistSq = Infinity;
+        for (let i = 0; i < data.seats.length; i++) {
+          const s = data.seats[i];
+          // Apply the rotor's current Y rotation to the seat's local
+          // position so we compare against the rider in world space.
+          const rx = s.x * cosR - s.z * sinR;
+          const rz = s.x * sinR + s.z * cosR;
+          const wp = this.localToWorld(obj, rx, s.y, rz);
+          const dx = wp.x - this.playerPos.x;
+          const dz = wp.z - this.playerPos.z;
+          const dsq = dx * dx + dz * dz;
+          if (dsq < bestDistSq) {
+            bestDistSq = dsq;
+            bestIdx = i;
+          }
+        }
+        ride.merrySeatIdx = bestIdx;
+        // Snap player to that seat using the helper that runs every frame
+        // — this also applies the avatar yaw so the rider faces outward.
+        this.snapPlayerToMerrySeat(obj, data, bestIdx);
         break;
       }
     }
@@ -3896,6 +4816,11 @@ export class Game {
     } else if (ride.type === 'seesaw' && parts?.plankGroup) {
       parts.plankGroup.rotation.z = -0.14; // resting tilt baked in factory
     }
+
+    // Reset any avatar pose tweaks the ride loop applied (body tilt
+    // for swing, arm overrides). applySitPose(false) below resets the
+    // limbs back to standing.
+    if (this.playerAvatar) this.playerAvatar.rotation.x = 0;
 
     // Drop player back to the ground at their current XZ
     this.playerPos.y = Math.max(
@@ -4007,7 +4932,23 @@ export class Game {
     );
     this.playerPos.set(wp.x, wp.y, wp.z);
     this.avatarYaw = obj.rotation.y;
-    if (localZ > params.z3 + 0.5) {
+    // Dismount threshold must push the player CLEAR of the slide's
+    // full AABB. The slide's body AABB max z is at local z = d/2 = z3,
+    // and the player's collision capsule has half-width 1.0, so the
+    // dismount position needs local z ≥ z3 + 1.0 + EPS. Use 1.6 for
+    // margin. Otherwise the dismounted player overlaps the AABB and
+    // can't move an inch.
+    if (localZ > params.z3 + 1.6) {
+      // Snap the player one last time to a definitely-clear position
+      // before the ride ends, so dismountPlayground doesn't drop them
+      // back inside the slide's bbox via findGroundY.
+      const cleared = this.localToWorld(
+        obj,
+        0,
+        params.slideExitY,
+        params.z3 + 1.6
+      );
+      this.playerPos.set(cleared.x, cleared.y, cleared.z);
       this.dismountPlayground();
     }
   }
@@ -4027,29 +4968,68 @@ export class Game {
     const apexY = swingParams.apexY;
     const chainLen = swingParams.chainLen;
 
-    // Drive the visual swing assembly: rotate the matching pivot group
-    // around its X axis so the chains and seat actually swing through
-    // the air. The pivot is positioned at (sx, apexY, 0); rotating by
-    // -angle around X moves the seat (initially at local y=-chainLen)
-    // forward to z = +chainLen·sin(angle), matching the player Z below.
+    // ----- 1) Visual swing assembly -----
+    // Rotate the matching pivot group around its X axis. The pivot is
+    // at (sx, apexY, 0); rotating by -angle around X moves the chain
+    // bottom (initially at local y=-chainLen) to (0, -chainLen·cos(angle),
+    // +chainLen·sin(angle)), so the seat slides forward in +Z direction.
     const parts = obj.userData.parts as
       | { swingPivots?: THREE.Group[] }
       | undefined;
     const pivot = parts?.swingPivots?.[ride.swingSeatIdx ?? 0];
     if (pivot) pivot.rotation.x = -angle;
 
-    // Seat surface Y in swing local: where the chain bottom is, less
-    // SIT_HIP_OFFSET so the minifig's butt sits on the seat.
-    const seatSurfaceY = apexY - chainLen * Math.cos(angle);
-    const localZ = chainLen * Math.sin(angle);
+    // ----- 2) Rider position: pendulum + back-shift on the seat -----
+    // The rider hangs from the same pivot as the chain. Their pivot
+    // point is the BUTT (SIT_HIP_OFFSET above the avatar feet origin),
+    // so the avatar feet trace a pendulum of radius (chainLen + hipY).
+    // We then shift them BACK on the seat by SWING_SEAT_BACK in the
+    // swing-local -Z direction so the hip sits at the back of the
+    // seat — the chain attachment is now in FRONT of the rider, which
+    // is why the arms have to reach forward+up to grip it.
+    const hipY = Game.SIT_HIP_OFFSET;
+    const fullLen = chainLen + hipY;
+    const back = Game.SWING_SEAT_BACK;
+    const localY = apexY - fullLen * Math.cos(angle);
+    const localZ = fullLen * Math.sin(angle) - back;
     const wp = this.localToWorld(
       obj,
       ride.swingSeatX ?? 0,
-      seatSurfaceY - Game.SIT_HIP_OFFSET,
+      localY,
       localZ
     );
     this.playerPos.set(wp.x, wp.y, wp.z);
     this.avatarYaw = obj.rotation.y;
+
+    // ----- 3) Body lean -----
+    // Tilt the avatar around its LOCAL X axis (in the yawed frame,
+    // thanks to YXZ rotation order set in startPlay) by -angle, so the
+    // body rocks back-and-forth in lockstep with the chain — exactly
+    // like a real pendulum rider.
+    if (this.playerAvatar) this.playerAvatar.rotation.x = -angle;
+
+    // ----- 4) Arms gripping the chains naturally -----
+    // The chains pass right beside the rider's body at the rigged hand
+    // X, so even with a tiny back-shift (SWING_SEAT_BACK = 0.15) the
+    // hands are essentially next to the chains. Just put both arms in
+    // a SLIGHT forward bend at the shoulder — the hands sit naturally
+    // near the chain, which reads as "loosely gripping". Going past
+    // ~30° here ends up rotating the rigged arm meshes far enough that
+    // they visually detach from the torso (the pivot offset gets
+    // flipped), so keep the angle small.
+    //
+    // The `back` shift drops out of the arm angle on purpose: a tiny
+    // 0.15u forward reach is well within the visual tolerance of
+    // "hand on chain" and avoids any extreme arm rotation.
+    void back;
+    const ARM_FORWARD = 0.25; // ~14° forward bend at shoulder
+    const aparts = this.playerAvatar?.userData.parts as
+      | { rightArm?: THREE.Group | null; leftArm?: THREE.Group | null }
+      | undefined;
+    if (aparts) {
+      if (aparts.rightArm) aparts.rightArm.rotation.x = -ARM_FORWARD;
+      if (aparts.leftArm) aparts.leftArm.rotation.x = -ARM_FORWARD;
+    }
   }
 
   private updateSeesawRide(dt: number) {
@@ -4093,29 +5073,69 @@ export class Game {
   }
 
   private updateMerryGoRoundRide(dt: number) {
-    void dt;
     const ride = this.playgroundRide;
     if (!ride || ride.type !== 'merrygoround') return;
     const obj = ride.obj;
-    const w = (obj.userData.spec as { w: number }).w;
-    const radius = w * 0.5 - 0.15 - 0.55;
-    const rotSpeed = 1.0;
-    const angle =
-      ((ride.merrySeatIdx ?? 0) / 4) * Math.PI * 2 + rotSpeed * ride.t;
-    const sx = Math.cos(angle) * radius;
-    const sz = Math.sin(angle) * radius;
-    // Seat pad surface ≈ baseH (0.32) + raised support (0.06) + pad
-    // half-thickness (0.07) = ~0.45 above the merry-go-round origin.
-    const seatSurfaceY = 0.32 + 0.32 + 0.14;
-    const wp = this.localToWorld(
-      obj,
-      sx,
-      seatSurfaceY - Game.SIT_HIP_OFFSET,
-      sz
-    );
+    const data = obj.userData.merryGoRound as
+      | {
+          rotor: THREE.Object3D;
+          seats: { x: number; y: number; z: number; angle: number }[];
+          seatBottomY: number;
+          spinSpeed: number;
+        }
+      | undefined;
+    if (!data) return;
+
+    // Spin the rotor (this is the only place merry-go-rounds rotate; the
+    // free-standing version doesn't spin until a rider mounts it).
+    data.rotor.rotation.y += data.spinSpeed * dt;
+
+    // Snap the rider to their seat in the rotor's new orientation.
+    this.snapPlayerToMerrySeat(obj, data, ride.merrySeatIdx ?? 0);
+  }
+
+  /** Computes the world position of seat `idx` for `obj`'s merry-go-round
+   *  in its CURRENT rotor orientation, then writes it to playerPos +
+   *  avatarYaw so the rider visually sits on the seat. */
+  private snapPlayerToMerrySeat(
+    obj: THREE.Object3D,
+    data: {
+      rotor: THREE.Object3D;
+      seats: { x: number; y: number; z: number; angle: number }[];
+    },
+    idx: number
+  ) {
+    const seat = data.seats[idx];
+    if (!seat) return;
+    const rotorY = data.rotor.rotation.y;
+    const cosR = Math.cos(rotorY);
+    const sinR = Math.sin(rotorY);
+    // Rotate the seat's local position around Y by the rotor's angle.
+    const rx = seat.x * cosR - seat.z * sinR;
+    const rz = seat.x * sinR + seat.z * cosR;
+    const wp = this.localToWorld(obj, rx, seat.y - Game.SIT_HIP_OFFSET, rz);
     this.playerPos.set(wp.x, wp.y, wp.z);
-    // Face outward from center (radial direction)
-    this.avatarYaw = obj.rotation.y - angle - Math.PI / 2;
+    // Rider faces radially OUTWARD from the rotor center. The seat's
+    // outward direction in rotor-local coords is at math angle
+    // `seat.angle`; after the rotor spins by rotorY, the world math
+    // angle is (seat.angle + rotorY). Avatar yaw is measured as
+    // atan2(forwardX, forwardZ), so for outward = (cos α, 0, sin α):
+    //   yaw = atan2(cos α, sin α) = π/2 − α
+    // Plus obj.rotation.y for any block-level rotation.
+    this.avatarYaw =
+      obj.rotation.y + Math.PI / 2 - seat.angle - rotorY;
+
+    // Arm grip pose: same gentle forward bend as the swing ride. The
+    // chains are right beside the rider (matching hand X) and slightly
+    // in front (because we shifted the rider back on the pad), so a
+    // small forward bend reads as "loosely gripping the chains".
+    const aparts = this.playerAvatar?.userData.parts as
+      | { rightArm?: THREE.Group | null; leftArm?: THREE.Group | null }
+      | undefined;
+    if (aparts) {
+      if (aparts.rightArm) aparts.rightArm.rotation.x = -0.25;
+      if (aparts.leftArm) aparts.leftArm.rotation.x = -0.25;
+    }
   }
 
   // ------------------------------------------------------------------

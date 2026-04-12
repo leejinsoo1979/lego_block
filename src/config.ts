@@ -219,20 +219,20 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   // one brick; `ramptall` rises two.
   { type: 'ramp', label: '완만한 경사', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: true },
   { type: 'ramptall', label: '긴 경사', category: 'shape', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: true },
-  { type: 'arch', label: '아치', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
-  { type: 'round', label: '원형', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
-  { type: 'cone', label: '콘', category: 'shape', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'arch', label: '아치', category: 'special', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
+  { type: 'round', label: '원형', category: 'special', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'cone', label: '콘', category: 'special', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
   // 부품
   { type: 'window', label: '창문', category: 'part', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 1 } },
   { type: 'door', label: '문', category: 'part', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 4, d: 1 } },
-  { type: 'fence', label: '울타리', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
+  { type: 'fence', label: '울타리', category: 'special', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 4, d: 1 } },
   { type: 'wheel', label: '바퀴', category: 'part', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 2, d: 2 } },
   // 특수
   { type: 'archway', label: '아치 입구', category: 'special', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 6, d: 2 } },
   { type: 'archmid', label: '중간 아치 입구', category: 'special', ghostHeightPlates: 21, bodyHeightPlates: 21, usesSize: false, fixedSize: { w: 8, d: 2 } },
   { type: 'archlarge', label: '큰 아치 입구', category: 'special', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 10, d: 3 } },
-  { type: 'stairs', label: '계단', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 2, d: 4 } },
-  { type: 'gentlestairs', label: '완만한 계단', category: 'special', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 6 } },
+  { type: 'stairs', label: '계단', category: 'shape', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 2, d: 4 } },
+  { type: 'gentlestairs', label: '완만한 계단', category: 'shape', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 6 } },
   { type: 'column', label: '기둥', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'tree', label: '나무', category: 'special', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 1, d: 1 } },
   { type: 'lamp', label: '가로등', category: 'special', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 1, d: 1 } },
@@ -248,7 +248,11 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'swing', label: '그네', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 12, d: 3 } },
   { type: 'seesaw', label: '시소', category: 'playground', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 12, d: 4 } },
   { type: 'junglegym', label: '정글짐', category: 'playground', ghostHeightPlates: 24, bodyHeightPlates: 24, usesSize: false, fixedSize: { w: 6, d: 6 } },
-  { type: 'merrygoround', label: '회전무대', category: 'playground', ghostHeightPlates: 18, bodyHeightPlates: 18, usesSize: false, fixedSize: { w: 10, d: 10 } },
+  // The biggest playground piece — 16×16 footprint × 32 plates tall
+  // (12.8 units, comfortably the tallest playground item). Sized so a
+  // Lego minifig can actually sit on the seats and so the structure
+  // visibly dominates the playground.
+  { type: 'merrygoround', label: '회전무대', category: 'playground', ghostHeightPlates: 32, bodyHeightPlates: 32, usesSize: false, fixedSize: { w: 16, d: 16 } },
   // 캐릭터
   { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
   { type: 'dog', label: '강아지', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 1, d: 2 } },
@@ -310,6 +314,28 @@ export type HatStyle =
   | 'crown'
   | 'pirate';
 
+export type HairStyle =
+  | 'none'
+  | 'short'
+  | 'bob'
+  | 'long'
+  | 'ponytail'
+  | 'mohawk'
+  | 'curly';
+
+/** Per-part face expression config for the character editor. Each field
+ *  is an index into the corresponding FACE_* catalog array. When
+ *  undefined the face falls through to the legacy per-preset
+ *  `drawCharacterFace` switch (backwards compat for the 8 built-in
+ *  presets that have hand-tuned faces). */
+export interface FaceConfig {
+  eyes: number;       // 0..FACE_EYES.length-1
+  nose: number;       // 0..FACE_NOSES.length-1
+  mouth: number;      // 0..FACE_MOUTHS.length-1
+  eyebrows: number;   // 0..FACE_EYEBROWS.length-1
+  cheeks: number;     // 0..FACE_CHEEKS.length-1
+}
+
 export interface MinifigPreset {
   id: string;
   name: string;
@@ -318,8 +344,96 @@ export interface MinifigPreset {
   headHex?: number;
   hatStyle: HatStyle;
   hatColor?: number;
+  hairStyle?: HairStyle;
+  hairColor?: number;
   hideFace?: boolean;
+  /** Custom face parts — when set, the editor-driven composable face
+   *  renderer is used instead of the legacy per-preset switch. */
+  face?: FaceConfig;
 }
+
+// ------------------------------------------------------------------
+//  Face part catalogs — each entry has a short Korean label used by
+//  the character-editor UI and a numeric `id` that the face renderer
+//  dispatches on.
+// ------------------------------------------------------------------
+
+export const FACE_EYES = [
+  { id: 0, label: '기본' },
+  { id: 1, label: '큰눈' },
+  { id: 2, label: '반달' },
+  { id: 3, label: '윙크' },
+  { id: 4, label: '졸린' },
+  { id: 5, label: '놀란' },
+  { id: 6, label: '별눈' },
+  { id: 7, label: '하트' },
+  { id: 8, label: '선글라스' },
+  { id: 9, label: '눈물' },
+] as const;
+
+export const FACE_NOSES = [
+  { id: 0, label: '없음' },
+  { id: 1, label: '점' },
+  { id: 2, label: 'ㄴ자' },
+  { id: 3, label: '둥근' },
+  { id: 4, label: '삼각' },
+] as const;
+
+export const FACE_MOUTHS = [
+  { id: 0, label: '미소' },
+  { id: 1, label: '활짝' },
+  { id: 2, label: '일자' },
+  { id: 3, label: '놀란' },
+  { id: 4, label: '혀' },
+  { id: 5, label: '찡그린' },
+  { id: 6, label: '수염' },
+  { id: 7, label: '뾰루퉁' },
+] as const;
+
+export const FACE_EYEBROWS = [
+  { id: 0, label: '없음' },
+  { id: 1, label: '일자' },
+  { id: 2, label: '올린' },
+  { id: 3, label: '찡그린' },
+  { id: 4, label: '굵은' },
+] as const;
+
+export const FACE_CHEEKS = [
+  { id: 0, label: '없음' },
+  { id: 1, label: '홍조' },
+  { id: 2, label: '주근깨' },
+] as const;
+
+export const HAIR_STYLES: { id: HairStyle; label: string }[] = [
+  { id: 'none', label: '없음' },
+  { id: 'short', label: '짧은머리' },
+  { id: 'bob', label: '단발' },
+  { id: 'long', label: '긴머리' },
+  { id: 'ponytail', label: '포니테일' },
+  { id: 'mohawk', label: '모히칸' },
+  { id: 'curly', label: '곱슬' },
+];
+
+export const HAT_STYLES: { id: HatStyle; label: string }[] = [
+  { id: 'none', label: '없음' },
+  { id: 'cap', label: '야구모자' },
+  { id: 'fireman', label: '소방모' },
+  { id: 'astronaut', label: '우주헬멧' },
+  { id: 'wizard', label: '마법모자' },
+  { id: 'crown', label: '왕관' },
+  { id: 'pirate', label: '해적모' },
+];
+
+/** Default face config used when the user creates a new custom character
+ *  or when a preset doesn't specify a custom face. Friendly round-eye
+ *  smile — the "classic" Lego face. */
+export const DEFAULT_FACE: FaceConfig = {
+  eyes: 0,
+  nose: 0,
+  mouth: 0,
+  eyebrows: 0,
+  cheeks: 0,
+};
 
 export const MINIFIG_PRESETS: MinifigPreset[] = [
   {

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 import { GRID, PLATE_HEIGHT, STUD_HEIGHT, STUD_RADIUS } from './config';
-import type { BlockType, HatStyle, MinifigPreset } from './config';
+import type { BlockType, FaceConfig, HairStyle, HatStyle, MinifigPreset } from './config';
 import characterModelUrl from './model/people.glb?url';
 
 export interface BlockSpec {
@@ -1108,7 +1108,9 @@ function createLampBlock(_spec: BlockSpec): THREE.Group {
     color: 0xfff4a6,
     roughness: 0.2,
     emissive: 0xfff4a6,
-    emissiveIntensity: 0.75,
+    // Default emissive intensity is the DAY value — Game.updateLampForTime()
+    // ramps it up at night via this material reference stored on userData.
+    emissiveIntensity: 0.4,
   });
 
   const baseH = PLATE_HEIGHT;
@@ -1139,12 +1141,42 @@ function createLampBlock(_spec: BlockSpec): THREE.Group {
   cap.castShadow = true;
   group.add(cap);
 
+  const bulbY = topY + 0.12 + 0.28;
   const bulb = new THREE.Mesh(
     new THREE.SphereGeometry(0.3, 16, 12),
     bulbMat
   );
-  bulb.position.y = topY + 0.12 + 0.28;
+  bulb.position.y = bulbY;
   group.add(bulb);
+
+  // ----- Real lighting that turns on at night -----
+  // SpotLight pointing straight down from the bulb. The cone is wide
+  // (~70°) with a soft penumbra so the floor pool has gentle edges
+  // instead of a hard circle. Intensity starts at 0 and is ramped up by
+  // Game.updateLampForTime() as the sun drops below the horizon.
+  const lampLight = new THREE.SpotLight(
+    0xffe1a0, // warm bulb color
+    0,         // intensity (set live by Game.updateLampForTime)
+    22,        // range — light reaches the ground and several units past
+    Math.PI / 2.6, // ~69° half-angle — wider pool than before
+    0.55,      // penumbra (soft circle edge)
+    2          // physical inverse-square decay
+  );
+  lampLight.position.set(0, bulbY - 0.05, 0);
+  // SpotLight needs an explicit target. Place it directly under the
+  // bulb in the lamp's LOCAL space so it follows the lamp around as a
+  // child of the same group.
+  lampLight.target.position.set(0, 0, 0);
+  group.add(lampLight);
+  group.add(lampLight.target);
+  lampLight.userData.isLampLight = true;
+
+  // Expose direct refs so Game.updateLampForTime() can modulate them
+  // every time the time-of-day slider moves, without traversing the
+  // group every frame.
+  group.userData.isLamp = true;
+  group.userData.lampBulbMaterial = bulbMat;
+  group.userData.lampLight = lampLight;
 
   return group;
 }
@@ -1466,10 +1498,11 @@ function createSwingBlock(spec: BlockSpec): THREE.Group {
 
     // Two chains hanging straight down from the pivot point. In pivot-
     // local space the pivot is the origin and the chain extends down
-    // from y=0 to y=-chainLen.
+    // from y=0 to y=-chainLen. Thickened so the visual contact with
+    // the rider's hand is clearly readable in 3rd-person view.
     for (const cx of [-chainXOffset, chainXOffset]) {
       const chain = new THREE.Mesh(
-        new THREE.BoxGeometry(0.08, chainLen, 0.08),
+        new THREE.BoxGeometry(0.14, chainLen, 0.14),
         chainMat
       );
       chain.position.set(cx, -chainLen / 2, 0);
@@ -1866,132 +1899,229 @@ function createJungleGymBlock(spec: BlockSpec): THREE.Group {
 // ------------------------------------------------------------------
 function createMerryGoRoundBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
-  const w = spec.w; // 10
-  const d = spec.d; // 10
-  // 18 plates (= 7.2 units) tall — 1.5× minifig so the canopy actually
-  // towers above seated riders. The visual is taller still because the
-  // conical canopy extends above the bodyHeightPlates (collision box).
-  const h = 18 * PLATE_HEIGHT;
+  const w = spec.w; // 16
+  const d = spec.d; // 16
+  // 32 plates (= 12.8 units) tall — the tallest playground piece. Keep
+  // in sync with bodyHeightPlates in config.ts so the collision box
+  // matches the visible structure.
+  const h = 32 * PLATE_HEIGHT;
   const material = studMaterial(spec.colorHex);
   const seatMat = new THREE.MeshStandardMaterial({
     color: 0xf5cd30, // yellow seats
     roughness: 0.5,
   });
   const canopyMat = new THREE.MeshStandardMaterial({
-    color: 0xc4281c, // red canopy roof
+    color: 0xc4281c, // red canopy / trim
     roughness: 0.55,
   });
+  const chainMat = new THREE.MeshStandardMaterial({
+    color: 0x6a6a6a,
+    roughness: 0.4,
+    metalness: 0.55,
+  });
 
-  const radius = Math.min(w, d) * 0.5 - 0.15;
-  const baseH = 0.32;
+  const baseR = Math.min(w, d) * 0.5 - 0.3; // ~7.7 for a 16×16
+  const baseH = 0.6; // 1.5 plates — chunky raised platform
+  const hubR = baseR * 0.42; // top hub disc radius (~3.2)
 
-  // ----- Round disc base (flat cylinder) -----
+  // ----- Stationary central support pole + ground anchor -----
+  // The pole stays put; only the rotor (everything else) spins around it.
+  const poleH = h - 0.4;
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.36, 0.36, poleH, 20),
+    material
+  );
+  pole.position.y = poleH / 2;
+  pole.castShadow = true;
+  pole.receiveShadow = true;
+  group.add(pole);
+
+  // ----- Rotor: everything that spins (base disc + hub + chains + seats) -----
+  const rotor = new THREE.Group();
+  rotor.userData.isRotor = true;
+  group.add(rotor);
+
+  // Round disc base — the floor riders' feet would touch
   const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius, radius, baseH, 32),
+    new THREE.CylinderGeometry(baseR, baseR, baseH, 48),
     material
   );
   base.position.y = baseH / 2;
   base.castShadow = true;
   base.receiveShadow = true;
-  group.add(base);
+  rotor.add(base);
 
-  // Trim ring around the base edge
-  const trimH = 0.14;
+  // Red trim ring around the base rim
   const trim = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius + 0.05, radius, trimH, 32),
+    new THREE.CylinderGeometry(baseR + 0.08, baseR, 0.24, 48),
     canopyMat
   );
-  trim.position.y = baseH + trimH / 2;
-  group.add(trim);
+  trim.position.y = baseH + 0.12;
+  rotor.add(trim);
 
-  // Central vertical pole
-  const poleH = h - baseH - 0.2;
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12, 0.12, poleH, 16),
-    material
-  );
-  pole.position.y = baseH + poleH / 2;
-  pole.castShadow = true;
-  group.add(pole);
-
-  // ----- Conical canopy (red, sits on top of the pole) -----
-  const canopyR = radius + 0.05;
-  const canopyH = h * 0.45;
-  const canopy = new THREE.Mesh(
-    new THREE.ConeGeometry(canopyR, canopyH, 20, 1, true),
+  // Top hub (where chains hang from)
+  const hubH = 0.7;
+  const hubY = h - 0.9;
+  const hub = new THREE.Mesh(
+    new THREE.CylinderGeometry(hubR, hubR + 0.25, hubH, 36),
     canopyMat
   );
-  canopy.position.y = baseH + poleH + canopyH / 2 - 0.05;
-  canopy.castShadow = true;
-  group.add(canopy);
+  hub.position.y = hubY;
+  hub.castShadow = true;
+  rotor.add(hub);
 
-  // Tiny finial on top of the canopy
+  // Decorative dome on the hub
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(hubR * 0.7, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+    canopyMat
+  );
+  dome.position.y = hubY + hubH / 2;
+  rotor.add(dome);
+
+  // Pointy finial on top
   const finial = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 12, 8),
+    new THREE.ConeGeometry(0.32, 0.95, 18),
     canopyMat
   );
-  finial.position.y = baseH + poleH + canopyH;
-  group.add(finial);
+  finial.position.y = hubY + hubH / 2 + hubR * 0.7 + 0.47;
+  rotor.add(finial);
 
-  // ----- 4 vertical drop bars from canopy rim to disc rim -----
-  // Each bar carries a seat at its base.
-  const numSeats = 4;
+  // ----- Six swing seats hanging from the hub -----
+  // Seats are sized for an actual minifig sitting on them. The chain
+  // PAIR for each seat is spaced exactly to match the minifig's hand
+  // span — measured off the rigged GLB at load time — so the rider's
+  // hands grip the chains naturally with no eyeballing.
+  const numSeats = 6;
+  const seatRadius = baseR - 1.4; // distance from center to seat center (~6.3)
+  const halfHandSpan = characterHandX > 0 ? characterHandX : 1.0;
+  const seatPadW = halfHandSpan * 2 + 0.6; // chain span + padding
+  const seatPadD = 1.4; // deep enough for sitting + back-shift
+  const seatBackH = 1.4; // up to minifig shoulder height
+  const seatBottomY = baseH + 1.6; // riders' feet hang freely
+  const seatTopY = seatBottomY + 0.18;
+  // How far back (toward the central pole, in seat-local -Z) the rider
+  // sits on the pad — places their back near the backrest and leaves
+  // the chains slightly in front so the arms reach forward to grip.
+  const seatBackShift = 0.3;
+
+  // Helper: build a thin cylinder ("chain") between two points.
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  const buildChain = (
+    top: THREE.Vector3,
+    bot: THREE.Vector3,
+    r: number
+  ): THREE.Mesh => {
+    const dir = new THREE.Vector3().subVectors(bot, top);
+    const length = dir.length();
+    dir.normalize();
+    const chain = new THREE.Mesh(
+      new THREE.CylinderGeometry(r, r, length, 8),
+      chainMat
+    );
+    chain.position.copy(top).add(bot).multiplyScalar(0.5);
+    chain.quaternion.setFromUnitVectors(yAxis, dir);
+    chain.castShadow = true;
+    return chain;
+  };
+
+  // Seat layout data — exposed via userData so the play-mode "ride"
+  // mechanic can find seats and lock the player to them.
+  const seatLocalPositions: { x: number; y: number; z: number; angle: number }[] =
+    [];
+
   for (let i = 0; i < numSeats; i++) {
     const angle = (i / numSeats) * Math.PI * 2;
     const cosA = Math.cos(angle);
     const sinA = Math.sin(angle);
 
-    const dropH = canopyH * 0.5 + poleH * 0.5;
-    const dropY = baseH + poleH - dropH / 2 + 0.2;
-    const dropR = radius - 0.15;
+    const seatCx = cosA * seatRadius;
+    const seatCz = sinA * seatRadius;
 
-    // Vertical bar
-    const dropBar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.07, 0.07, dropH, 10),
-      material
-    );
-    dropBar.position.set(cosA * dropR, dropY, sinA * dropR);
-    dropBar.castShadow = true;
-    group.add(dropBar);
-
-    // Seat — slightly curved-looking using a wider box (faces tangent
-    // to the disc, so the seat back is the outer side)
+    // Seat group, oriented so its +Z faces OUTWARD (radially away from
+    // center). Riders sit looking out — backrest is on the inner side.
     const seatGroup = new THREE.Group();
-    seatGroup.position.set(
-      cosA * (radius - 0.55),
-      baseH + 0.32,
-      sinA * (radius - 0.55)
-    );
-    seatGroup.rotation.y = -angle;
-    group.add(seatGroup);
+    seatGroup.position.set(seatCx, seatBottomY, seatCz);
+    // Look at a point further along the same radial direction (outward)
+    seatGroup.lookAt(seatCx + cosA, seatBottomY, seatCz + sinA);
+    rotor.add(seatGroup);
 
-    const seatPad = new THREE.Mesh(
-      new THREE.BoxGeometry(0.85, 0.14, 0.6),
+    // Seat pad
+    const pad = new THREE.Mesh(
+      new THREE.BoxGeometry(seatPadW, 0.18, seatPadD),
       seatMat
     );
-    seatPad.castShadow = true;
-    seatGroup.add(seatPad);
+    pad.castShadow = true;
+    seatGroup.add(pad);
 
-    // Small backrest on the outside (radial-out direction)
-    const seatBack = new THREE.Mesh(
-      new THREE.BoxGeometry(0.85, 0.55, 0.1),
+    // Backrest — on the inside (rider's back faces the central pole).
+    // Local -Z is now toward center after the outward-facing lookAt.
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(seatPadW, seatBackH, 0.18),
       seatMat
     );
-    seatBack.position.set(0, 0.3, 0.28);
-    seatBack.castShadow = true;
-    seatGroup.add(seatBack);
+    back.position.set(0, seatBackH / 2 + 0.09, -seatPadD / 2 + 0.09);
+    back.castShadow = true;
+    seatGroup.add(back);
 
-    // Small arms on the sides
-    for (const ax of [-1, 1]) {
-      const arm = new THREE.Mesh(
-        new THREE.BoxGeometry(0.08, 0.4, 0.5),
-        seatMat
+    // Two chains per seat, spaced exactly handSpan apart so the rider's
+    // hands rest on them naturally. Chains attach to the seat edges
+    // (left and right of the rider, at hand level) and rise straight up
+    // to the hub edge directly above.
+    //
+    // After the outward-facing lookAt, the seat's local +X axis runs
+    // along the tangent direction (sinA, 0, -cosA) in world space. We
+    // use that to place chain anchors exactly handSpan apart along the
+    // tangent (so the spacing matches a minifig's hand span).
+    const tx = sinA; // local +X direction in world (tangent)
+    const tz = -cosA;
+
+    for (const ax of [-1, 1] as const) {
+      // Chain grip on the seat: tangentially offset by the measured
+      // half hand span, at chest height above the seat pad.
+      const offX = ax * halfHandSpan;
+      const wx = seatCx + tx * offX;
+      const wz = seatCz + tz * offX;
+      const handY = seatTopY + seatBackH * 0.55;
+      const handPoint = new THREE.Vector3(wx, handY, wz);
+
+      // Hub attachment: directly above this anchor, projected onto the
+      // hub edge so the chain has a slight inward slope when at rest.
+      const len = Math.hypot(wx, wz);
+      const ux = wx / len;
+      const uz = wz / len;
+      const hubX = ux * (hubR + 0.06);
+      const hubZ = uz * (hubR + 0.06);
+      const hubAttach = new THREE.Vector3(
+        hubX,
+        hubY - hubH / 2 - 0.04,
+        hubZ
       );
-      arm.position.set(ax * (0.85 / 2 - 0.04), 0.22, 0.04);
-      arm.castShadow = true;
-      seatGroup.add(arm);
+
+      rotor.add(buildChain(hubAttach, handPoint, 0.07));
     }
+
+    // Sit position: on top of the pad (= seatBottomY + halfPadH) and
+    // shifted back toward the backrest by seatBackShift, in the seat-
+    // local -Z direction (which equals the inward radial in world).
+    const sitX = seatCx - cosA * seatBackShift;
+    const sitZ = seatCz - sinA * seatBackShift;
+    const sitY = seatBottomY + 0.09; // pad-top in world Y (= rider hip)
+    seatLocalPositions.push({
+      x: sitX,
+      y: sitY,
+      z: sitZ,
+      angle,
+    });
   }
+
+  // Stash the seat layout + rotor reference + spin parameters in
+  // userData so the play loop can drive rotation and snap riders.
+  group.userData.merryGoRound = {
+    rotor,
+    seats: seatLocalPositions,
+    seatBottomY,
+    spinSpeed: 0.55, // radians per second when active
+  };
 
   return group;
 }
@@ -2252,6 +2382,132 @@ function createHat(style: HatStyle, color: number): THREE.Group | null {
 }
 
 // ------------------------------------------------------------------
+//  Hair factories
+// ------------------------------------------------------------------
+
+function createHair(style: HairStyle, color: number): THREE.Group | null {
+  if (style === 'none') return null;
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+
+  switch (style) {
+    case 'short': {
+      // Low flat cap of hair — box on top + slight side overhang
+      const top = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.18, 0.88), mat);
+      top.position.y = 0.09;
+      top.castShadow = true;
+      group.add(top);
+      // Slight side volume
+      for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.7), mat);
+        side.position.set(sx * 0.48, -0.05, -0.05);
+        side.castShadow = true;
+        group.add(side);
+      }
+      break;
+    }
+    case 'bob': {
+      // Rounded bob — hemisphere top + side panels that reach jaw level
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.48, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+        mat
+      );
+      dome.castShadow = true;
+      group.add(dome);
+      // Side panels
+      for (const sx of [-1, 1]) {
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.55, 0.65), mat);
+        panel.position.set(sx * 0.44, -0.2, -0.05);
+        panel.castShadow = true;
+        group.add(panel);
+      }
+      // Back panel
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.16), mat);
+      back.position.set(0, -0.15, -0.38);
+      back.castShadow = true;
+      group.add(back);
+      break;
+    }
+    case 'long': {
+      // Long hair — dome on top + long back reaching shoulders
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.48, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+        mat
+      );
+      dome.castShadow = true;
+      group.add(dome);
+      // Long back portion
+      const longBack = new THREE.Mesh(new THREE.BoxGeometry(0.82, 1.0, 0.18), mat);
+      longBack.position.set(0, -0.45, -0.36);
+      longBack.castShadow = true;
+      group.add(longBack);
+      // Side strands
+      for (const sx of [-1, 1]) {
+        const strand = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.85, 0.5), mat);
+        strand.position.set(sx * 0.44, -0.35, -0.1);
+        strand.castShadow = true;
+        group.add(strand);
+      }
+      break;
+    }
+    case 'ponytail': {
+      // Short top + ponytail at back
+      const top = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.2, 0.88), mat);
+      top.position.y = 0.1;
+      top.castShadow = true;
+      group.add(top);
+      // Ponytail — cylinder angled down
+      const tail = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.08, 0.7, 10),
+        mat
+      );
+      tail.position.set(0, -0.2, -0.42);
+      tail.rotation.x = 0.5;
+      tail.castShadow = true;
+      group.add(tail);
+      // Tie (small ring)
+      const tie = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.15, 0.15, 0.06, 12),
+        new THREE.MeshStandardMaterial({ color: 0xc43030, roughness: 0.5 })
+      );
+      tie.position.set(0, 0.02, -0.42);
+      tie.rotation.x = 0.5;
+      group.add(tie);
+      break;
+    }
+    case 'mohawk': {
+      // Ridge of boxes along the center-top
+      for (let i = 0; i < 5; i++) {
+        const h = 0.2 + (i === 2 ? 0.15 : 0); // taller in the middle
+        const spike = new THREE.Mesh(new THREE.BoxGeometry(0.14, h, 0.14), mat);
+        spike.position.set(0, h / 2, -0.3 + i * 0.15);
+        spike.castShadow = true;
+        group.add(spike);
+      }
+      break;
+    }
+    case 'curly': {
+      // Cluster of small spheres
+      const r = 0.13;
+      const positions = [
+        [0, 0.12, 0.28], [-0.28, 0.08, 0.18], [0.28, 0.08, 0.18],
+        [-0.38, 0, -0.05], [0.38, 0, -0.05], [-0.3, 0.1, -0.28],
+        [0.3, 0.1, -0.28], [0, 0.14, -0.32], [-0.15, 0.16, 0.1],
+        [0.15, 0.16, 0.1], [0, 0.18, -0.1],
+      ];
+      for (const [px, py, pz] of positions) {
+        const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), mat);
+        ball.position.set(px, py, pz);
+        ball.castShadow = true;
+        group.add(ball);
+      }
+      break;
+    }
+  }
+  return group;
+}
+
+// ------------------------------------------------------------------
 //  Minifigure
 // ------------------------------------------------------------------
 
@@ -2273,6 +2529,12 @@ let characterTopY = 0;
  *  swing factory uses this so its chain spacing equals the rider's hand
  *  spacing exactly — chains land directly under the gripping hands. */
 let characterHandX = 0;
+/** Y of a SHOULDER pivot (= top of the arm bbox) in body-local space. */
+let characterShoulderY = 0;
+/** Length from shoulder to hand of a hanging arm, in world units. The
+ *  swing ride uses this to compute the exact arm rotation that puts
+ *  the hands on the chains while the rider sits back on the seat. */
+let characterArmLen = 0;
 
 /** Target distance between the two FOOT CENTERS, in world units. One stud
  *  pitch = 1 unit, so setting this to 1.0 puts each foot center exactly
@@ -2515,21 +2777,63 @@ export function loadCharacterModel(): Promise<void> {
           if (n === 'Cylinder002') rightHand = m;
           else if (n === 'Cylinder003') leftHand = m;
         });
+        // Find the upper-arm meshes (Cube.002 right, Cube.004 left) so
+        // we can also measure the SHOULDER Y (= top of the arm bbox)
+        // and derive the arm length (shoulderY - handY).
+        let leftArmMesh: THREE.Mesh | null = null;
+        let rightArmMesh: THREE.Mesh | null = null;
+        root.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (!m.isMesh) return;
+          const n = normName(m.name);
+          if (n === 'Cube002') rightArmMesh = m;
+          else if (n === 'Cube004') leftArmMesh = m;
+        });
+
         if (leftHand && rightHand) {
           const lb = new THREE.Box3().setFromObject(leftHand);
           const rb = new THREE.Box3().setFromObject(rightHand);
           const lx = (lb.min.x + lb.max.x) / 2;
           const rx = (rb.min.x + rb.max.x) / 2;
           characterHandX = (Math.abs(lx) + Math.abs(rx)) / 2;
+          const handY = ((lb.min.y + lb.max.y) / 2 + (rb.min.y + rb.max.y) / 2) / 2;
+
+          // Shoulder Y = top of the arm-mesh bbox (matching how rigLimb
+          // picks the pivot). Use whichever side(s) we found.
+          let shoulderY = 0;
+          let shoulderCount = 0;
+          if (rightArmMesh) {
+            const ab = new THREE.Box3().setFromObject(rightArmMesh);
+            shoulderY += ab.max.y;
+            shoulderCount++;
+          }
+          if (leftArmMesh) {
+            const ab = new THREE.Box3().setFromObject(leftArmMesh);
+            shoulderY += ab.max.y;
+            shoulderCount++;
+          }
+          if (shoulderCount > 0) {
+            characterShoulderY = shoulderY / shoulderCount;
+            characterArmLen = Math.max(0.1, characterShoulderY - handY);
+          } else {
+            // Fallback: assume the arm spans from the hand up by ~1.4u
+            characterArmLen = 1.4;
+            characterShoulderY = handY + characterArmLen;
+          }
+
           console.log(
             '[GLB] hand X (world):',
             'L=', lx.toFixed(3),
             'R=', rx.toFixed(3),
-            '→ |handX|=', characterHandX.toFixed(3)
+            '→ |handX|=', characterHandX.toFixed(3),
+            'shoulderY=', characterShoulderY.toFixed(3),
+            'armLen=', characterArmLen.toFixed(3)
           );
         } else {
           console.warn('[GLB] hand meshes not found, falling back to handX=1.0');
           characterHandX = 1.0;
+          characterShoulderY = 3.0;
+          characterArmLen = 1.4;
         }
 
         characterTemplate = root;
@@ -2553,6 +2857,13 @@ export function getMinifigHeight(): number {
  *  loadCharacterModel resolves. */
 export function getMinifigHandX(): number {
   return characterHandX;
+}
+
+/** Length from shoulder pivot to hand of a hanging arm, in world units.
+ *  Used by the swing ride to compute the arm rotation that puts the
+ *  hands on the chains. */
+export function getMinifigArmLen(): number {
+  return characterArmLen;
 }
 
 /**
@@ -2644,6 +2955,29 @@ export function createMinifigure(preset: MinifigPreset): THREE.Group {
     if (faceMesh) group.add(faceMesh);
   }
 
+  // ----- Hat or Hair attachment -----
+  // Hats take priority when BOTH hatStyle and hairStyle are set (a hat
+  // covers the hair). Attach to body (not group) so it inherits the
+  // body's scale/position for correct placement.
+  if (headMesh) {
+    body.updateMatrixWorld(true);
+    const headBox = new THREE.Box3().setFromObject(headMesh);
+    const headTopY = body.worldToLocal(
+      new THREE.Vector3(0, headBox.max.y, 0)
+    ).y;
+
+    let headwear: THREE.Group | null = null;
+    if (preset.hatStyle && preset.hatStyle !== 'none') {
+      headwear = createHat(preset.hatStyle, preset.hatColor ?? 0x333333);
+    } else if (preset.hairStyle && preset.hairStyle !== 'none') {
+      headwear = createHair(preset.hairStyle, preset.hairColor ?? 0x3b2415);
+    }
+    if (headwear) {
+      headwear.position.y = headTopY;
+      body.add(headwear);
+    }
+  }
+
   // ----- Rig the limbs for walking animation -----
   // The GLB exports each limb as a mesh (or two — upper + hand) with its
   // origin somewhere in the middle of the geometry. To make a limb swing
@@ -2664,12 +2998,20 @@ export function createMinifigure(preset: MinifigPreset): THREE.Group {
   const rigLimb = (limbs: (THREE.Mesh | null)[]): THREE.Group | null => {
     const valid = limbs.filter((m): m is THREE.Mesh => m !== null);
     if (valid.length === 0) return null;
-    // Combined world AABB across all sub-meshes
+    // Combined TIGHT world AABB across all sub-meshes. `precise=true`
+    // walks every vertex through matrixWorld and computes the exact
+    // axis-aligned bounding box; the default (precise=false) transforms
+    // only the mesh's own local-bbox corners, which for rotated meshes
+    // produces a LOOSE AABB whose max.y sits above the actual shoulder
+    // vertices. A loose-bbox pivot is what makes the shoulder axis
+    // appear to bob up and down during the arm swing — the visible mesh
+    // top isn't at the pivot, so rotating the pivot traces a vertical
+    // arc at the mesh's top end.
     const bbox = new THREE.Box3();
-    for (const m of valid) bbox.expandByObject(m);
+    for (const m of valid) bbox.expandByObject(m, true);
     const hipWorld = new THREE.Vector3(
       (bbox.min.x + bbox.max.x) / 2,
-      bbox.max.y, // top of limb = hip / shoulder
+      bbox.max.y, // tight top of the limb = visible shoulder / hip
       (bbox.min.z + bbox.max.z) / 2
     );
     const pivot = new THREE.Group();
@@ -2798,14 +3140,422 @@ function createCharacterFace(
   return decal;
 }
 
+// ------------------------------------------------------------------
+//  Composable face-part draw functions
+//
+//  Each function draws ONE part (eyes/nose/mouth/eyebrows/cheeks) onto
+//  a 2D canvas at the standard layout positions. The `index` argument
+//  selects a style from the corresponding FACE_* catalog in config.ts.
+//  These are consumed by both the editor-driven renderer AND by
+//  drawFacePartPreview (which generates tiny thumbnails for the UI).
+// ------------------------------------------------------------------
+
+interface FaceLayout {
+  cx: number;
+  eyeY: number;
+  eyeOffset: number;
+  size: number;
+}
+
+/** Shared canvas-drawing helpers — reused across all face-part draw fns. */
+function faceDot(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  color = '#000'
+) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+function faceStroke(
+  ctx: CanvasRenderingContext2D,
+  fn: () => void,
+  color = '#000',
+  w: number
+) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = w;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  fn();
+  ctx.stroke();
+}
+
+function drawFaceEyes(
+  ctx: CanvasRenderingContext2D,
+  index: number,
+  l: FaceLayout
+) {
+  const { cx, eyeY, eyeOffset, size } = l;
+  const lx = cx - eyeOffset;
+  const rx = cx + eyeOffset;
+  switch (index) {
+    case 0: // 기본 — round dots
+      faceDot(ctx, lx, eyeY, size * 0.048);
+      faceDot(ctx, rx, eyeY, size * 0.048);
+      break;
+    case 1: // 큰눈 — big round eyes with shine
+      faceDot(ctx, lx, eyeY, size * 0.062);
+      faceDot(ctx, rx, eyeY, size * 0.062);
+      faceDot(ctx, lx + size * 0.015, eyeY - size * 0.015, size * 0.018, '#fff');
+      faceDot(ctx, rx + size * 0.015, eyeY - size * 0.015, size * 0.018, '#fff');
+      break;
+    case 2: // 반달 — happy closed arcs (^  ^)
+      faceStroke(ctx, () => {
+        ctx.arc(lx, eyeY + size * 0.01, size * 0.045, Math.PI, 2 * Math.PI);
+      }, '#000', size * 0.028);
+      faceStroke(ctx, () => {
+        ctx.arc(rx, eyeY + size * 0.01, size * 0.045, Math.PI, 2 * Math.PI);
+      }, '#000', size * 0.028);
+      break;
+    case 3: // 윙크 — left eye closed arc, right normal
+      faceStroke(ctx, () => {
+        ctx.arc(lx, eyeY + size * 0.01, size * 0.045, Math.PI, 2 * Math.PI);
+      }, '#000', size * 0.028);
+      faceDot(ctx, rx, eyeY, size * 0.05);
+      faceDot(ctx, rx + size * 0.013, eyeY - size * 0.013, size * 0.014, '#fff');
+      break;
+    case 4: // 졸린 — half-lid (upper arc clipping the dot)
+      faceDot(ctx, lx, eyeY, size * 0.045);
+      faceDot(ctx, rx, eyeY, size * 0.045);
+      // eyelids
+      faceStroke(ctx, () => {
+        ctx.moveTo(lx - size * 0.06, eyeY - size * 0.02);
+        ctx.lineTo(lx + size * 0.06, eyeY - size * 0.005);
+      }, '#000', size * 0.025);
+      faceStroke(ctx, () => {
+        ctx.moveTo(rx - size * 0.06, eyeY - size * 0.005);
+        ctx.lineTo(rx + size * 0.06, eyeY - size * 0.02);
+      }, '#000', size * 0.025);
+      break;
+    case 5: // 놀란 — wide O-shaped eyes
+      faceStroke(ctx, () => {
+        ctx.arc(lx, eyeY, size * 0.05, 0, Math.PI * 2);
+      }, '#000', size * 0.025);
+      faceStroke(ctx, () => {
+        ctx.arc(rx, eyeY, size * 0.05, 0, Math.PI * 2);
+      }, '#000', size * 0.025);
+      faceDot(ctx, lx, eyeY, size * 0.025);
+      faceDot(ctx, rx, eyeY, size * 0.025);
+      break;
+    case 6: // 별눈 — star sparkle
+      for (const ex of [lx, rx]) {
+        const r = size * 0.045;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+          const o = a + Math.PI / 5;
+          ctx.lineTo(ex + Math.cos(a) * r, eyeY + Math.sin(a) * r);
+          ctx.lineTo(ex + Math.cos(o) * r * 0.45, eyeY + Math.sin(o) * r * 0.45);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+      break;
+    case 7: // 하트 — heart-shaped eyes
+      for (const ex of [lx, rx]) {
+        const s = size * 0.04;
+        ctx.fillStyle = '#e03050';
+        ctx.beginPath();
+        ctx.moveTo(ex, eyeY + s * 1.1);
+        ctx.bezierCurveTo(ex - s * 1.2, eyeY - s * 0.2, ex - s * 0.6, eyeY - s * 1.2, ex, eyeY - s * 0.4);
+        ctx.bezierCurveTo(ex + s * 0.6, eyeY - s * 1.2, ex + s * 1.2, eyeY - s * 0.2, ex, eyeY + s * 1.1);
+        ctx.fill();
+      }
+      break;
+    case 8: // 선글라스 — dark visor strip
+      ctx.fillStyle = '#1a1a22';
+      // Bridge
+      ctx.fillRect(cx - size * 0.04, eyeY - size * 0.02, size * 0.08, size * 0.04);
+      // Left lens
+      ctx.beginPath();
+      ctx.roundRect(lx - size * 0.09, eyeY - size * 0.045, size * 0.18, size * 0.09, size * 0.02);
+      ctx.fill();
+      // Right lens
+      ctx.beginPath();
+      ctx.roundRect(rx - size * 0.09, eyeY - size * 0.045, size * 0.18, size * 0.09, size * 0.02);
+      ctx.fill();
+      break;
+    case 9: // 눈물 — normal eyes + tear drops
+      faceDot(ctx, lx, eyeY, size * 0.048);
+      faceDot(ctx, rx, eyeY, size * 0.048);
+      // tear on left
+      ctx.fillStyle = '#5ac8f5';
+      ctx.beginPath();
+      ctx.moveTo(lx + size * 0.02, eyeY + size * 0.05);
+      ctx.quadraticCurveTo(lx + size * 0.045, eyeY + size * 0.12, lx + size * 0.02, eyeY + size * 0.14);
+      ctx.quadraticCurveTo(lx - size * 0.005, eyeY + size * 0.12, lx + size * 0.02, eyeY + size * 0.05);
+      ctx.fill();
+      break;
+  }
+}
+
+function drawFaceNose(
+  ctx: CanvasRenderingContext2D,
+  index: number,
+  l: FaceLayout
+) {
+  const { cx, size } = l;
+  const noseY = size * 0.53;
+  switch (index) {
+    case 0: // 없음
+      break;
+    case 1: // 점
+      faceDot(ctx, cx, noseY, size * 0.015);
+      break;
+    case 2: // ㄴ자
+      faceStroke(ctx, () => {
+        ctx.moveTo(cx, noseY - size * 0.03);
+        ctx.lineTo(cx, noseY + size * 0.02);
+        ctx.lineTo(cx + size * 0.025, noseY + size * 0.02);
+      }, '#000', size * 0.018);
+      break;
+    case 3: // 둥근
+      faceStroke(ctx, () => {
+        ctx.arc(cx, noseY, size * 0.025, 0.2 * Math.PI, 0.8 * Math.PI);
+      }, '#000', size * 0.018);
+      break;
+    case 4: // 삼각
+      faceStroke(ctx, () => {
+        ctx.moveTo(cx - size * 0.02, noseY + size * 0.015);
+        ctx.lineTo(cx, noseY - size * 0.02);
+        ctx.lineTo(cx + size * 0.02, noseY + size * 0.015);
+      }, '#000', size * 0.015);
+      break;
+  }
+}
+
+function drawFaceMouth(
+  ctx: CanvasRenderingContext2D,
+  index: number,
+  l: FaceLayout
+) {
+  const { cx, size } = l;
+  const my = size * 0.63;
+  switch (index) {
+    case 0: // 미소
+      faceStroke(ctx, () => {
+        ctx.arc(cx, my - size * 0.04, size * 0.13, 0.15 * Math.PI, 0.85 * Math.PI);
+      }, '#000', size * 0.025);
+      break;
+    case 1: // 활짝
+      faceStroke(ctx, () => {
+        ctx.arc(cx, my - size * 0.07, size * 0.16, 0.1 * Math.PI, 0.9 * Math.PI);
+      }, '#000', size * 0.028);
+      // teeth
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx - size * 0.07, my - size * 0.01, size * 0.14, size * 0.04);
+      break;
+    case 2: // 일자
+      faceStroke(ctx, () => {
+        ctx.moveTo(cx - size * 0.08, my);
+        ctx.lineTo(cx + size * 0.08, my);
+      }, '#000', size * 0.025);
+      break;
+    case 3: // 놀란 (O-shaped)
+      faceStroke(ctx, () => {
+        ctx.arc(cx, my, size * 0.06, 0, Math.PI * 2);
+      }, '#000', size * 0.025);
+      break;
+    case 4: // 혀 (tongue out)
+      faceStroke(ctx, () => {
+        ctx.arc(cx, my - size * 0.04, size * 0.13, 0.15 * Math.PI, 0.85 * Math.PI);
+      }, '#000', size * 0.025);
+      ctx.fillStyle = '#e85060';
+      ctx.beginPath();
+      ctx.arc(cx, my + size * 0.04, size * 0.04, 0, Math.PI);
+      ctx.fill();
+      break;
+    case 5: // 찡그린 (frown)
+      faceStroke(ctx, () => {
+        ctx.arc(cx, my + size * 0.08, size * 0.12, 1.2 * Math.PI, 1.8 * Math.PI);
+      }, '#000', size * 0.025);
+      break;
+    case 6: // 수염
+      ctx.fillStyle = '#3b2415';
+      ctx.beginPath();
+      ctx.ellipse(cx, my - size * 0.02, size * 0.16, size * 0.045, 0, 0, Math.PI * 2);
+      ctx.fill();
+      faceStroke(ctx, () => {
+        ctx.moveTo(cx - size * 0.06, my + size * 0.04);
+        ctx.lineTo(cx + size * 0.06, my + size * 0.04);
+      }, '#000', size * 0.02);
+      break;
+    case 7: // 뾰루퉁 (pouty)
+      faceStroke(ctx, () => {
+        ctx.moveTo(cx - size * 0.06, my);
+        ctx.quadraticCurveTo(cx, my - size * 0.04, cx + size * 0.06, my);
+      }, '#000', size * 0.028);
+      break;
+  }
+}
+
+function drawFaceEyebrows(
+  ctx: CanvasRenderingContext2D,
+  index: number,
+  l: FaceLayout
+) {
+  const { cx, eyeY, eyeOffset, size } = l;
+  const lx = cx - eyeOffset;
+  const rx = cx + eyeOffset;
+  const by = eyeY - size * 0.09;
+  switch (index) {
+    case 0: // 없음
+      break;
+    case 1: // 일자 (straight)
+      faceStroke(ctx, () => {
+        ctx.moveTo(lx - size * 0.06, by);
+        ctx.lineTo(lx + size * 0.06, by);
+        ctx.moveTo(rx - size * 0.06, by);
+        ctx.lineTo(rx + size * 0.06, by);
+      }, '#000', size * 0.028);
+      break;
+    case 2: // 올린 (raised inner)
+      faceStroke(ctx, () => {
+        ctx.moveTo(lx - size * 0.06, by);
+        ctx.lineTo(lx + size * 0.06, by - size * 0.04);
+        ctx.moveTo(rx - size * 0.06, by - size * 0.04);
+        ctx.lineTo(rx + size * 0.06, by);
+      }, '#000', size * 0.028);
+      break;
+    case 3: // 찡그린 (angry converging)
+      faceStroke(ctx, () => {
+        ctx.moveTo(lx - size * 0.07, by - size * 0.04);
+        ctx.lineTo(lx + size * 0.05, by + size * 0.02);
+        ctx.moveTo(rx + size * 0.07, by - size * 0.04);
+        ctx.lineTo(rx - size * 0.05, by + size * 0.02);
+      }, '#000', size * 0.03);
+      break;
+    case 4: // 굵은 (thick bushy)
+      faceStroke(ctx, () => {
+        ctx.moveTo(lx - size * 0.07, by);
+        ctx.lineTo(lx + size * 0.07, by);
+        ctx.moveTo(rx - size * 0.07, by);
+        ctx.lineTo(rx + size * 0.07, by);
+      }, '#000', size * 0.045);
+      break;
+  }
+}
+
+function drawFaceCheeks(
+  ctx: CanvasRenderingContext2D,
+  index: number,
+  l: FaceLayout
+) {
+  const { cx, size } = l;
+  const cy = size * 0.58;
+  switch (index) {
+    case 0: // 없음
+      break;
+    case 1: // 홍조
+      ctx.fillStyle = 'rgba(255, 110, 140, 0.5)';
+      ctx.beginPath();
+      ctx.arc(cx - size * 0.28, cy, size * 0.06, 0, Math.PI * 2);
+      ctx.arc(cx + size * 0.28, cy, size * 0.06, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 2: // 주근깨
+      ctx.fillStyle = 'rgba(140, 90, 50, 0.55)';
+      for (const sx of [-1, 1]) {
+        const ox = cx + sx * size * 0.22;
+        for (let i = 0; i < 4; i++) {
+          const fx = ox + (Math.random() - 0.5) * size * 0.08;
+          const fy = cy + (Math.random() - 0.5) * size * 0.06;
+          ctx.beginPath();
+          ctx.arc(fx, fy, size * 0.01, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      break;
+  }
+}
+
+/** Draw a composable face from a FaceConfig onto a canvas. Used by the
+ *  character editor. Each part is drawn in layer order (back to front):
+ *  cheeks → eyebrows → eyes → nose → mouth. */
+function drawComposableFace(
+  face: FaceConfig,
+  size: number
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, size, size);
+  const l: FaceLayout = {
+    cx: size / 2,
+    eyeY: size * 0.44,
+    eyeOffset: size * 0.17,
+    size,
+  };
+  drawFaceCheeks(ctx, face.cheeks, l);
+  drawFaceEyebrows(ctx, face.eyebrows, l);
+  drawFaceEyes(ctx, face.eyes, l);
+  drawFaceNose(ctx, face.nose, l);
+  drawFaceMouth(ctx, face.mouth, l);
+  return canvas;
+}
+
+/** Render a single face-part preview onto a small canvas (for the
+ *  editor's selectable thumbnail strips). Only the requested part is
+ *  drawn so the user can see it in isolation. */
+export function drawFacePartPreview(
+  part: 'eyes' | 'nose' | 'mouth' | 'eyebrows' | 'cheeks',
+  index: number,
+  size = 48
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, size, size);
+  const l: FaceLayout = {
+    cx: size / 2,
+    eyeY: size * 0.44,
+    eyeOffset: size * 0.17,
+    size,
+  };
+  switch (part) {
+    case 'eyes':
+      drawFaceEyes(ctx, index, l);
+      break;
+    case 'nose':
+      drawFaceNose(ctx, index, l);
+      break;
+    case 'mouth':
+      drawFaceMouth(ctx, index, l);
+      break;
+    case 'eyebrows':
+      drawFaceEyebrows(ctx, index, l);
+      break;
+    case 'cheeks':
+      drawFaceCheeks(ctx, index, l);
+      break;
+  }
+  return canvas;
+}
+
 /**
  * Draws a character-specific face onto a transparent canvas. The canvas is
  * consumed by createCharacterFace() as a THREE.CanvasTexture.
+ *
+ * When the preset has a `face` config (editor-driven), the composable
+ * renderer is used. Otherwise falls through to the hand-tuned legacy
+ * faces for the 8 built-in presets.
  */
 function drawCharacterFace(
   preset: MinifigPreset,
   size: number
 ): HTMLCanvasElement {
+  // Editor-driven composable face
+  if (preset.face) {
+    return drawComposableFace(preset.face, size);
+  }
+
+  // Legacy per-preset faces (preserved for the 8 built-in presets)
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;

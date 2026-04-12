@@ -14,6 +14,93 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!-- Vertical icon bar on the very left edge — quick navigation /
+         tools strip. Visible on tablet+desktop, hidden on mobile (the
+         bottom drawer covers everything there). -->
+    <nav id="icon-bar" class="icon-bar" aria-label="도구 모음">
+      <!-- Logo: filled by ui.ts on startup with Phosphor "lego-thin" -->
+      <button id="iconbar-logo" class="icon-bar-logo" title="레고 블록 빌더"></button>
+      <div class="icon-bar-divider"></div>
+
+      <!-- Block categories — each switches the sidebar panel -->
+      <!-- 블록 (basic bricks) — PiLegoThin -->
+      <button class="icon-bar-btn active" title="블록" data-panel="basic">
+        <svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+          <path d="M241.79,76.42,194.37,52.71C189.84,42.92,176.36,36,160,36c-20.19,0-36,10.54-36,24a17.55,17.55,0,0,0,2.2,8.43L101.65,80.7A49.17,49.17,0,0,0,80,76c-20.19,0-36,10.54-36,24a17.55,17.55,0,0,0,2.2,8.43l-32,16A4,4,0,0,0,12,128v64a4,4,0,0,0,2.21,3.58l64,32a4,4,0,0,0,3.58,0l160-80A4,4,0,0,0,244,144V80A4,4,0,0,0,241.79,76.42ZM160,44c15.18,0,28,7.33,28,16s-12.82,16-28,16-28-7.33-28-16S144.82,44,160,44ZM131.43,74.76C138,80.41,148.23,84,160,84c19,0,34.09-9.32,35.83-21.61L231.06,80,80,155.53,24.94,128l26.49-13.24C58,120.41,68.23,124,80,124c20.19,0,36-10.54,36-24,0-5.34-2.49-10.21-6.75-14.15ZM80,84c15.18,0,28,7.33,28,16s-12.82,16-28,16c-10.49,0-19.85-3.5-24.63-8.52-.09-.12-.19-.21-.28-.31A10.7,10.7,0,0,1,52,100C52,91.33,64.82,84,80,84ZM20,134.47l56,28v55.06l-56-28Zm64,83.06V162.47l152-76v55.06Z"/>
+        </svg>
+      </button>
+
+      <!-- 모양 (shapes) — GrSteps -->
+      <button class="icon-bar-btn" title="모양" data-panel="shape">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 20h5v-4h5v-4h5v-4h5V4"/>
+        </svg>
+      </button>
+
+      <!-- 부품 (parts) — BsDoorOpen -->
+      <button class="icon-bar-btn" title="부품" data-panel="part">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8.5 10c-.276 0-.5-.448-.5-1s.224-1 .5-1 .5.448.5 1-.224 1-.5 1"/>
+          <path d="M10.828.122A.5.5 0 0 1 11 .5V1h.5A1.5 1.5 0 0 1 13 2.5V15h1.5a.5.5 0 0 1 0 1h-13a.5.5 0 0 1 0-1H3V1.5a.5.5 0 0 1 .43-.495l7-1a.5.5 0 0 1 .398.117M11.5 2H11v13h1V2.5a.5.5 0 0 0-.5-.5M4 1.934V15h6V1.077z"/>
+        </svg>
+      </button>
+
+      <!-- 특수 (special) — FaArchway -->
+      <button class="icon-bar-btn" title="특수" data-panel="special">
+        <svg viewBox="0 0 576 512" fill="currentColor" aria-hidden="true">
+          <path d="M0 0C0-17.7 14.3-32 32-32h512c17.7 0 32 14.3 32 32v448c0 17.7-14.3 32-32 32h-96c-17.7 0-32-14.3-32-32V304c0-61.9-50.1-112-112-112s-112 50.1-112 112v144c0 17.7-14.3 32-32 32H32C14.3 480 0 465.7 0 448V0z"/>
+        </svg>
+      </button>
+
+      <!-- 놀이터 (playground) — GiCarousel -->
+      <button class="icon-bar-btn" title="놀이터" data-panel="playground">
+        <svg viewBox="0 0 512 512" fill="currentColor" aria-hidden="true">
+          <path d="M256 16c-8.832 0-16 7.168-16 16v32h32V32c0-8.832-7.168-16-16-16zm-96 64c-17.664 0-32 14.336-32 32v64c0 17.664 14.336 32 32 32h192c17.664 0 32-14.336 32-32v-64c0-17.664-14.336-32-32-32H160zm-48 160l-48 112h48v80h32v-80h16V240h-48zm144 0v112h-16v80h32v-80h16V240h-32zm144 0h-48v112h16v80h32v-80h48L400 240zM160 96h192v64H160V96z"/>
+        </svg>
+      </button>
+
+      <!-- 캐릭터 (character) — PiLegoSmileyLight -->
+      <button class="icon-bar-btn" title="캐릭터" data-panel="character">
+        <svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+          <path d="M100,122a10,10,0,1,1,10-10A10,10,0,0,1,100,122Zm56-20a10,10,0,1,0,10,10A10,10,0,0,0,156,102Zm-3.2,44.92a47,47,0,0,1-49.6,0,6,6,0,0,0-6.4,10.16,59,59,0,0,0,62.4,0,6,6,0,1,0-6.4-10.16ZM214,80v96a30.05,30.05,0,0,1-24,29.4V224a14,14,0,0,1-14,14H80a14,14,0,0,1-14-14V205.4A30.05,30.05,0,0,1,42,176V80A30,30,0,0,1,72,50H90V32a14,14,0,0,1,14-14h48a14,14,0,0,1,14,14V50h18A30,30,0,0,1,214,80ZM102,50h52V32a2,2,0,0,0-2-2H104a2,2,0,0,0-2,2Zm76,174V206H78v18a2,2,0,0,0,2,2h96A2,2,0,0,0,178,224ZM202,80a18,18,0,0,0-18-18H72A18,18,0,0,0,54,80v96a18,18,0,0,0,18,18H184a18,18,0,0,0,18-18Z"/>
+        </svg>
+      </button>
+
+      <div class="icon-bar-divider"></div>
+
+      <!-- 환경 (environment) — sunrise (FiSunrise) -->
+      <button class="icon-bar-btn" title="환경" data-panel="env">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M17 18a5 5 0 0 0-10 0"/>
+          <line x1="12" y1="9" x2="12" y2="2"/>
+          <line x1="4.22" y1="10.22" x2="5.64" y2="11.64"/>
+          <line x1="1" y1="18" x2="3" y2="18"/>
+          <line x1="21" y1="18" x2="23" y2="18"/>
+          <line x1="18.36" y1="11.64" x2="19.78" y2="10.22"/>
+          <line x1="23" y1="22" x2="1" y2="22"/>
+          <polyline points="8 6 12 2 16 6"/>
+        </svg>
+      </button>
+
+      <div class="icon-bar-spacer"></div>
+
+      <!-- Play — triangle (toggles to a stop square in JS) -->
+      <button class="icon-bar-btn" id="iconbar-play" title="플레이" data-action="play">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M8 5.5v13l11-6.5L8 5.5z"/>
+        </svg>
+      </button>
+
+      <!-- Help -->
+      <button class="icon-bar-btn" id="iconbar-help" title="도움말" data-action="help">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 4"/>
+          <circle cx="12" cy="17.2" r="0.6" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+    </nav>
+
     <aside id="sidebar">
       <!-- Mobile-only drawer handle (always visible when collapsed).
            The drag indicator is the gesture affordance — tap anywhere on
@@ -28,60 +115,114 @@
 
       <header class="sidebar-header">
         <div class="brand">
-          <div class="brand-icon">🧱</div>
           <div class="brand-text">
-            <h1>레고 빌더</h1>
+            <h1 id="panel-title">블록</h1>
             <p class="brand-sub">Block Studio</p>
           </div>
-          <button id="help-toggle" class="icon-btn" title="도움말">?</button>
+          <div class="header-actions">
+            <div class="row mode-row">
+              <button id="mode-place" class="mode-btn">설치</button>
+              <button id="mode-remove" class="mode-btn">제거</button>
+            </div>
+            <button id="play" class="play-btn-compact" title="플레이">▶</button>
+            <button id="help-toggle" class="icon-btn" title="도움말">?</button>
+          </div>
         </div>
       </header>
 
-      <div class="primary-actions">
-        <button id="play" class="play-btn">▶ 플레이</button>
-        <div class="row mode-row">
-          <button id="mode-place" class="mode-btn">설치</button>
-          <button id="mode-remove" class="mode-btn">제거</button>
-        </div>
+      <!-- ===== Block category panels (basic/shape/part/special/playground/character) ===== -->
+      <div id="panel-blocks" class="sidebar-panel active">
+        <div id="types" class="type-grid"></div>
+
+        <section class="panel" id="properties">
+          <div class="property" id="color-panel">
+            <label class="property-label">색상</label>
+            <div id="colors" class="row wrap"></div>
+          </div>
+
+          <div class="property" id="size-panel">
+            <label class="property-label property-label-row">
+              <span>크기</span>
+              <button id="rotate" title="블록 회전 (Tab / 우클릭)">
+                ↻ <span id="rot-label">0°</span>
+              </button>
+            </label>
+            <div id="sizes" class="row wrap"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title"><span>스터드 추가</span></div>
+          <button id="add-baseplate" class="add-tile-btn">＋ 스터드 추가</button>
+          <p class="add-tile-hint">
+            베이스플레이트 옆에 빈 슬롯이 나타납니다. 원하는 슬롯을 클릭하면 그 자리에 새 스터드 바닥판이 생깁니다.
+          </p>
+        </section>
       </div>
 
-      <section class="panel library">
-        <div class="section-title"><span>블록 라이브러리</span></div>
-        <nav id="library-tabs" class="library-tabs"></nav>
-        <div id="types" class="type-grid"></div>
-      </section>
+      <!-- ===== Environment panel ===== -->
+      <div id="panel-env" class="sidebar-panel">
+        <section class="panel">
+          <div class="section-title"><span>환경</span></div>
+          <div id="environments" class="row wrap"></div>
+        </section>
 
-      <section class="panel" id="properties">
-        <div class="section-title"><span>속성</span></div>
+        <section class="panel">
+          <div class="section-title"><span>시간 / 태양</span></div>
 
-        <div class="property" id="color-panel">
-          <label class="property-label">색상</label>
-          <div id="colors" class="row wrap"></div>
-        </div>
+          <div class="time-control">
+            <div class="slider-row-label">
+              <span>시간</span>
+              <span id="time-label" class="slider-value">12:00</span>
+              <span id="time-phase" class="time-phase">정오</span>
+            </div>
+            <input
+              id="time-slider"
+              class="time-slider"
+              type="range"
+              min="0"
+              max="1440"
+              step="5"
+              value="720"
+              aria-label="시간"
+            />
+          </div>
 
-        <div class="property" id="size-panel">
-          <label class="property-label property-label-row">
-            <span>크기</span>
-            <button id="rotate" title="블록 회전 (Tab / 우클릭)">
-              ↻ <span id="rot-label">0°</span>
-            </button>
-          </label>
-          <div id="sizes" class="row wrap"></div>
-        </div>
-      </section>
+          <div class="time-control">
+            <div class="slider-row-label">
+              <span>태양 방위</span>
+              <span id="azimuth-label" class="slider-value">0°</span>
+            </div>
+            <input
+              id="azimuth-slider"
+              class="azimuth-slider"
+              type="range"
+              min="0"
+              max="360"
+              step="1"
+              value="0"
+              aria-label="태양 방위"
+            />
+          </div>
 
-      <section class="panel">
-        <div class="section-title"><span>스터드 추가</span></div>
-        <button id="add-baseplate" class="add-tile-btn">＋ 스터드 추가</button>
-        <p class="add-tile-hint">
-          베이스플레이트 옆에 빈 슬롯이 나타납니다. 원하는 슬롯을 클릭하면 그 자리에 새 스터드 바닥판이 생깁니다.
-        </p>
-      </section>
-
-      <section class="panel">
-        <div class="section-title"><span>환경</span></div>
-        <div id="environments" class="row wrap"></div>
-      </section>
+          <div class="time-control">
+            <div class="slider-row-label">
+              <span>태양 강도</span>
+              <span id="intensity-label" class="slider-value">×1.0</span>
+            </div>
+            <input
+              id="intensity-slider"
+              class="intensity-slider"
+              type="range"
+              min="0"
+              max="200"
+              step="5"
+              value="100"
+              aria-label="태양 강도"
+            />
+          </div>
+        </section>
+      </div>
 
       <footer class="sidebar-footer">
         <button id="clear">전체 지우기</button>
@@ -138,6 +279,61 @@
       <div class="play-hint">
         <kbd>WASD</kbd> 이동 · <kbd>Shift</kbd> 달리기 · <kbd>Space</kbd> 점프 ·
         <kbd>V</kbd> 시점 전환 · <kbd>9</kbd> 휘파람 · <kbd>ESC</kbd> 종료
+      </div>
+    </div>
+
+    <!-- Full-screen character editor overlay — covers sidebar + viewer.
+         Split into a large 3D preview (left / top on mobile) and a
+         scrollable controls panel (right / bottom on mobile). -->
+    <div id="char-editor" class="char-editor hidden">
+      <div class="char-editor-preview-area">
+        <canvas id="char-editor-preview" width="400" height="500"></canvas>
+      </div>
+      <div class="char-editor-controls">
+        <div class="char-editor-header">
+          <span>캐릭터 에디터</span>
+          <button id="char-editor-close" class="icon-btn" aria-label="닫기">×</button>
+        </div>
+
+        <div class="ce-group">
+          <span class="ce-group-title">색상</span>
+          <div class="ce-color-row">
+            <label class="char-editor-label">피부색</label>
+            <input id="ce-skin" type="color" value="#f5cd30" class="ce-color" />
+          </div>
+          <div class="ce-color-row">
+            <label class="char-editor-label">상의색</label>
+            <input id="ce-shirt" type="color" value="#c4281c" class="ce-color" />
+          </div>
+          <div class="ce-color-row">
+            <label class="char-editor-label">하의색</label>
+            <input id="ce-pants" type="color" value="#0d69ac" class="ce-color" />
+          </div>
+        </div>
+
+        <div class="ce-group">
+          <span class="ce-group-title">얼굴</span>
+          <div class="char-editor-section"><span class="char-editor-label">눈</span><div id="ce-eyes" class="ce-strip"></div></div>
+          <div class="char-editor-section"><span class="char-editor-label">눈썹</span><div id="ce-eyebrows" class="ce-strip"></div></div>
+          <div class="char-editor-section"><span class="char-editor-label">코</span><div id="ce-nose" class="ce-strip"></div></div>
+          <div class="char-editor-section"><span class="char-editor-label">입</span><div id="ce-mouth" class="ce-strip"></div></div>
+          <div class="char-editor-section"><span class="char-editor-label">볼</span><div id="ce-cheeks" class="ce-strip"></div></div>
+        </div>
+
+        <div class="ce-group">
+          <span class="ce-group-title">머리</span>
+          <div class="char-editor-section"><span class="char-editor-label">머리카락</span><div id="ce-hair" class="ce-strip"></div></div>
+          <div class="char-editor-section"><span class="char-editor-label">모자</span><div id="ce-hat" class="ce-strip"></div></div>
+          <div class="ce-color-row">
+            <label class="char-editor-label">머리/모자 색</label>
+            <input id="ce-headwear-color" type="color" value="#3b2415" class="ce-color" />
+          </div>
+        </div>
+
+        <div class="char-editor-actions">
+          <button id="ce-apply" class="ce-apply-btn">적용</button>
+          <button id="ce-reset" class="ce-reset-btn">초기화</button>
+        </div>
       </div>
     </div>
 

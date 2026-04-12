@@ -1,20 +1,48 @@
 import {
   BLOCK_TYPES,
   BOARD_SIZES,
-  CATEGORIES,
   COLORS,
+  DEFAULT_FACE,
   ENVIRONMENTS,
+  FACE_CHEEKS,
+  FACE_EYEBROWS,
+  FACE_EYES,
+  FACE_MOUTHS,
+  FACE_NOSES,
+  HAIR_STYLES,
+  HAT_STYLES,
   MINIFIG_PRESETS,
   SIZES,
 } from './config';
-import type { BlockCategory, BlockType } from './config';
+import type { BlockCategory, BlockType, FaceConfig, HairStyle, HatStyle } from './config';
 import type { Game, Mode } from './game';
 import {
   renderBlockTypeThumbnail,
   renderMinifigPresetThumbnail,
 } from './thumbnails';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { drawFacePartPreview, createMinifigure } from './blocks';
+
+// Phosphor "lego-thin" — Vite ?raw import gives us the file contents as
+// a string we can inject directly into the icon-bar logo button. This
+// keeps the icon as a real SVG element (not an <img>) so currentColor
+// and CSS sizing still work.
+import legoThinSvg from '@phosphor-icons/core/assets/thin/lego-thin.svg?raw';
 
 const THUMBNAIL_COLOR = 0xd4534a;
+
+/** Maps icon-bar data-panel values to sidebar panel elements and
+ *  the corresponding panel title shown in the header. */
+const PANEL_TITLES: Record<string, string> = {
+  basic: '블록',
+  shape: '모양',
+  part: '부품',
+  special: '특수',
+  playground: '놀이터',
+  character: '캐릭터',
+  env: '환경',
+};
 
 export function buildUI(game: Game) {
   const sidebar = document.getElementById('sidebar')!;
@@ -29,7 +57,7 @@ export function buildUI(game: Game) {
     (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
   if (hasTouch) document.body.classList.add('touch-device');
 
-  // --- Play buttons (PC sidebar + mobile drawer handle) ---
+  // --- Play buttons (PC sidebar compact + mobile drawer handle) ---
   const playButtons = Array.from(
     document.querySelectorAll<HTMLButtonElement>('#play, #play-mobile')
   );
@@ -42,12 +70,16 @@ export function buildUI(game: Game) {
   ) as HTMLButtonElement;
   const syncPlay = (playing: boolean) => {
     playButtons.forEach((btn) => {
-      btn.textContent = playing ? '■ 빌드로 돌아가기' : '▶ Play';
+      // Mobile button gets full text; compact header button gets icon only
+      if (btn.id === 'play-mobile') {
+        btn.textContent = playing ? '■ 빌드로 돌아가기' : '▶ 플레이';
+      } else {
+        btn.textContent = playing ? '■' : '▶';
+      }
       btn.classList.toggle('playing', playing);
     });
     playOverlay.classList.toggle('active', playing);
     document.body.classList.toggle('playing', playing);
-    // Auto-collapse the mobile drawer whenever play mode starts
     if (playing) sidebar.classList.remove('expanded');
   };
   const syncViewMode = (mode: 'first' | 'third') => {
@@ -65,10 +97,10 @@ export function buildUI(game: Game) {
   });
   playButtons.forEach((btn) => {
     btn.addEventListener('click', (e) => {
-      e.stopPropagation(); // don't bubble up to drawer toggle handler
+      e.stopPropagation();
       if (game.isPlaying) game.stopPlay();
       else game.startPlay();
-      btn.blur(); // prevent Space from re-triggering the button during play
+      btn.blur();
     });
   });
   game.onPlayChange = syncPlay;
@@ -117,18 +149,109 @@ export function buildUI(game: Game) {
   game.onModeChange = syncMode;
   syncMode(game.mode);
 
-  // --- Block library (tabs + filtered grid) ---
-  const tabsNav = document.getElementById('library-tabs')!;
+  // --- Icon bar → sidebar panel switching ---
+  const panelBlocks = document.getElementById('panel-blocks')!;
+  const panelEnv = document.getElementById('panel-env')!;
+  const panelTitle = document.getElementById('panel-title')!;
   const typeGrid = document.getElementById('types')!;
-  const tabButtons = new Map<BlockCategory, HTMLButtonElement>();
   const typeButtons = new Map<BlockType, HTMLButtonElement>();
   const charButtons = new Map<string, HTMLButtonElement>();
 
+  // Which panel group is showing: 'blocks' (any block category) or 'env'
+  type PanelId = 'blocks' | 'env';
   let activeCategory: BlockCategory =
     BLOCK_TYPES.find((t) => t.type === game.blockType)?.category ?? 'basic';
 
-  /** Renders the block / character grid for the given category. Reused
-   *  whenever the active tab or character preset changes. */
+  function showPanel(panel: PanelId) {
+    panelBlocks.classList.toggle('active', panel === 'blocks');
+    panelEnv.classList.toggle('active', panel === 'env');
+  }
+
+  /** Wire a thumbnail button so a press-and-drag becomes a drag-place flow.
+   *  Touch: drag starts immediately (no hover state on mobile).
+   *  Mouse: drag starts after the pointer moves beyond a small threshold
+   *         so that a normal click still just selects the block type. */
+  const DRAG_THRESHOLD = 6; // px — must move this far before drag starts
+
+  function attachThumbnailDrag(btn: HTMLButtonElement, selectFn: () => void) {
+    // Suppress click when the interaction was a completed drag, so the
+    // block type doesn't get re-selected after commitThumbnailDrag.
+    let suppressClick = false;
+    btn.addEventListener('click', (e) => {
+      if (suppressClick) { suppressClick = false; e.preventDefault(); return; }
+      selectFn();
+    });
+
+    // Prevent the browser's native image-drag on the <img> inside the
+    // button — without this, mouse drag-and-drop never fires pointermove.
+    btn.addEventListener('dragstart', (e) => e.preventDefault());
+
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (game.isPlaying) return;
+      if (game.mode !== 'place') return;
+
+      const isTouch = e.pointerType === 'touch';
+
+      if (isTouch) {
+        // Touch: start drag immediately (existing behaviour)
+        e.preventDefault();
+        e.stopPropagation();
+        sidebar.classList.remove('expanded');
+        selectFn();
+        game.beginThumbnailDrag(e.clientX, e.clientY);
+      }
+
+      // Mouse: defer drag start until the pointer moves past the threshold.
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let dragStarted = isTouch; // touch starts immediately
+
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
+
+        if (!dragStarted) {
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+          // Passed threshold — begin drag
+          dragStarted = true;
+          selectFn();
+          game.beginThumbnailDrag(ev.clientX, ev.clientY);
+        }
+
+        ev.preventDefault();
+        game.updateThumbnailDrag(ev.clientX, ev.clientY);
+      };
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
+        ev.preventDefault();
+        cleanup();
+        if (dragStarted) {
+          suppressClick = true;
+          game.commitThumbnailDrag(ev.clientX, ev.clientY);
+        }
+      };
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
+        cleanup();
+        if (dragStarted) {
+          suppressClick = true;
+          game.cancelThumbnailDrag();
+        }
+      };
+      const cleanup = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onCancel);
+      };
+      document.addEventListener('pointermove', onMove, { passive: false });
+      document.addEventListener('pointerup', onUp, { passive: false });
+      document.addEventListener('pointercancel', onCancel);
+    });
+  }
+
+  /** Renders the block / character grid for the given category. */
   function renderGrid(cat: BlockCategory) {
     typeGrid.innerHTML = '';
     typeButtons.clear();
@@ -154,7 +277,7 @@ export function buildUI(game: Game) {
         label.textContent = preset.name;
         btn.appendChild(label);
 
-        btn.addEventListener('click', () => {
+        attachThumbnailDrag(btn, () => {
           game.setBlockType('minifig');
           game.setCharacter(preset);
         });
@@ -166,9 +289,6 @@ export function buildUI(game: Game) {
         charButtons.set(preset.id, btn);
       });
 
-      // Non-minifig characters (dog, future animals) — drawn after the
-      // minifig presets. Reuse the block thumbnail path so the button
-      // style matches the other character-tab tiles.
       BLOCK_TYPES.filter(
         (t) => t.category === 'character' && t.type !== 'minifig'
       ).forEach((t) => {
@@ -189,7 +309,7 @@ export function buildUI(game: Game) {
         label.textContent = t.label;
         btn.appendChild(label);
 
-        btn.addEventListener('click', () => game.setBlockType(t.type));
+        attachThumbnailDrag(btn, () => game.setBlockType(t.type));
         if (t.type === game.blockType) btn.classList.add('active');
 
         typeGrid.appendChild(btn);
@@ -206,7 +326,7 @@ export function buildUI(game: Game) {
         try {
           img.src = renderBlockTypeThumbnail(t.type, THUMBNAIL_COLOR);
         } catch {
-          /* fallback: no thumbnail */
+          /* fallback */
         }
         btn.appendChild(img);
 
@@ -214,7 +334,7 @@ export function buildUI(game: Game) {
         label.textContent = t.label;
         btn.appendChild(label);
 
-        btn.addEventListener('click', () => game.setBlockType(t.type));
+        attachThumbnailDrag(btn, () => game.setBlockType(t.type));
         if (t.type === game.blockType) btn.classList.add('active');
 
         typeGrid.appendChild(btn);
@@ -223,34 +343,32 @@ export function buildUI(game: Game) {
     }
   }
 
-  function setActiveCategory(cat: BlockCategory) {
-    activeCategory = cat;
-    tabButtons.forEach((btn, c) => btn.classList.toggle('active', c === cat));
-    renderGrid(cat);
-  }
+  // --- Icon bar button references (needed by setActiveCategory) ---
+  const iconBar = document.getElementById('icon-bar');
+  const iconBtns = iconBar
+    ? Array.from(iconBar.querySelectorAll<HTMLButtonElement>('.icon-bar-btn'))
+    : [];
 
-  // Build tab buttons from CATEGORIES (order is meaningful)
-  CATEGORIES.forEach((cat) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab-btn';
-    btn.dataset.category = cat.id;
-    btn.textContent = cat.label;
-    btn.addEventListener('click', () => {
-      if (activeCategory === cat.id) return;
-      setActiveCategory(cat.id);
-      // When entering a tab, auto-select its first member so the
-      // properties panel reflects something sensible.
-      if (cat.id === 'character') {
-        game.setBlockType('minifig');
-      } else {
-        const first = BLOCK_TYPES.find((t) => t.category === cat.id);
-        if (first) game.setBlockType(first.type);
+  /** Highlight the icon bar button matching the given panel id. */
+  function syncIconBar(panelId: string) {
+    iconBtns.forEach((b) => {
+      if (b.dataset.panel) {
+        b.classList.toggle('active', b.dataset.panel === panelId);
       }
     });
-    tabsNav.appendChild(btn);
-    tabButtons.set(cat.id, btn);
-  });
+  }
 
+  /** Switch to a block category: update icon bar highlight, panel title,
+   *  show the blocks panel, and render the grid. */
+  function setActiveCategory(cat: BlockCategory) {
+    activeCategory = cat;
+    panelTitle.textContent = PANEL_TITLES[cat] ?? cat;
+    showPanel('blocks');
+    renderGrid(cat);
+    syncIconBar(cat);
+  }
+
+  // Initial render
   setActiveCategory(activeCategory);
 
   // Disable color/size panels for blocks that don't honor them.
@@ -273,7 +391,7 @@ export function buildUI(game: Game) {
   };
 
   game.onBlockTypeChange = (type) => {
-    // Auto-switch the tab if the new block lives in a different category
+    // Auto-switch the icon bar panel if the new block lives in a different category
     const def = BLOCK_TYPES.find((t) => t.type === type);
     if (def && def.category !== activeCategory) {
       setActiveCategory(def.category);
@@ -387,6 +505,100 @@ export function buildUI(game: Game) {
     };
   }
 
+  // --- Time-of-day slider ---
+  // Slider value is in MINUTES (0..1440) for fine 5-minute steps. Game
+  // takes a 24h float, so we divide by 60 going in and reformat as
+  // HH:MM coming out.
+  const timeSlider = document.getElementById(
+    'time-slider'
+  ) as HTMLInputElement | null;
+  const timeLabel = document.getElementById('time-label');
+  const timePhase = document.getElementById('time-phase');
+  if (timeSlider) {
+    const formatTime = (t: number) => {
+      const mins = Math.round(t * 60);
+      const hh = Math.floor(mins / 60) % 24;
+      const mm = mins % 60;
+      return `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
+    };
+    const phaseFor = (t: number) => {
+      if (t < 5) return '심야';
+      if (t < 7) return '새벽';
+      if (t < 11) return '아침';
+      if (t < 13) return '정오';
+      if (t < 17) return '오후';
+      if (t < 19) return '저녁';
+      if (t < 22) return '밤';
+      return '심야';
+    };
+    const renderTime = (t: number) => {
+      if (timeLabel) timeLabel.textContent = formatTime(t);
+      if (timePhase) timePhase.textContent = phaseFor(t);
+    };
+    timeSlider.value = String(Math.round(game.getTimeOfDay() * 60));
+    renderTime(game.getTimeOfDay());
+    timeSlider.addEventListener('input', () => {
+      const t = parseInt(timeSlider.value, 10) / 60;
+      game.setTimeOfDay(t);
+    });
+    game.onTimeOfDayChange = (t) => {
+      const v = String(Math.round(t * 60));
+      if (timeSlider.value !== v) timeSlider.value = v;
+      renderTime(t);
+    };
+  }
+
+  // --- Sun azimuth slider (0..360°) ---
+  const azimuthSlider = document.getElementById(
+    'azimuth-slider'
+  ) as HTMLInputElement | null;
+  const azimuthLabel = document.getElementById('azimuth-label');
+  if (azimuthSlider) {
+    const renderAzimuth = (rad: number) => {
+      const deg = Math.round((rad * 180) / Math.PI);
+      if (azimuthLabel) azimuthLabel.textContent = `${deg}°`;
+    };
+    azimuthSlider.value = String(
+      Math.round((game.getSunAzimuth() * 180) / Math.PI)
+    );
+    renderAzimuth(game.getSunAzimuth());
+    azimuthSlider.addEventListener('input', () => {
+      const deg = parseInt(azimuthSlider.value, 10);
+      game.setSunAzimuth((deg * Math.PI) / 180);
+    });
+    game.onSunAzimuthChange = (rad) => {
+      const v = String(Math.round((rad * 180) / Math.PI));
+      if (azimuthSlider.value !== v) azimuthSlider.value = v;
+      renderAzimuth(rad);
+    };
+  }
+
+  // --- Sun intensity slider (0..2.0×) ---
+  // Slider stores ×100 so the integer step lands on whole percent
+  // values; the game treats it as a multiplier (1.0 = baseline).
+  const intensitySlider = document.getElementById(
+    'intensity-slider'
+  ) as HTMLInputElement | null;
+  const intensityLabel = document.getElementById('intensity-label');
+  if (intensitySlider) {
+    const renderIntensity = (m: number) => {
+      if (intensityLabel) intensityLabel.textContent = `×${m.toFixed(1)}`;
+    };
+    intensitySlider.value = String(
+      Math.round(game.getSunIntensityScale() * 100)
+    );
+    renderIntensity(game.getSunIntensityScale());
+    intensitySlider.addEventListener('input', () => {
+      const m = parseInt(intensitySlider.value, 10) / 100;
+      game.setSunIntensityScale(m);
+    });
+    game.onSunIntensityChange = (m) => {
+      const v = String(Math.round(m * 100));
+      if (intensitySlider.value !== v) intensitySlider.value = v;
+      renderIntensity(m);
+    };
+  }
+
   // --- Add baseplate tile mode toggle ---
   const addTileBtn = document.getElementById(
     'add-baseplate'
@@ -410,8 +622,7 @@ export function buildUI(game: Game) {
     if (confirm('모든 블록을 지울까요?')) game.clearAll();
   });
 
-  // Count is mirrored in the PC sidebar (#count, full "블록: N" label) and
-  // the mobile drawer handle pill (#count-mobile, just the number)
+  // Count is mirrored in two places: sidebar footer + mobile drawer pill.
   const countDesktop = document.getElementById('count');
   const countMobile = document.getElementById('count-mobile');
   game.onCountChange = (count) => {
@@ -443,4 +654,419 @@ export function buildUI(game: Game) {
     if (helpToggle && helpToggle.contains(target)) return;
     helpPopover.classList.add('hidden');
   });
+
+  // --- Left icon bar click handlers ---
+  if (iconBar) {
+    for (const btn of iconBtns) {
+      const panel = btn.dataset.panel;
+      const action = btn.dataset.action;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+
+        if (panel) {
+          if (panel === 'env') {
+            syncIconBar('env');
+            panelTitle.textContent = PANEL_TITLES.env;
+            showPanel('env');
+          } else {
+            const cat = panel as BlockCategory;
+            setActiveCategory(cat);
+            if (cat === 'character') {
+              game.setBlockType('minifig');
+            } else {
+              const first = BLOCK_TYPES.find((t) => t.category === cat);
+              if (first) game.setBlockType(first.type);
+            }
+          }
+        } else if (action) {
+          switch (action) {
+            case 'play':
+              if (game.isPlaying) game.stopPlay();
+              else game.startPlay();
+              break;
+            case 'help':
+              if (helpPopover) helpPopover.classList.toggle('hidden');
+              break;
+          }
+        }
+        btn.blur();
+      });
+    }
+
+    // Logo: inject the Phosphor lego-thin SVG
+    const logoBtn = document.getElementById('iconbar-logo');
+    if (logoBtn) {
+      logoBtn.innerHTML = legoThinSvg;
+      logoBtn.addEventListener('click', () => {
+        setActiveCategory('basic');
+        game.setBlockType('brick');
+      });
+    }
+
+    // Mirror the Play button visual state
+    const iconPlayBtn = document.getElementById(
+      'iconbar-play'
+    ) as HTMLButtonElement | null;
+    if (iconPlayBtn) {
+      const baseSyncPlay = game.onPlayChange;
+      game.onPlayChange = (playing: boolean) => {
+        baseSyncPlay(playing);
+        iconPlayBtn.textContent = playing ? '■' : '▶';
+        iconPlayBtn.classList.toggle('active', playing);
+      };
+    }
+  }
+
+  // =================================================================
+  //  Character editor panel
+  // =================================================================
+
+  const editorEl = document.getElementById('char-editor');
+  const editorPreviewCanvas = document.getElementById(
+    'char-editor-preview'
+  ) as HTMLCanvasElement | null;
+
+  if (editorEl && editorPreviewCanvas) {
+    // --- Editor state (local copy, applied to game on "적용") ---
+    const editorFace: FaceConfig = { ...DEFAULT_FACE };
+    let editorHairStyle: HairStyle = 'none';
+    let editorHatStyle: HatStyle = 'none';
+    let editorHairColor = 0x3b2415;
+    let editorHatColor = 0x333333;
+    let editorSkinHex = 0xf5cd30;
+    let editorShirtHex = 0xc4281c;
+    let editorPantsHex = 0x0d69ac;
+
+    // --- 3D preview with OrbitControls (draggable + auto-rotate) ---
+    const previewRenderer = new THREE.WebGLRenderer({
+      canvas: editorPreviewCanvas,
+      alpha: true,
+      antialias: true,
+    });
+    previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Actual render size is driven by the CSS layout via ResizeObserver.
+    previewRenderer.setSize(
+      editorPreviewCanvas.clientWidth,
+      editorPreviewCanvas.clientHeight,
+      false
+    );
+    previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    previewRenderer.toneMappingExposure = 1.1;
+    const previewScene = new THREE.Scene();
+    previewScene.background = new THREE.Color(0xdfe2e8);
+    const previewCamera = new THREE.PerspectiveCamera(
+      32,
+      editorPreviewCanvas.clientWidth / editorPreviewCanvas.clientHeight,
+      0.1,
+      100
+    );
+    // Frame the full body: camera at eye level, pulled back enough so
+    // the head (top ~4.8u) and feet (0) both fit with room to spare.
+    previewCamera.position.set(0, 2.8, 9);
+
+    // OrbitControls — orbit target at the minifig's center of mass,
+    // auto-rotate slowly so the user can inspect without dragging.
+    const previewControls = new OrbitControls(
+      previewCamera,
+      editorPreviewCanvas
+    );
+    previewControls.target.set(0, 2.4, 0);
+    previewControls.enableDamping = true;
+    previewControls.dampingFactor = 0.12;
+    previewControls.autoRotate = false;
+    previewControls.enableZoom = true;
+    previewControls.minDistance = 4;
+    previewControls.maxDistance = 18;
+    previewControls.enablePan = false;
+    previewControls.update();
+
+    // Lighting: key + fill + rim for a clean product-shot look.
+    const pKey = new THREE.DirectionalLight(0xfff6e6, 3.0);
+    pKey.position.set(4, 10, 6);
+    previewScene.add(pKey);
+    const pFill = new THREE.DirectionalLight(0xd0e0ff, 1.0);
+    pFill.position.set(-5, 4, -3);
+    previewScene.add(pFill);
+    const pAmb = new THREE.AmbientLight(0xffffff, 0.6);
+    previewScene.add(pAmb);
+
+    // Ground disc so the minifig isn't floating in void.
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0xc8cad0,
+      roughness: 0.9,
+    });
+    const ground = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.2, 2.2, 0.06, 32),
+      groundMat
+    );
+    ground.position.y = -0.03;
+    ground.receiveShadow = true;
+    previewScene.add(ground);
+
+    let previewMinifig: THREE.Group | null = null;
+    let editorOpen = false;
+
+    const refreshPreview = () => {
+      if (previewMinifig) {
+        previewScene.remove(previewMinifig);
+        previewMinifig = null;
+      }
+      previewMinifig = createMinifigure({
+        id: 'editor',
+        name: '커스텀',
+        shirtHex: editorShirtHex,
+        pantsHex: editorPantsHex,
+        headHex: editorSkinHex,
+        hatStyle: editorHatStyle,
+        hatColor: editorHatColor,
+        hairStyle: editorHairStyle,
+        hairColor: editorHairColor,
+        face: { ...editorFace },
+      });
+      previewScene.add(previewMinifig);
+    };
+
+    // Render loop — runs only while the editor is open.
+    const editorRenderLoop = () => {
+      if (!editorOpen) return;
+      requestAnimationFrame(editorRenderLoop);
+      previewControls.update();
+      previewRenderer.render(previewScene, previewCamera);
+    };
+
+    // Keep preview canvas sized to its CSS container.
+    const previewRO = new ResizeObserver(() => {
+      const w = editorPreviewCanvas.clientWidth;
+      const h = editorPreviewCanvas.clientHeight;
+      if (w === 0 || h === 0) return;
+      previewRenderer.setSize(w, h, false);
+      previewCamera.aspect = w / h;
+      previewCamera.updateProjectionMatrix();
+    });
+    previewRO.observe(editorPreviewCanvas);
+
+    // --- Color pickers ---
+    const skinPicker = document.getElementById('ce-skin') as HTMLInputElement;
+    const shirtPicker = document.getElementById('ce-shirt') as HTMLInputElement;
+    const pantsPicker = document.getElementById('ce-pants') as HTMLInputElement;
+    const hwColorPicker = document.getElementById(
+      'ce-headwear-color'
+    ) as HTMLInputElement;
+
+    const hex = (n: number) =>
+      '#' + n.toString(16).padStart(6, '0');
+
+    const syncColorPickers = () => {
+      skinPicker.value = hex(editorSkinHex);
+      shirtPicker.value = hex(editorShirtHex);
+      pantsPicker.value = hex(editorPantsHex);
+      hwColorPicker.value = hex(
+        editorHatStyle !== 'none' ? editorHatColor : editorHairColor
+      );
+    };
+
+    skinPicker.addEventListener('input', () => {
+      editorSkinHex = parseInt(skinPicker.value.slice(1), 16);
+      refreshPreview();
+    });
+    shirtPicker.addEventListener('input', () => {
+      editorShirtHex = parseInt(shirtPicker.value.slice(1), 16);
+      refreshPreview();
+    });
+    pantsPicker.addEventListener('input', () => {
+      editorPantsHex = parseInt(pantsPicker.value.slice(1), 16);
+      refreshPreview();
+    });
+    hwColorPicker.addEventListener('input', () => {
+      const c = parseInt(hwColorPicker.value.slice(1), 16);
+      if (editorHatStyle !== 'none') editorHatColor = c;
+      else editorHairColor = c;
+      refreshPreview();
+    });
+
+    // --- Face part strips ---
+    type FacePart = 'eyes' | 'nose' | 'mouth' | 'eyebrows' | 'cheeks';
+    const facePartMap: { part: FacePart; elId: string; catalog: readonly { id: number; label: string }[]; key: keyof FaceConfig }[] = [
+      { part: 'eyes', elId: 'ce-eyes', catalog: FACE_EYES, key: 'eyes' },
+      { part: 'nose', elId: 'ce-nose', catalog: FACE_NOSES, key: 'nose' },
+      { part: 'mouth', elId: 'ce-mouth', catalog: FACE_MOUTHS, key: 'mouth' },
+      { part: 'eyebrows', elId: 'ce-eyebrows', catalog: FACE_EYEBROWS, key: 'eyebrows' },
+      { part: 'cheeks', elId: 'ce-cheeks', catalog: FACE_CHEEKS, key: 'cheeks' },
+    ];
+
+    for (const { part, elId, catalog, key } of facePartMap) {
+      const strip = document.getElementById(elId);
+      if (!strip) continue;
+      const buttons: HTMLButtonElement[] = [];
+      catalog.forEach((entry) => {
+        const btn = document.createElement('button');
+        btn.className = 'ce-strip-btn';
+        btn.title = entry.label;
+        const canvas = drawFacePartPreview(part, entry.id, 48);
+        if (entry.id === 0 && part !== 'eyes') {
+          // "없음" entries look empty — show label instead
+          const span = document.createElement('span');
+          span.textContent = entry.label;
+          btn.appendChild(span);
+        } else {
+          btn.appendChild(canvas);
+        }
+        btn.addEventListener('click', () => {
+          editorFace[key] = entry.id;
+          buttons.forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          refreshPreview();
+        });
+        if (entry.id === editorFace[key]) btn.classList.add('active');
+        strip.appendChild(btn);
+        buttons.push(btn);
+      });
+    }
+
+    // --- Hair strip ---
+    const hairStrip = document.getElementById('ce-hair');
+    if (hairStrip) {
+      const hairBtns: HTMLButtonElement[] = [];
+      HAIR_STYLES.forEach((hs) => {
+        const btn = document.createElement('button');
+        btn.className = 'ce-strip-btn';
+        const span = document.createElement('span');
+        span.textContent = hs.label;
+        btn.appendChild(span);
+        btn.addEventListener('click', () => {
+          editorHairStyle = hs.id;
+          if (hs.id !== 'none') editorHatStyle = 'none';
+          hairBtns.forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          // deselect hat if hair picked
+          document
+            .querySelectorAll('#ce-hat .ce-strip-btn')
+            .forEach((b) => b.classList.remove('active'));
+          document
+            .querySelector('#ce-hat .ce-strip-btn')
+            ?.classList.add('active'); // "없음"
+          refreshPreview();
+        });
+        if (hs.id === editorHairStyle) btn.classList.add('active');
+        hairStrip.appendChild(btn);
+        hairBtns.push(btn);
+      });
+    }
+
+    // --- Hat strip ---
+    const hatStrip = document.getElementById('ce-hat');
+    if (hatStrip) {
+      const hatBtns: HTMLButtonElement[] = [];
+      HAT_STYLES.forEach((hs) => {
+        const btn = document.createElement('button');
+        btn.className = 'ce-strip-btn';
+        const span = document.createElement('span');
+        span.textContent = hs.label;
+        btn.appendChild(span);
+        btn.addEventListener('click', () => {
+          editorHatStyle = hs.id;
+          if (hs.id !== 'none') editorHairStyle = 'none';
+          hatBtns.forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          // deselect hair if hat picked
+          document
+            .querySelectorAll('#ce-hair .ce-strip-btn')
+            .forEach((b) => b.classList.remove('active'));
+          document
+            .querySelector('#ce-hair .ce-strip-btn')
+            ?.classList.add('active'); // "없음"
+          refreshPreview();
+        });
+        if (hs.id === editorHatStyle) btn.classList.add('active');
+        hatStrip.appendChild(btn);
+        hatBtns.push(btn);
+      });
+    }
+
+    // --- Open / close editor ---
+    const openEditor = () => {
+      // Load current character state into editor
+      const c = game.character;
+      editorSkinHex = c.headHex ?? 0xf5cd30;
+      editorShirtHex = c.shirtHex;
+      editorPantsHex = c.pantsHex;
+      editorHatStyle = c.hatStyle;
+      editorHatColor = c.hatColor ?? 0x333333;
+      editorHairStyle = c.hairStyle ?? 'none';
+      editorHairColor = c.hairColor ?? 0x3b2415;
+      if (c.face) {
+        Object.assign(editorFace, c.face);
+      } else {
+        Object.assign(editorFace, DEFAULT_FACE);
+      }
+      syncColorPickers();
+      editorEl.classList.remove('hidden');
+      refreshPreview();
+      // Start the render loop so orbit controls animate.
+      editorOpen = true;
+      editorRenderLoop();
+    };
+
+    const closeEditor = () => {
+      editorOpen = false;
+      editorEl.classList.add('hidden');
+    };
+
+    // "커스터마이즈" button added to the character preset area
+    // (We'll insert it dynamically after the character buttons)
+    const charSection = document.querySelector(
+      '[data-panel="character"], #types'
+    );
+    if (charSection) {
+      const customBtn = document.createElement('button');
+      customBtn.className = 'add-tile-btn';
+      customBtn.textContent = '✎ 캐릭터 커스터마이즈';
+      customBtn.style.marginTop = '8px';
+      customBtn.addEventListener('click', openEditor);
+      // Insert after the types grid (which holds character preset buttons)
+      const typesGrid = document.getElementById('types');
+      if (typesGrid) {
+        typesGrid.parentElement?.insertBefore(
+          customBtn,
+          typesGrid.nextSibling
+        );
+      }
+    }
+
+    document
+      .getElementById('char-editor-close')
+      ?.addEventListener('click', closeEditor);
+
+    // "적용" button — push editor state to game
+    document.getElementById('ce-apply')?.addEventListener('click', () => {
+      game.applyEditorCharacter({
+        id: 'custom',
+        name: '커스텀',
+        shirtHex: editorShirtHex,
+        pantsHex: editorPantsHex,
+        headHex: editorSkinHex,
+        hatStyle: editorHatStyle,
+        hatColor: editorHatColor,
+        hairStyle: editorHairStyle,
+        hairColor: editorHairColor,
+        face: { ...editorFace },
+        hideFace: false,
+      });
+      closeEditor();
+    });
+
+    // "초기화" button — reset to default
+    document.getElementById('ce-reset')?.addEventListener('click', () => {
+      Object.assign(editorFace, DEFAULT_FACE);
+      editorHairStyle = 'none';
+      editorHatStyle = 'none';
+      editorSkinHex = 0xf5cd30;
+      editorShirtHex = 0xc4281c;
+      editorPantsHex = 0x0d69ac;
+      editorHairColor = 0x3b2415;
+      editorHatColor = 0x333333;
+      syncColorPickers();
+      refreshPreview();
+    });
+  }
 }

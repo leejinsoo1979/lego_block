@@ -268,10 +268,12 @@ export function renderBlockTypeThumbnail(
       camera!.lookAt(0, 4.8, 0);
       break;
     case 'merrygoround':
-      // 10×10×7.2 — round disc with central pole, tall conical canopy,
-      // and 4 seats. Pulled back to fit the taller canopy in frame.
-      camera!.position.set(18, 14, 18);
-      camera!.lookAt(0, 3.2, 0);
+      // 16×16×12.8 — the biggest playground piece. Round platform,
+      // tall central pole, hub crown, and 6 minifig-scale swing seats
+      // hanging on hand-spaced chain pairs. Camera way back so the
+      // 16-stud diameter and 12.8-tall pole + finial all fit in frame.
+      camera!.position.set(34, 22, 34);
+      camera!.lookAt(0, 5.0, 0);
       break;
     default:
       camera!.position.set(3.8, 3.2, 3.8);
