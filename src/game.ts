@@ -233,6 +233,16 @@ export class Game {
    *  the bridge block is selected. Lets the user point at empty space
    *  (water / off-tile / gap between baseplates) to position a bridge. */
   private bridgePlane: THREE.Mesh | null = null;
+  /** Sharks swimming around the island environment. */
+  private sharks: {
+    group: THREE.Group;
+    angle: number;
+    speed: number;
+    radiusX: number;
+    radiusZ: number;
+    phase: number;
+    tailBone: THREE.Object3D;
+  }[] = [];
   // Map-extension mode — translucent tile-shaped "slots" appear at every
   // empty horizontal neighbor of an existing baseplate. The user clicks a
   // slot to add a real tile there.
@@ -305,6 +315,8 @@ export class Game {
   private playerAvatar: THREE.Group | null = null;
   private avatarYaw = 0; // facing direction in radians
   private walkTime = 0;  // accumulator for limb-swing animation
+  private swimTime = 0;  // accumulator for swim-stroke animation
+  private isSwimming = false;
   private thirdPersonDistance = 14;
   private wasMovingForJumpAnim = false;
 
@@ -1274,10 +1286,15 @@ export class Game {
     }
 
     const env = this.environment;
+    // Despawn sharks whenever environment changes; re-spawn below if island
+    this.despawnSharks();
+
     if (env.surroundType === 'none') return;
 
     if (env.surroundType === 'water') {
       this.surroundMesh = this.createWaterSurround(env);
+      // Spawn sharks for island environment
+      if (env.id === 'island') this.spawnSharks();
     } else if (env.surroundType === 'ground') {
       this.surroundMesh = this.createGroundSurround(env);
     }
@@ -1323,18 +1340,275 @@ export class Game {
 
   /** Large flat ground plane (sand / snow / etc.) extending 1000 units. */
   private createGroundSurround(env: EnvironmentDef): THREE.Mesh {
-    const geom = new THREE.PlaneGeometry(1000, 1000);
+    const isDesert = env.id === 'desert';
+    const segments = isDesert ? 256 : 1;
+    const geom = new THREE.PlaneGeometry(1000, 1000, segments, segments);
+
+    // Desert: displace vertices with layered sine waves to create
+    // rolling sand dunes. Amplitudes are small enough that they don't
+    // interfere with the baseplate area near the origin.
+    if (isDesert) {
+      const pos = geom.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        // Distance from center — keep the baseplate zone flat
+        const dist = Math.sqrt(x * x + y * y);
+        const fade = Math.min(1, Math.max(0, (dist - 30) / 40));
+        // Layered dunes at different scales
+        const h =
+          Math.sin(x * 0.012 + y * 0.008) * 3.5 +
+          Math.sin(x * 0.025 - y * 0.018) * 1.8 +
+          Math.sin(x * 0.06 + y * 0.05) * 0.6 +
+          Math.sin(x * 0.15 - y * 0.12) * 0.2;
+        pos.setZ(i, h * fade);
+      }
+      geom.computeVertexNormals();
+    }
+
+    // Desert: procedural canvas texture for sand grain + color variation
     const mat = new THREE.MeshStandardMaterial({
       color: env.surroundColor ?? 0xcccccc,
       roughness: env.surroundRoughness ?? 0.9,
       metalness: 0,
     });
+
+    if (isDesert) {
+      const texSize = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = texSize;
+      canvas.height = texSize;
+      const ctx = canvas.getContext('2d')!;
+      // Base sand fill
+      ctx.fillStyle = '#c99a5a';
+      ctx.fillRect(0, 0, texSize, texSize);
+      // Scatter fine sand grains
+      for (let i = 0; i < 40000; i++) {
+        const gx = Math.random() * texSize;
+        const gy = Math.random() * texSize;
+        const brightness = 140 + Math.random() * 80;
+        const r = brightness + 20;
+        const g = brightness - 10;
+        const b = brightness - 50;
+        ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+        ctx.fillRect(gx, gy, 1 + Math.random() * 1.5, 1 + Math.random() * 1.5);
+      }
+      // Broader warm patches
+      for (let i = 0; i < 200; i++) {
+        const px = Math.random() * texSize;
+        const py = Math.random() * texSize;
+        const pr = 4 + Math.random() * 12;
+        ctx.globalAlpha = 0.08 + Math.random() * 0.08;
+        ctx.fillStyle = Math.random() > 0.5 ? '#b8842e' : '#ddb87a';
+        ctx.beginPath();
+        ctx.arc(px, py, pr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(80, 80);
+      mat.map = tex;
+      mat.needsUpdate = true;
+    }
+
     const ground = new THREE.Mesh(geom, mat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.05;
     ground.receiveShadow = true;
     ground.userData.isSurround = true;
     return ground;
+  }
+
+  // ------------------------------------------------------------------
+  //  Sharks (island environment only)
+  // ------------------------------------------------------------------
+
+  /** Build a single procedural shark from basic Three.js geometry. */
+  private createShark(): THREE.Group {
+    const group = new THREE.Group();
+    const bodyColor = 0x5a6a7a;
+    const bellyColor = 0xc8ccd0;
+
+    // --- Body (tapered ellipsoid via scaled sphere) ---
+    const bodyGeom = new THREE.SphereGeometry(1, 16, 10);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      roughness: 0.6,
+      metalness: 0.1,
+    });
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    body.scale.set(0.7, 0.45, 2.0); // wide, flat, long
+    group.add(body);
+
+    // --- Belly (slightly smaller, white underside) ---
+    const bellyGeom = new THREE.SphereGeometry(0.92, 14, 8, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5);
+    const bellyMat = new THREE.MeshStandardMaterial({
+      color: bellyColor,
+      roughness: 0.7,
+      metalness: 0,
+    });
+    const belly = new THREE.Mesh(bellyGeom, bellyMat);
+    belly.scale.set(0.7, 0.4, 1.9);
+    belly.rotation.x = Math.PI;
+    belly.position.y = -0.05;
+    group.add(belly);
+
+    // --- Dorsal fin (triangle via extruded shape) ---
+    const finShape = new THREE.Shape();
+    finShape.moveTo(0, 0);
+    finShape.lineTo(-0.15, 0.8);
+    finShape.lineTo(0.5, 0);
+    finShape.closePath();
+    const finGeom = new THREE.ExtrudeGeometry(finShape, {
+      depth: 0.06,
+      bevelEnabled: false,
+    });
+    const finMat = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      roughness: 0.5,
+      metalness: 0.1,
+    });
+    const dorsalFin = new THREE.Mesh(finGeom, finMat);
+    dorsalFin.position.set(-0.03, 0.4, -0.2);
+    group.add(dorsalFin);
+
+    // --- Tail fin (two flattened triangles in a V) ---
+    const tailPivot = new THREE.Group();
+    tailPivot.position.set(0, 0, -2.0);
+    const tailShape = new THREE.Shape();
+    tailShape.moveTo(0, 0);
+    tailShape.lineTo(-0.05, 0.6);
+    tailShape.lineTo(0.6, 0);
+    tailShape.closePath();
+    const tailGeom = new THREE.ExtrudeGeometry(tailShape, {
+      depth: 0.04,
+      bevelEnabled: false,
+    });
+    // Upper lobe
+    const tailUp = new THREE.Mesh(tailGeom, finMat);
+    tailUp.position.set(-0.02, 0.05, 0);
+    tailUp.rotation.z = 0.15;
+    tailPivot.add(tailUp);
+    // Lower lobe
+    const tailDown = new THREE.Mesh(tailGeom, finMat.clone());
+    tailDown.position.set(-0.02, -0.05, 0);
+    tailDown.rotation.z = -0.15;
+    tailDown.scale.y = -0.7;
+    tailPivot.add(tailDown);
+    group.add(tailPivot);
+    // Tag the tail pivot for animation
+    tailPivot.userData.isSharkTail = true;
+
+    // --- Pectoral fins (small flat triangles on each side) ---
+    const pectoralShape = new THREE.Shape();
+    pectoralShape.moveTo(0, 0);
+    pectoralShape.lineTo(-0.1, -0.5);
+    pectoralShape.lineTo(0.5, -0.1);
+    pectoralShape.closePath();
+    const pectoralGeom = new THREE.ExtrudeGeometry(pectoralShape, {
+      depth: 0.03,
+      bevelEnabled: false,
+    });
+    const pectL = new THREE.Mesh(pectoralGeom, finMat);
+    pectL.position.set(-0.6, -0.15, 0.4);
+    pectL.rotation.y = -0.3;
+    group.add(pectL);
+    const pectR = new THREE.Mesh(pectoralGeom, finMat);
+    pectR.position.set(0.6, -0.15, 0.4);
+    pectR.rotation.y = 0.3;
+    pectR.scale.x = -1;
+    group.add(pectR);
+
+    // --- Eyes (small dark spheres) ---
+    const eyeGeom = new THREE.SphereGeometry(0.06, 8, 8);
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    const eyeL = new THREE.Mesh(eyeGeom, eyeMat);
+    eyeL.position.set(-0.5, 0.12, 1.4);
+    group.add(eyeL);
+    const eyeR = new THREE.Mesh(eyeGeom, eyeMat);
+    eyeR.position.set(0.5, 0.12, 1.4);
+    group.add(eyeR);
+
+    // Scale the whole shark to world size (about 4-5 studs long)
+    group.scale.setScalar(1.2);
+
+    return group;
+  }
+
+  /** Spawn sharks for the island environment. */
+  private spawnSharks() {
+    this.despawnSharks();
+    const waterY = this.environment.waterLevel ?? -0.05;
+    const count = 3;
+    for (let i = 0; i < count; i++) {
+      const shark = this.createShark();
+      const angle = (i / count) * Math.PI * 2;
+      const radiusX = 35 + Math.random() * 20;
+      const radiusZ = 35 + Math.random() * 20;
+      const speed = 0.15 + Math.random() * 0.1;
+      // Position the shark so the dorsal fin pokes above water
+      shark.position.y = waterY - 0.15;
+      this.scene.add(shark);
+
+      // Find the tail pivot
+      let tailBone: THREE.Object3D = shark;
+      shark.traverse((c) => {
+        if (c.userData.isSharkTail) tailBone = c;
+      });
+
+      this.sharks.push({
+        group: shark,
+        angle,
+        speed,
+        radiusX,
+        radiusZ,
+        phase: Math.random() * Math.PI * 2,
+        tailBone,
+      });
+    }
+  }
+
+  /** Remove all sharks from the scene and dispose geometry. */
+  private despawnSharks() {
+    for (const s of this.sharks) {
+      this.scene.remove(s.group);
+      s.group.traverse((c) => {
+        if (c instanceof THREE.Mesh) {
+          c.geometry?.dispose?.();
+          const mat = c.material as THREE.Material | THREE.Material[];
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+          else mat?.dispose?.();
+        }
+      });
+    }
+    this.sharks = [];
+  }
+
+  /** Per-frame shark animation — patrol + tail wag + bobbing. */
+  private updateSharks(dt: number) {
+    const waterY = this.environment.waterLevel ?? -0.05;
+    const now = performance.now() * 0.001;
+    for (const s of this.sharks) {
+      s.angle += s.speed * dt;
+      const x = Math.cos(s.angle) * s.radiusX;
+      const z = Math.sin(s.angle) * s.radiusZ;
+      // Gentle bobbing
+      const bob = Math.sin(now * 1.5 + s.phase) * 0.08;
+      s.group.position.set(x, waterY - 0.15 + bob, z);
+
+      // Face movement direction (tangent of ellipse)
+      const tx = -Math.sin(s.angle) * s.radiusX;
+      const tz = Math.cos(s.angle) * s.radiusZ;
+      s.group.rotation.y = Math.atan2(tx, tz);
+
+      // Slight roll for realism
+      s.group.rotation.z = Math.sin(now * 0.8 + s.phase) * 0.06;
+
+      // Tail wag
+      s.tailBone.rotation.y = Math.sin(now * 4 + s.phase) * 0.35;
+    }
   }
 
   /** Toggle the "add baseplate" tile placement mode. When active, the cursor
@@ -2846,6 +3120,52 @@ export class Game {
     return boxes;
   }
 
+  /** Split the bridge into a thin walkable deck + two side railings so
+   *  the player walks on the deck surface, not on top of the railings. */
+  private bridgeCollisionBoxes(
+    obj: THREE.Object3D,
+    spec: { w: number; d: number; type?: BlockType }
+  ): THREE.Box3[] {
+    const k = Math.round(-obj.rotation.y / (Math.PI / 2));
+    const rotSwap = ((k % 2) + 2) % 2 === 1;
+    const baseW = rotSwap ? spec.d : spec.w;
+    const baseD = rotSwap ? spec.w : spec.d;
+
+    // Match createBridgeBlock in blocks.ts
+    const deckH = PLATE_HEIGHT; // 0.4 — the walkway slab
+    const railH = 2.0; // post height above deck
+    const railThk = 0.45; // corner-pillar thickness ≈ railing width
+
+    obj.updateMatrixWorld(true);
+    const boxes: THREE.Box3[] = [];
+
+    // 1) Deck slab — thin, full-width, walkable surface
+    const deckLocal = new THREE.Box3(
+      new THREE.Vector3(-baseW / 2, 0, -baseD / 2),
+      new THREE.Vector3(baseW / 2, deckH, baseD / 2)
+    );
+    deckLocal.applyMatrix4(obj.matrixWorld);
+    boxes.push(deckLocal);
+
+    // 2) Left railing wall
+    const leftLocal = new THREE.Box3(
+      new THREE.Vector3(-baseW / 2, deckH, -baseD / 2),
+      new THREE.Vector3(-baseW / 2 + railThk, deckH + railH, baseD / 2)
+    );
+    leftLocal.applyMatrix4(obj.matrixWorld);
+    boxes.push(leftLocal);
+
+    // 3) Right railing wall
+    const rightLocal = new THREE.Box3(
+      new THREE.Vector3(baseW / 2 - railThk, deckH, -baseD / 2),
+      new THREE.Vector3(baseW / 2, deckH + railH, baseD / 2)
+    );
+    rightLocal.applyMatrix4(obj.matrixWorld);
+    boxes.push(rightLocal);
+
+    return boxes;
+  }
+
   // ------------------------------------------------------------------
   //  Preview
   // ------------------------------------------------------------------
@@ -3371,6 +3691,16 @@ export class Game {
         }
         continue;
       }
+      // Bridge: decompose into a thin deck slab + two side railings.
+      // Without this, the single full-height AABB makes the player walk
+      // on top of the railings instead of the deck surface.
+      if (spec?.type === 'bridge') {
+        for (const box of this.bridgeCollisionBoxes(child, spec)) {
+          this.playAABBs.push(box);
+          this.playAABBDoorRefs.push(null);
+        }
+        continue;
+      }
       this.playAABBs.push(this.getBlockAABB(child));
       this.playAABBDoorRefs.push(spec?.type === 'door' ? child : null);
     }
@@ -3666,9 +3996,6 @@ export class Game {
     // cycle amplitude + body lean changes below make it *feel* like a
     // full-on sprint, not just "faster walking".
     const RUN_MULT = 2.4;
-    const SPEED = 6 * (this.moveKeys.run ? RUN_MULT : 1);
-    const GRAVITY = -22;
-    const JUMP = this.moveKeys.run ? 10.5 : 9;
     // Minifig footprint is 2×1 studs — the visible mesh (torso, arms,
     // shoulders) extends up to 1 unit from the player center. Using 0.45
     // lets arms/shoulders clip into walls and doorframes. 1.0 half-width
@@ -3678,6 +4005,16 @@ export class Game {
     // Both derived from the loaded GLB so they track its uniform scale.
     const BODY_H = getMinifigHeight() || 2.5;
     const EYE_HEIGHT = BODY_H * 0.92; // just below the top of the head/hat
+
+    // --- Swimming detection ---
+    const hasWater = this.environment.surroundType === 'water';
+    const waterY = hasWater ? (this.environment.waterLevel ?? -0.05) : -Infinity;
+    this.isSwimming = hasWater && this.playerPos.y <= waterY;
+
+    const SWIM_SPEED = 3.5;
+    const SPEED = this.isSwimming
+      ? SWIM_SPEED
+      : 6 * (this.moveKeys.run ? RUN_MULT : 1);
 
     // Horizontal input relative to camera facing
     const forward = new THREE.Vector3();
@@ -3698,13 +4035,33 @@ export class Game {
     this.playerVel.z = move.z * SPEED;
     const isWalking = move.lengthSq() > 0.001;
 
-    // Gravity
-    this.playerVel.y += GRAVITY * dt;
+    if (this.isSwimming) {
+      // --- Swimming physics ---
+      // Buoyancy pulls the player toward the swim surface (head above water).
+      const swimSurfaceY = waterY - BODY_H * 0.4;
+      const buoyancy = (swimSurfaceY - this.playerPos.y) * 8;
+      this.playerVel.y += buoyancy * dt;
+      // Dampen vertical oscillation
+      this.playerVel.y *= Math.max(0, 1 - 3 * dt);
 
-    // Jump (only if grounded)
-    if (this.moveKeys.jump && this.onGround) {
-      this.playerVel.y = JUMP;
+      // Space near a baseplate edge → climb up onto the plate
+      if (this.moveKeys.jump && this.tryClimbBaseplate(BODY_W, BODY_H)) {
+        // Successfully climbed — skip normal swim-up
+      } else {
+        // Space = swim upward, Shift = dive down
+        if (this.moveKeys.jump) this.playerVel.y += 6 * dt;
+        if (this.moveKeys.run) this.playerVel.y -= 6 * dt;
+      }
       this.onGround = false;
+    } else {
+      // --- Normal land physics ---
+      const GRAVITY = -22;
+      const JUMP = this.moveKeys.run ? 10.5 : 9;
+      this.playerVel.y += GRAVITY * dt;
+      if (this.moveKeys.jump && this.onGround) {
+        this.playerVel.y = JUMP;
+        this.onGround = false;
+      }
     }
 
     // Auto step-up: small bumps (tiles, plates, even a single brick) should
@@ -3741,17 +4098,11 @@ export class Game {
 
     // --- Y axis ---
     let newY = this.playerPos.y + this.playerVel.y * dt;
-    if (newY < 0) {
-      newY = 0;
-      this.playerVel.y = 0;
-      this.onGround = true;
-    }
     if (!this.collides(this.playerPos.x, newY, this.playerPos.z, BODY_W, BODY_H)) {
       this.playerPos.y = newY;
       // Ground test: sample a hair below current position
       const below = this.playerPos.y - 0.02;
       this.onGround =
-        below <= 0 ||
         this.collides(this.playerPos.x, below, this.playerPos.z, BODY_W, BODY_H);
     } else {
       if (this.playerVel.y < 0) {
@@ -3769,13 +4120,17 @@ export class Game {
 
     // No XZ clamp now that the map can be extended in any direction with
     // tiles — the player can walk off the edge and fall. The respawn safety
-    // net catches them.
+    // net catches them when they drop below the water / void.
 
-    // Safety net: if something goes sideways and we fall forever, respawn
-    if (this.playerPos.y < -20) {
+    // Safety net: respawn when falling far below the world. In water
+    // environments, allow deeper swimming before forcing a respawn.
+    const respawnFloor = hasWater ? waterY - 10 : -5;
+    if (this.playerPos.y < respawnFloor) {
       const spawnZ = Math.min(15, this.tileSize / 2 - 5);
       this.playerPos.set(0, 0, spawnZ);
       this.playerVel.set(0, 0, 0);
+      this.onGround = false;
+      this.isSwimming = false;
     }
 
     // ----- Avatar update -----
@@ -3805,16 +4160,6 @@ export class Game {
       const isRunning =
         this.moveKeys.run && isWalking && this.onGround;
 
-      // Walking animation: hip-pivoted leg swing + opposite-phase arm swing.
-      // Pivots are created in createMinifigure (blocks.ts) so rotations
-      // happen at the hip / shoulder rather than the mesh center. Running
-      // uses a faster cycle, a larger stride, and more arm swing.
-      if (isWalking && this.onGround) {
-        this.walkTime += dt * (isRunning ? 15 : 9);
-      }
-      const swingAmp = isRunning ? 0.7 : 0.32;
-      const swing =
-        isWalking && this.onGround ? Math.sin(this.walkTime) * swingAmp : 0;
       const parts = this.playerAvatar.userData.parts as
         | {
             rightLeg?: THREE.Group | null;
@@ -3823,41 +4168,78 @@ export class Game {
             leftArm?: THREE.Group | null;
           }
         | undefined;
-      if (parts) {
-        // Right leg forward ↔ left leg back
-        if (parts.rightLeg) parts.rightLeg.rotation.x = swing;
-        if (parts.leftLeg) parts.leftLeg.rotation.x = -swing;
-        // Arms swing opposite to legs, a bit bigger when sprinting
-        const armScale = isRunning ? 1.0 : 0.85;
-        if (parts.rightArm) parts.rightArm.rotation.x = -swing * armScale;
-        if (parts.leftArm) parts.leftArm.rotation.x = swing * armScale;
-      }
-      // Body bounce — the whole avatar rises/falls on every step. This
-      // is the ONLY reason the rigged shoulder pivots appear to move
-      // vertically during the walk cycle, because the pivots live
-      // inside the body group and inherit its Y. Keep bob for running
-      // (the extra motion reads as effort and doesn't look wrong
-      // against the big arm swing), but ZERO it for walking so the
-      // shoulder axis stays pinned while the arms swing.
-      const bobAmp = isRunning ? 0.1 : 0;
-      const bob =
-        isWalking && this.onGround
-          ? Math.abs(Math.sin(this.walkTime)) * bobAmp
-          : 0;
-      this.playerAvatar.position.y += bob;
 
-      // Forward body lean when sprinting — gives that real "running"
-      // silhouette instead of "walking faster". Smoothly eases in/out so
-      // starting/stopping Shift doesn't snap the body.
-      // With YXZ rotation order the local X axis (after yaw) maps to the
-      // character's right, and a POSITIVE rotation.x tilts the head toward
-      // the character's forward direction — i.e. a forward lean.
       this.playerAvatar.rotation.order = 'YXZ';
-      const targetLean = isRunning ? 0.28 : 0; // ~16° forward
-      const currentLean = this.playerAvatar.rotation.x;
-      const leanDelta = targetLean - currentLean;
-      this.playerAvatar.rotation.x =
-        currentLean + leanDelta * Math.min(1, dt * 8);
+
+      if (this.isSwimming) {
+        // ---- Swimming animation (freestyle / front crawl) ----
+        // Arms rotate 360° like a windmill; legs flutter kick.
+        const swimRate = isWalking ? 5 : 2.5;
+        this.swimTime += dt * swimRate;
+
+        if (parts) {
+          // Arms: freestyle crawl stroke — large alternating swing.
+          // Uses the existing shoulder pivot (no child position hacks).
+          // Each arm sweeps forward (overhead) then pulls back, offset
+          // by half a cycle so they alternate like a real crawl.
+          const armAmp = 1.2; // ~69 degrees each way
+          const rPhase = Math.sin(this.swimTime);
+          const lPhase = Math.sin(this.swimTime + Math.PI);
+          // Asymmetric shape: fast pull (negative), slow recovery (positive)
+          const shapeStroke = (t: number) =>
+            t > 0 ? t * armAmp : t * armAmp * 0.7;
+          if (parts.rightArm)
+            parts.rightArm.rotation.x = shapeStroke(rPhase);
+          if (parts.leftArm)
+            parts.leftArm.rotation.x = shapeStroke(lPhase);
+
+          // Legs: flutter kick
+          const legAmp = 0.45;
+          const legKick = Math.sin(this.swimTime * 2.5) * legAmp;
+          if (parts.rightLeg) parts.rightLeg.rotation.x = legKick;
+          if (parts.leftLeg) parts.leftLeg.rotation.x = -legKick;
+        }
+
+        // Body tilts forward (~70°) so the character is nearly horizontal
+        const swimLean = isWalking ? 1.2 : 0.6;
+        const currentLean = this.playerAvatar.rotation.x;
+        const leanDelta = swimLean - currentLean;
+        this.playerAvatar.rotation.x =
+          currentLean + leanDelta * Math.min(1, dt * 6);
+
+        // Gentle vertical bob in the water
+        const waterBob = Math.sin(this.swimTime * 0.8) * 0.08;
+        this.playerAvatar.position.y += waterBob;
+      } else {
+        // ---- Walking / running animation ----
+        this.swimTime = 0;
+        if (isWalking && this.onGround) {
+          this.walkTime += dt * (isRunning ? 15 : 9);
+        }
+        const swingAmp = isRunning ? 0.7 : 0.32;
+        const swing =
+          isWalking && this.onGround ? Math.sin(this.walkTime) * swingAmp : 0;
+        if (parts) {
+          if (parts.rightLeg) parts.rightLeg.rotation.x = swing;
+          if (parts.leftLeg) parts.leftLeg.rotation.x = -swing;
+          const armScale = isRunning ? 1.0 : 0.85;
+          if (parts.rightArm) parts.rightArm.rotation.x = -swing * armScale;
+          if (parts.leftArm) parts.leftArm.rotation.x = swing * armScale;
+        }
+        const bobAmp = isRunning ? 0.1 : 0;
+        const bob =
+          isWalking && this.onGround
+            ? Math.abs(Math.sin(this.walkTime)) * bobAmp
+            : 0;
+        this.playerAvatar.position.y += bob;
+
+        const targetLean = isRunning ? 0.28 : 0;
+        const currentLean = this.playerAvatar.rotation.x;
+        const leanDelta = targetLean - currentLean;
+        this.playerAvatar.rotation.x =
+          currentLean + leanDelta * Math.min(1, dt * 8);
+      }
+
       this.playerAvatar.rotation.y = this.avatarYaw;
       this.playerAvatar.rotation.z = 0;
     }
@@ -3947,7 +4329,7 @@ export class Game {
   }
 
   private findGroundY(x: number, y: number, z: number, bw: number): number {
-    let maxTop = 0; // baseplate top
+    let maxTop = -Infinity;
     for (let i = 0; i < this.playAABBs.length; i++) {
       const door = this.playAABBDoorRefs[i];
       if (door && this.isDoorPassable(door)) continue;
@@ -3995,6 +4377,52 @@ export class Game {
     // Ensure the player actually fits at the new height
     if (this.collides(x, highestTop, z, bw, bh)) return null;
     return highestTop;
+  }
+
+  /** When swimming near a baseplate edge, check if the player can climb
+   *  up onto it. Returns true if the climb succeeded (position updated). */
+  private tryClimbBaseplate(bodyW: number, bodyH: number): boolean {
+    const px = this.playerPos.x;
+    const pz = this.playerPos.z;
+    const half = this.tileSize / 2;
+    const reach = 2.5; // how close to the edge the player must be
+
+    for (const [key] of this.baseplates) {
+      const [txs, _tys, tzs] = key.split(',');
+      const cx = Number(txs) * this.tileSize;
+      const cz = Number(tzs) * this.tileSize;
+      const minX = cx - half;
+      const maxX = cx + half;
+      const minZ = cz - half;
+      const maxZ = cz + half;
+
+      // Player must be just outside the tile boundary but within reach
+      const insideX = px >= minX && px <= maxX;
+      const insideZ = pz >= minZ && pz <= maxZ;
+      const nearEdge =
+        (insideZ && (px >= minX - reach && px < minX)) ||
+        (insideZ && (px <= maxX + reach && px > maxX)) ||
+        (insideX && (pz >= minZ - reach && pz < minZ)) ||
+        (insideX && (pz <= maxZ + reach && pz > maxZ));
+
+      if (!nearEdge) continue;
+
+      // Target Y = top of the baseplate (y = 0)
+      const targetY = 0;
+      // Clamp X/Z to just inside the tile
+      const clampX = Math.max(minX + bodyW, Math.min(maxX - bodyW, px));
+      const clampZ = Math.max(minZ + bodyW, Math.min(maxZ - bodyW, pz));
+
+      // Make sure the landing spot is free
+      if (!this.collides(clampX, targetY, clampZ, bodyW, bodyH)) {
+        this.playerPos.set(clampX, targetY, clampZ);
+        this.playerVel.set(0, 0, 0);
+        this.isSwimming = false;
+        this.onGround = true;
+        return true;
+      }
+    }
+    return false;
   }
 
   // ------------------------------------------------------------------
@@ -5160,6 +5588,9 @@ export class Game {
         this.surroundMesh.material as THREE.ShaderMaterial
       ).uniforms['time'].value += dt;
     }
+
+    // Animate sharks (island environment)
+    if (this.sharks.length > 0) this.updateSharks(dt);
 
     this.renderer.render(this.scene, this.camera);
   };

@@ -751,9 +751,9 @@ export function buildUI(game: Game) {
       false
     );
     previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-    previewRenderer.toneMappingExposure = 1.1;
+    previewRenderer.toneMappingExposure = 1.6;
     const previewScene = new THREE.Scene();
-    previewScene.background = new THREE.Color(0xdfe2e8);
+    previewScene.background = new THREE.Color(0xeef0f4);
     const previewCamera = new THREE.PerspectiveCamera(
       32,
       editorPreviewCanvas.clientWidth / editorPreviewCanvas.clientHeight,
@@ -762,7 +762,7 @@ export function buildUI(game: Game) {
     );
     // Frame the full body: camera at eye level, pulled back enough so
     // the head (top ~4.8u) and feet (0) both fit with room to spare.
-    previewCamera.position.set(0, 2.8, 9);
+    previewCamera.position.set(0, 2.8, 16);
 
     // OrbitControls — orbit target at the minifig's center of mass,
     // auto-rotate slowly so the user can inspect without dragging.
@@ -781,13 +781,16 @@ export function buildUI(game: Game) {
     previewControls.update();
 
     // Lighting: key + fill + rim for a clean product-shot look.
-    const pKey = new THREE.DirectionalLight(0xfff6e6, 3.0);
+    const pKey = new THREE.DirectionalLight(0xffffff, 4.5);
     pKey.position.set(4, 10, 6);
     previewScene.add(pKey);
-    const pFill = new THREE.DirectionalLight(0xd0e0ff, 1.0);
-    pFill.position.set(-5, 4, -3);
+    const pFill = new THREE.DirectionalLight(0xeef4ff, 2.5);
+    pFill.position.set(-5, 6, -2);
     previewScene.add(pFill);
-    const pAmb = new THREE.AmbientLight(0xffffff, 0.6);
+    const pBack = new THREE.DirectionalLight(0xfff0dd, 1.5);
+    pBack.position.set(0, 4, -6);
+    previewScene.add(pBack);
+    const pAmb = new THREE.AmbientLight(0xffffff, 1.2);
     previewScene.add(pAmb);
 
     // Ground disc so the minifig isn't floating in void.
@@ -1035,6 +1038,9 @@ export function buildUI(game: Game) {
 
     document
       .getElementById('char-editor-close')
+      ?.addEventListener('click', closeEditor);
+    document
+      .getElementById('ce-exit')
       ?.addEventListener('click', closeEditor);
 
     // "적용" button — push editor state to game

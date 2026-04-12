@@ -2973,7 +2973,10 @@ export function createMinifigure(preset: MinifigPreset): THREE.Group {
       headwear = createHair(preset.hairStyle, preset.hairColor ?? 0x3b2415);
     }
     if (headwear) {
-      headwear.position.y = headTopY;
+      // Lower the hat so it sits around the head stud (not on top of it).
+      // headTopY includes the stud; pull down by STUD_HEIGHT so the hat
+      // encases the stud like a real Lego connection.
+      headwear.position.y = headTopY - STUD_HEIGHT;
       body.add(headwear);
     }
   }
@@ -3009,9 +3012,14 @@ export function createMinifigure(preset: MinifigPreset): THREE.Group {
     // arc at the mesh's top end.
     const bbox = new THREE.Box3();
     for (const m of valid) bbox.expandByObject(m, true);
+    const limbHeight = bbox.max.y - bbox.min.y;
+    // Pivot at the shoulder/hip joint — slightly inside the top of the
+    // limb (15% down from the top) so the rotation axis sits at the
+    // joint center, not the outer surface. This keeps limbs attached
+    // to the torso during large-angle swings (e.g. swimming).
     const hipWorld = new THREE.Vector3(
       (bbox.min.x + bbox.max.x) / 2,
-      bbox.max.y, // tight top of the limb = visible shoulder / hip
+      bbox.max.y - limbHeight * 0.15,
       (bbox.min.z + bbox.max.z) / 2
     );
     const pivot = new THREE.Group();
