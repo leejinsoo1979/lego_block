@@ -4711,15 +4711,23 @@ function createSofaBlock(_spec: BlockSpec): THREE.Group {
   const cushMat = new THREE.MeshStandardMaterial({ color: 0xdd3333, roughness: 0.5 });
   const backMat = new THREE.MeshStandardMaterial({ color: 0x991111, roughness: 0.65 });
   const armMat = new THREE.MeshStandardMaterial({ color: 0xaa1818, roughness: 0.65 });
-  // Base box
-  group.add(_box(4, 0.8, 2, 0, 0.4, 0, baseMat));
-  // Seat cushion slightly inset
-  group.add(_box(3.2, 0.4, 1.6, 0, 1.0, 0, cushMat));
-  // Backrest at back
-  group.add(_box(4, 1.2, 0.5, 0, 1.4, -0.75, backMat));
+  // 8×4 footprint, minifig-scale sofa (3-seater)
+  const hw = 4, hd = 2;
+  // Base
+  group.add(_box(8, 1.0, 4, 0, 0.5, 0, baseMat));
+  // 3 seat cushions with gaps between
+  for (let i = -1; i <= 1; i++) {
+    group.add(_box(2.3, 0.5, 3.0, i * 2.5, 1.25, 0.3, cushMat));
+  }
+  // Backrest
+  group.add(_box(8, 1.6, 0.8, 0, 1.8, -hd + 0.4, backMat));
   // Armrests on sides
-  group.add(_box(0.4, 0.8, 1.6, -1.8, 1.2, 0, armMat));
-  group.add(_box(0.4, 0.8, 1.6, 1.8, 1.2, 0, armMat));
+  group.add(_box(0.6, 1.2, 3.5, -hw + 0.3, 1.6, 0.15, armMat));
+  group.add(_box(0.6, 1.2, 3.5, hw - 0.3, 1.6, 0.15, armMat));
+  // 4 short legs
+  for (const [ox, oz] of [[-hw + 0.5, -hd + 0.5], [hw - 0.5, -hd + 0.5], [-hw + 0.5, hd - 0.5], [hw - 0.5, hd - 0.5]] as [number, number][]) {
+    group.add(_box(0.4, 0.3, 0.4, ox, -0.15, oz, baseMat));
+  }
   return group;
 }
 
@@ -4729,18 +4737,28 @@ function createBedBlock(_spec: BlockSpec): THREE.Group {
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7 });
   const mattMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.5 });
   const pillowMat = new THREE.MeshStandardMaterial({ color: 0xaaccee, roughness: 0.4 });
-  // 4 short legs at corners under frame
-  for (const [ox, oz] of [[-1.75, -2.75], [1.75, -2.75], [-1.75, 2.75], [1.75, 2.75]] as [number, number][]) {
-    group.add(_box(0.5, 0.4, 0.5, ox, 0.2, oz, frameMat));
+  const blanketMat = new THREE.MeshStandardMaterial({ color: 0xcc4444, roughness: 0.55 });
+  // 6×10 footprint, minifig-scale bed
+  const hw = 3, hd = 5;
+  // 4 legs at corners
+  for (const [ox, oz] of [[-hw + 0.3, -hd + 0.3], [hw - 0.3, -hd + 0.3], [-hw + 0.3, hd - 0.3], [hw - 0.3, hd - 0.3]] as [number, number][]) {
+    group.add(_box(0.6, 0.8, 0.6, ox, 0.4, oz, frameMat));
   }
-  // Frame
-  group.add(_box(4, 0.4, 6, 0, 0.6, 0, frameMat));
-  // Mattress slightly inset
-  group.add(_box(3.6, 0.5, 5, 0, 1.05, 0.5, mattMat));
+  // Frame rails (side beams)
+  group.add(_box(0.5, 0.6, 10, -hw + 0.25, 0.7, 0, frameMat));
+  group.add(_box(0.5, 0.6, 10, hw - 0.25, 0.7, 0, frameMat));
+  // Frame slats (base)
+  group.add(_box(6, 0.3, 10, 0, 0.95, 0, frameMat));
+  // Mattress
+  group.add(_box(5.4, 0.6, 9, 0, 1.4, 0.3, mattMat));
   // Pillow at head end
-  group.add(_box(3, 0.4, 1, 0, 1.5, -2.0, pillowMat));
+  group.add(_box(4.5, 0.5, 1.5, 0, 1.95, -hd + 1.2, pillowMat));
+  // Blanket covering lower 2/3
+  group.add(_box(5.2, 0.15, 6, 0, 1.78, 1.5, blanketMat));
   // Headboard
-  group.add(_box(4, 1.6, 0.4, 0, 1.6, -2.8, frameMat));
+  group.add(_box(6, 2.4, 0.5, 0, 2.0, -hd + 0.25, frameMat));
+  // Footboard (shorter)
+  group.add(_box(6, 1.2, 0.5, 0, 1.4, hd - 0.25, frameMat));
   return group;
 }
 

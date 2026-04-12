@@ -293,8 +293,8 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   // 가구 — minifig-scale (minifig ≈ 4.8 units tall)
   { type: 'chair', label: '의자', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 2 } },
   { type: 'table', label: '테이블', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 4, d: 4 } },
-  { type: 'sofa', label: '소파', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 4, d: 2 } },
-  { type: 'bed', label: '침대', category: 'furniture', ghostHeightPlates: 4, bodyHeightPlates: 4, usesSize: false, fixedSize: { w: 4, d: 6 } },
+  { type: 'sofa', label: '소파', category: 'furniture', ghostHeightPlates: 8, bodyHeightPlates: 8, usesSize: false, fixedSize: { w: 8, d: 4 } },
+  { type: 'bed', label: '침대', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 6, d: 10 } },
   { type: 'bookshelf', label: '책장', category: 'furniture', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 4, d: 1 } },
   { type: 'desk', label: '책상', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 4, d: 2 } },
   { type: 'cabinet', label: '서랍장', category: 'furniture', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 2, d: 2 } },
