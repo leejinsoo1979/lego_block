@@ -59,6 +59,23 @@
         </svg>
       </button>
 
+      <!-- 가구 (furniture) — chair -->
+      <button class="icon-bar-btn" title="가구" data-panel="furniture">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 11V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6"/>
+          <path d="M4 11h16a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1z"/>
+          <path d="M6 15v4"/><path d="M18 15v4"/>
+        </svg>
+      </button>
+
+      <!-- 소품 (props) — traffic cone -->
+      <button class="icon-bar-btn" title="소품" data-panel="prop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2L8 18h8L12 2z"/>
+          <rect x="5" y="18" width="14" height="3" rx="0.5"/>
+        </svg>
+      </button>
+
       <!-- 캐릭터 (character) — PiLegoSmileyLight -->
       <button class="icon-bar-btn" title="캐릭터" data-panel="character">
         <svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
@@ -299,14 +316,17 @@
           <span class="ce-group-title">색상</span>
           <div class="ce-color-row">
             <label class="char-editor-label">피부색</label>
+            <div class="ce-swatch-row" id="ce-skin-swatches"></div>
             <input id="ce-skin" type="color" value="#f5cd30" class="ce-color" />
           </div>
           <div class="ce-color-row">
             <label class="char-editor-label">상의색</label>
+            <div class="ce-swatch-row" id="ce-shirt-swatches"></div>
             <input id="ce-shirt" type="color" value="#c4281c" class="ce-color" />
           </div>
           <div class="ce-color-row">
             <label class="char-editor-label">하의색</label>
+            <div class="ce-swatch-row" id="ce-pants-swatches"></div>
             <input id="ce-pants" type="color" value="#0d69ac" class="ce-color" />
           </div>
         </div>

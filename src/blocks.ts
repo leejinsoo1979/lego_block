@@ -138,6 +138,62 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'merrygoround':
       group = createMerryGoRoundBlock(spec);
       break;
+    // 가구
+    case 'chair':
+      group = createChairBlock(spec);
+      break;
+    case 'table':
+      group = createTableBlock(spec);
+      break;
+    case 'sofa':
+      group = createSofaBlock(spec);
+      break;
+    case 'bed':
+      group = createBedBlock(spec);
+      break;
+    case 'bookshelf':
+      group = createBookshelfBlock(spec);
+      break;
+    case 'desk':
+      group = createDeskBlock(spec);
+      break;
+    case 'cabinet':
+      group = createCabinetBlock(spec);
+      break;
+    case 'tvset':
+      group = createTvSetBlock(spec);
+      break;
+    case 'fridge':
+      group = createFridgeBlock(spec);
+      break;
+    // 소품
+    case 'bench':
+      group = createBenchBlock(spec);
+      break;
+    case 'flowerpot':
+      group = createFlowerpotBlock(spec);
+      break;
+    case 'trashcan':
+      group = createTrashcanBlock(spec);
+      break;
+    case 'mailbox':
+      group = createMailboxBlock(spec);
+      break;
+    case 'signpost':
+      group = createSignpostBlock(spec);
+      break;
+    case 'hydrant':
+    case 'barrel':
+    case 'campfire':
+    case 'fountain':
+    case 'trafficcone':
+    case 'barricade':
+    case 'well':
+    case 'tent':
+      // Placeholder — these block types were added externally but
+      // don't have dedicated factories yet. Fall back to a basic box.
+      group = createBoxBlock(spec, 'brick');
+      break;
     default:
       group = createBoxBlock(spec, 'brick');
   }
@@ -2218,163 +2274,224 @@ function createBridgeBlock(spec: BlockSpec): THREE.Group {
 function createHat(style: HatStyle, color: number): THREE.Group | null {
   if (style === 'none') return null;
   const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+  // All hats are scaled to properly sit on the Lego minifig head (which
+  // is about 1.0–1.2u wide). The hat sits directly on head-top (y=0 in
+  // this group's local frame), so everything builds upward from y=0.
 
   switch (style) {
     case 'cap': {
+      // Classic Lego baseball cap — tapered cylinder crown + flat
+      // rounded visor that sticks out in front. The visor is a full-
+      // width half-cylinder (not a box) so it reads as curved from
+      // every angle, like the real Lego cap piece.
       const crown = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.46, 0.5, 0.28, 20),
+        new THREE.CylinderGeometry(0.54, 0.62, 0.35, 24),
         mat
       );
-      crown.position.y = 0.14;
+      crown.position.y = 0.18;
       crown.castShadow = true;
       group.add(crown);
-
-      const visor = new THREE.Mesh(
-        new THREE.BoxGeometry(0.8, 0.05, 0.22),
+      // Button on top
+      const button = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.1, 0.06, 12),
         mat
       );
-      visor.position.set(0, 0.03, 0.4);
+      button.position.y = 0.38;
+      group.add(button);
+      // Visor — a flat half-cylinder lying on its side: the full-
+      // width curved brim that sticks forward from the crown base.
+      const visor = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.56, 0.56, 0.06, 24, 1, false, 0, Math.PI),
+        mat
+      );
+      visor.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
+      visor.position.set(0, 0.04, 0.34);
       visor.castShadow = true;
       group.add(visor);
       break;
     }
     case 'fireman': {
+      // Chunky fire helmet — dome + wide brim + front crest
       const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.52, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
+        new THREE.SphereGeometry(0.65, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
         mat
       );
-      dome.position.y = 0.05;
+      dome.position.y = 0.08;
       dome.castShadow = true;
       group.add(dome);
-
       const brim = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.72, 0.72, 0.06, 24),
+        new THREE.CylinderGeometry(0.88, 0.9, 0.08, 28),
         mat
       );
-      brim.position.y = 0.04;
+      brim.position.y = 0.05;
       brim.castShadow = true;
       group.add(brim);
-
+      // Front crest (shield)
       const crest = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.42, 0.1),
-        mat
+        new THREE.BoxGeometry(0.3, 0.5, 0.12),
+        new THREE.MeshStandardMaterial({ color: 0xf5cd30, roughness: 0.4, metalness: 0.3 })
       );
-      crest.position.set(0, 0.3, -0.08);
-      crest.rotation.x = -0.15;
+      crest.position.set(0, 0.38, 0.52);
       crest.castShadow = true;
       group.add(crest);
       break;
     }
     case 'astronaut': {
+      // Full-head fishbowl helmet with reflective visor
       const bubble = new THREE.Mesh(
-        new THREE.SphereGeometry(0.6, 24, 20),
+        new THREE.SphereGeometry(0.78, 28, 22),
         new THREE.MeshStandardMaterial({
-          color,
-          roughness: 0.35,
-          metalness: 0.1,
+          color: 0xf0f0f0,
+          roughness: 0.15,
+          metalness: 0.05,
+          transparent: true,
+          opacity: 0.65,
         })
       );
-      bubble.position.y = 0.1;
+      bubble.position.y = -0.15;
       bubble.castShadow = true;
       group.add(bubble);
-
+      // Dark gold visor on the front
       const visor = new THREE.Mesh(
-        new THREE.BoxGeometry(0.78, 0.3, 0.06),
+        new THREE.SphereGeometry(0.72, 28, 16, 0, Math.PI * 2, 0, Math.PI * 0.4),
         new THREE.MeshStandardMaterial({
-          color: 0x1a1a30,
-          roughness: 0.2,
-          metalness: 0.7,
+          color: 0x302010,
+          roughness: 0.1,
+          metalness: 0.85,
         })
       );
-      visor.position.set(0, 0.1, 0.56);
+      visor.position.set(0, -0.15, 0);
+      visor.rotation.x = Math.PI * 0.15;
       group.add(visor);
       break;
     }
     case 'wizard': {
+      // Tall pointy wizard hat with wide brim + star
       const brim = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.78, 0.78, 0.06, 24),
+        new THREE.CylinderGeometry(0.95, 0.95, 0.08, 28),
         mat
       );
-      brim.position.y = 0.03;
+      brim.position.y = 0.04;
       brim.castShadow = true;
       group.add(brim);
-
       const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(0.5, 1.35, 24),
+        new THREE.ConeGeometry(0.55, 1.8, 28),
         mat
       );
-      cone.position.y = 0.7;
-      cone.rotation.x = 0.12;
+      cone.position.y = 0.96;
+      cone.rotation.z = 0.08;
       cone.castShadow = true;
       group.add(cone);
-
-      // Star decoration
+      // Gold star at the front
+      const starMat = new THREE.MeshStandardMaterial({
+        color: 0xf5cd30,
+        roughness: 0.3,
+        metalness: 0.5,
+      });
       const star = new THREE.Mesh(
-        new THREE.ConeGeometry(0.08, 0.05, 5),
-        new THREE.MeshStandardMaterial({
-          color: 0xf5cd30,
-          roughness: 0.3,
-          metalness: 0.6,
-        })
+        new THREE.ConeGeometry(0.12, 0.08, 5),
+        starMat
       );
-      star.position.set(0, 0.9, 0.45);
+      star.position.set(0, 0.6, 0.5);
       star.rotation.x = Math.PI / 2;
       group.add(star);
       break;
     }
     case 'crown': {
-      const base = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.44, 0.44, 0.15, 20),
+      // Chunky gold crown — thick band + 5 tall points
+      const band = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.58, 0.62, 0.25, 24),
         mat
       );
-      base.position.y = 0.075;
-      base.castShadow = true;
-      group.add(base);
-
+      band.position.y = 0.125;
+      band.castShadow = true;
+      group.add(band);
       for (let i = 0; i < 5; i++) {
         const angle = (i / 5) * Math.PI * 2;
         const spike = new THREE.Mesh(
-          new THREE.ConeGeometry(0.08, 0.24, 8),
+          new THREE.ConeGeometry(0.1, 0.4, 8),
           mat
         );
         spike.position.set(
-          Math.cos(angle) * 0.4,
-          0.27,
-          Math.sin(angle) * 0.4
+          Math.cos(angle) * 0.52,
+          0.45,
+          Math.sin(angle) * 0.52
         );
+        spike.castShadow = true;
         group.add(spike);
+      }
+      // Jewels on the band
+      const jewelMat = new THREE.MeshStandardMaterial({
+        color: 0xcc2222,
+        roughness: 0.2,
+        metalness: 0.4,
+      });
+      for (let i = 0; i < 5; i++) {
+        const angle = ((i + 0.5) / 5) * Math.PI * 2;
+        const jewel = new THREE.Mesh(
+          new THREE.SphereGeometry(0.06, 10, 8),
+          jewelMat
+        );
+        jewel.position.set(
+          Math.cos(angle) * 0.6,
+          0.14,
+          Math.sin(angle) * 0.6
+        );
+        group.add(jewel);
       }
       break;
     }
     case 'pirate': {
+      // Tricorn pirate hat — wide brim pinched front-back + tall top
       const brim = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.74, 0.74, 0.06, 24),
+        new THREE.CylinderGeometry(0.9, 0.92, 0.08, 28),
         mat
       );
       brim.scale.z = 0.55;
-      brim.position.y = 0.03;
+      brim.position.y = 0.04;
       brim.castShadow = true;
       group.add(brim);
-
+      // Turned-up sides (two triangular wedges)
+      for (const sx of [-1, 1]) {
+        const flap = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.45, 0.55),
+          mat
+        );
+        flap.position.set(sx * 0.7, 0.22, 0);
+        flap.rotation.z = sx * -0.2;
+        flap.castShadow = true;
+        group.add(flap);
+      }
+      // Tall top
       const top = new THREE.Mesh(
-        new THREE.BoxGeometry(0.78, 0.32, 0.32),
+        new THREE.BoxGeometry(0.9, 0.45, 0.4),
         mat
       );
-      top.position.y = 0.2;
+      top.position.y = 0.3;
       top.castShadow = true;
       group.add(top);
-
-      // Skull
+      // Skull and crossbones
+      const skullMat = new THREE.MeshStandardMaterial({
+        color: 0xf2f3f3,
+        roughness: 0.5,
+      });
       const skull = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.12, 0.02),
-        new THREE.MeshStandardMaterial({
-          color: 0xf2f3f3,
-          roughness: 0.5,
-        })
+        new THREE.SphereGeometry(0.1, 10, 8),
+        skullMat
       );
-      skull.position.set(0, 0.2, 0.17);
+      skull.position.set(0, 0.32, 0.21);
       group.add(skull);
+      // Crossbones
+      for (const sx of [-1, 1]) {
+        const bone = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.025, 0.025, 0.22, 6),
+          skullMat
+        );
+        bone.position.set(0, 0.22, 0.21);
+        bone.rotation.z = sx * 0.7;
+        group.add(bone);
+      }
       break;
     }
   }
@@ -2388,115 +2505,199 @@ function createHat(style: HatStyle, color: number): THREE.Group | null {
 function createHair(style: HairStyle, color: number): THREE.Group | null {
   if (style === 'none') return null;
   const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
+  // Lego hair pieces are thick, smooth, and completely cover the top
+  // of the head with generous overhang on the sides. The head is
+  // roughly 1.0–1.2u wide (after GLB scaling), so a dome radius of
+  // 0.65 and side panels at ±0.6 give proper coverage.
 
   switch (style) {
     case 'short': {
-      // Low flat cap of hair — box on top + slight side overhang
-      const top = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.18, 0.88), mat);
-      top.position.y = 0.09;
-      top.castShadow = true;
-      group.add(top);
-      // Slight side volume
+      // Classic short Lego hair — thick rounded cap that covers the
+      // whole top + clips around the sides and back.
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.62, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.45),
+        mat
+      );
+      dome.position.y = 0.04;
+      dome.castShadow = true;
+      group.add(dome);
+      // Side volume wrapping around the head
       for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.7), mat);
-        side.position.set(sx * 0.48, -0.05, -0.05);
+        const side = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.45, 0.9),
+          mat
+        );
+        side.position.set(sx * 0.55, -0.12, -0.05);
         side.castShadow = true;
         group.add(side);
       }
-      break;
-    }
-    case 'bob': {
-      // Rounded bob — hemisphere top + side panels that reach jaw level
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.48, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+      // Back volume
+      const back = new THREE.Mesh(
+        new THREE.BoxGeometry(1.0, 0.4, 0.25),
         mat
       );
-      dome.castShadow = true;
-      group.add(dome);
-      // Side panels
-      for (const sx of [-1, 1]) {
-        const panel = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.55, 0.65), mat);
-        panel.position.set(sx * 0.44, -0.2, -0.05);
-        panel.castShadow = true;
-        group.add(panel);
-      }
-      // Back panel
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.16), mat);
-      back.position.set(0, -0.15, -0.38);
+      back.position.set(0, -0.1, -0.45);
       back.castShadow = true;
       group.add(back);
       break;
     }
-    case 'long': {
-      // Long hair — dome on top + long back reaching shoulders
+    case 'bob': {
+      // Classic Lego bob cut — smooth dome + thick side panels to jaw
       const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.48, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.SphereGeometry(0.65, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
         mat
       );
       dome.castShadow = true;
       group.add(dome);
-      // Long back portion
-      const longBack = new THREE.Mesh(new THREE.BoxGeometry(0.82, 1.0, 0.18), mat);
-      longBack.position.set(0, -0.45, -0.36);
+      // Side panels reaching jaw level
+      for (const sx of [-1, 1]) {
+        const panel = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22, 0.8, 0.85),
+          mat
+        );
+        panel.position.set(sx * 0.56, -0.3, -0.05);
+        panel.castShadow = true;
+        group.add(panel);
+      }
+      // Thick back
+      const back = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 0.75, 0.26),
+        mat
+      );
+      back.position.set(0, -0.25, -0.48);
+      back.castShadow = true;
+      group.add(back);
+      // Fringe bangs across the forehead
+      const bangs = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.18, 0.25),
+        mat
+      );
+      bangs.position.set(0, -0.06, 0.48);
+      bangs.castShadow = true;
+      group.add(bangs);
+      break;
+    }
+    case 'long': {
+      // Flowing long hair — dome + long thick back + side curtains
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.65, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
+        mat
+      );
+      dome.castShadow = true;
+      group.add(dome);
+      // Long back portion reaching mid-torso
+      const longBack = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 1.5, 0.28),
+        mat
+      );
+      longBack.position.set(0, -0.7, -0.46);
       longBack.castShadow = true;
       group.add(longBack);
-      // Side strands
+      // Side curtains
       for (const sx of [-1, 1]) {
-        const strand = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.85, 0.5), mat);
-        strand.position.set(sx * 0.44, -0.35, -0.1);
+        const strand = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22, 1.3, 0.7),
+          mat
+        );
+        strand.position.set(sx * 0.56, -0.55, -0.1);
         strand.castShadow = true;
         group.add(strand);
       }
+      // Fringe
+      const bangs = new THREE.Mesh(
+        new THREE.BoxGeometry(0.85, 0.15, 0.22),
+        mat
+      );
+      bangs.position.set(0, -0.04, 0.5);
+      bangs.castShadow = true;
+      group.add(bangs);
       break;
     }
     case 'ponytail': {
-      // Short top + ponytail at back
-      const top = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.2, 0.88), mat);
-      top.position.y = 0.1;
-      top.castShadow = true;
-      group.add(top);
-      // Ponytail — cylinder angled down
-      const tail = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.08, 0.7, 10),
+      // Thick cap + chunky ponytail sticking out the back
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.62, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.45),
         mat
       );
-      tail.position.set(0, -0.2, -0.42);
-      tail.rotation.x = 0.5;
+      dome.position.y = 0.04;
+      dome.castShadow = true;
+      group.add(dome);
+      // Sides
+      for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.4, 0.8),
+          mat
+        );
+        side.position.set(sx * 0.55, -0.1, -0.05);
+        side.castShadow = true;
+        group.add(side);
+      }
+      // Ponytail — thick cylinder angled downward
+      const tail = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.12, 1.1, 12),
+        mat
+      );
+      tail.position.set(0, -0.45, -0.55);
+      tail.rotation.x = 0.45;
       tail.castShadow = true;
       group.add(tail);
-      // Tie (small ring)
+      // Hair tie
       const tie = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.15, 0.15, 0.06, 12),
-        new THREE.MeshStandardMaterial({ color: 0xc43030, roughness: 0.5 })
+        new THREE.CylinderGeometry(0.22, 0.22, 0.1, 14),
+        new THREE.MeshStandardMaterial({ color: 0xc43030, roughness: 0.4 })
       );
-      tie.position.set(0, 0.02, -0.42);
-      tie.rotation.x = 0.5;
+      tie.position.set(0, -0.05, -0.55);
+      tie.rotation.x = 0.45;
       group.add(tie);
       break;
     }
     case 'mohawk': {
-      // Ridge of boxes along the center-top
-      for (let i = 0; i < 5; i++) {
-        const h = 0.2 + (i === 2 ? 0.15 : 0); // taller in the middle
-        const spike = new THREE.Mesh(new THREE.BoxGeometry(0.14, h, 0.14), mat);
-        spike.position.set(0, h / 2, -0.3 + i * 0.15);
+      // Flat sides + tall ridge of thick plates along center
+      // Base shell covering sides
+      for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(
+          new THREE.BoxGeometry(0.35, 0.3, 0.9),
+          mat
+        );
+        side.position.set(sx * 0.45, -0.08, -0.05);
+        side.castShadow = true;
+        group.add(side);
+      }
+      // Mohawk ridge — 7 thick plates tapering up in center
+      for (let i = 0; i < 7; i++) {
+        const t = i / 6; // 0..1
+        const h = 0.3 + 0.35 * Math.sin(t * Math.PI); // parabolic height
+        const spike = new THREE.Mesh(
+          new THREE.BoxGeometry(0.18, h, 0.16),
+          mat
+        );
+        spike.position.set(0, h / 2 + 0.02, -0.4 + i * 0.14);
         spike.castShadow = true;
         group.add(spike);
       }
       break;
     }
     case 'curly': {
-      // Cluster of small spheres
-      const r = 0.13;
-      const positions = [
-        [0, 0.12, 0.28], [-0.28, 0.08, 0.18], [0.28, 0.08, 0.18],
-        [-0.38, 0, -0.05], [0.38, 0, -0.05], [-0.3, 0.1, -0.28],
-        [0.3, 0.1, -0.28], [0, 0.14, -0.32], [-0.15, 0.16, 0.1],
-        [0.15, 0.16, 0.1], [0, 0.18, -0.1],
+      // Voluminous curly hair — larger spheres clustered all around
+      const r = 0.22;
+      const positions: number[][] = [
+        // Top
+        [0, 0.18, 0.3], [-0.3, 0.14, 0.22], [0.3, 0.14, 0.22],
+        [0, 0.24, -0.05], [-0.25, 0.2, -0.25], [0.25, 0.2, -0.25],
+        [0, 0.16, -0.4],
+        // Sides
+        [-0.5, -0.05, 0.1], [0.5, -0.05, 0.1],
+        [-0.48, -0.05, -0.2], [0.48, -0.05, -0.2],
+        [-0.42, 0.1, 0.28], [0.42, 0.1, 0.28],
+        // Back
+        [-0.3, -0.1, -0.42], [0.3, -0.1, -0.42], [0, -0.08, -0.5],
       ];
       for (const [px, py, pz] of positions) {
-        const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), mat);
+        const ball = new THREE.Mesh(
+          new THREE.SphereGeometry(r, 12, 10),
+          mat
+        );
         ball.position.set(px, py, pz);
         ball.castShadow = true;
         group.add(ball);

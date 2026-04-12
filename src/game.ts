@@ -4064,6 +4064,41 @@ export class Game {
       }
     }
 
+    // --- Depenetration: if the player is already stuck inside a block,
+    // push them out to the nearest free position so they don't get
+    // permanently trapped. Tries Y (up) first, then all 4 XZ directions.
+    if (this.collides(this.playerPos.x, this.playerPos.y, this.playerPos.z, BODY_W, BODY_H)) {
+      let escaped = false;
+      // Try pushing up in small increments (most common escape)
+      for (let dy = 0.2; dy <= 6; dy += 0.2) {
+        if (!this.collides(this.playerPos.x, this.playerPos.y + dy, this.playerPos.z, BODY_W, BODY_H)) {
+          this.playerPos.y += dy;
+          this.playerVel.y = 0;
+          escaped = true;
+          break;
+        }
+      }
+      // If up didn't work, try horizontal push
+      if (!escaped) {
+        const dirs = [
+          [1, 0], [-1, 0], [0, 1], [0, -1],
+          [1, 1], [-1, 1], [1, -1], [-1, -1],
+        ];
+        for (let dist = 0.5; dist <= 5 && !escaped; dist += 0.5) {
+          for (const [dx, dz] of dirs) {
+            const nx = this.playerPos.x + dx * dist;
+            const nz = this.playerPos.z + dz * dist;
+            if (!this.collides(nx, this.playerPos.y, nz, BODY_W, BODY_H)) {
+              this.playerPos.x = nx;
+              this.playerPos.z = nz;
+              escaped = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
     // Auto step-up: small bumps (tiles, plates, even a single brick) should
     // let the player walk right over them instead of getting stuck.
     const STEP_MAX = 1.2; // 1 brick — plates/tiles/1-brick walls auto-step

@@ -40,6 +40,8 @@ const PANEL_TITLES: Record<string, string> = {
   part: '부품',
   special: '특수',
   playground: '놀이터',
+  furniture: '가구',
+  prop: '소품',
   character: '캐릭터',
   env: '환경',
 };
@@ -381,7 +383,8 @@ export function buildUI(game: Game) {
     // Blocks with hard-coded natural colors (tree, lamp, characters)
     // ignore the color picker — disable the panel so users don't get
     // confused.
-    const isColorless = isCharacter || type === 'tree' || type === 'lamp';
+    const isFurnitureOrProp = def?.category === 'furniture' || def?.category === 'prop';
+    const isColorless = isCharacter || isFurnitureOrProp || type === 'tree' || type === 'lamp';
     document
       .getElementById('color-panel')!
       .classList.toggle('disabled', isColorless);
@@ -859,6 +862,77 @@ export function buildUI(game: Game) {
     const hex = (n: number) =>
       '#' + n.toString(16).padStart(6, '0');
 
+    // --- Swatch palettes ---
+    const SKIN_SWATCHES = [
+      0xf5cd30, 0xf7d74e,
+      0xfde0c4, 0xf5c9a0, 0xe8ab76, 0xd4915c,
+      0xc47e4c, 0xb06835, 0x8d5524, 0x6b3e26,
+      0x4a2912, 0x3b1e0e,
+      0xf0e68c, 0xadd8e6, 0xd8bfd8, 0xc0e0c0,
+    ];
+    const CLOTHING_SWATCHES = [
+      0xc4281c, 0xe74c3c, 0xff6b6b, 0xd4524a, 0x8b1a1a,
+      0xff8c00, 0xf39c12, 0xe67e22,
+      0xf5cd30, 0xffd700, 0xf7dc6f,
+      0x27ae60, 0x2ecc71, 0x1abc9c, 0x006400, 0x228b22, 0x6b8e23,
+      0x0d69ac, 0x2980b9, 0x3498db, 0x1b3668, 0x5dade2, 0x1a5276, 0x154360,
+      0x8e44ad, 0x9b59b6, 0x4a1e6e, 0x6c3483, 0x2a1040,
+      0xe8bac8, 0xff69b4, 0xd89ab0, 0xc0507e,
+      0x8b4513, 0xa0522d, 0x6b3e26, 0xd2691e,
+      0xf2f3f3, 0xd0d3d3, 0xa0a0a0, 0x6e6e6e, 0x4a4a4a, 0x2a2a2a,
+      0xffffff, 0x1b2028, 0x0d1830, 0x000000,
+    ];
+
+    const buildSwatches = (
+      containerId: string,
+      palette: number[],
+      setValue: (c: number) => void,
+      picker: HTMLInputElement,
+    ) => {
+      const container = document.getElementById(containerId)!;
+      const buttons: HTMLButtonElement[] = [];
+      for (const c of palette) {
+        const btn = document.createElement('button');
+        btn.className = 'ce-swatch';
+        btn.style.background = hex(c);
+        btn.title = hex(c);
+        btn.addEventListener('click', () => {
+          setValue(c);
+          picker.value = hex(c);
+          syncSwatchActive();
+          refreshPreview();
+        });
+        container.appendChild(btn);
+        buttons.push(btn);
+      }
+      return buttons;
+    };
+
+    const skinSwatchBtns = buildSwatches(
+      'ce-skin-swatches', SKIN_SWATCHES,
+      (c) => { editorSkinHex = c; },
+      skinPicker,
+    );
+    const shirtSwatchBtns = buildSwatches(
+      'ce-shirt-swatches', CLOTHING_SWATCHES,
+      (c) => { editorShirtHex = c; },
+      shirtPicker,
+    );
+    const pantsSwatchBtns = buildSwatches(
+      'ce-pants-swatches', CLOTHING_SWATCHES,
+      (c) => { editorPantsHex = c; },
+      pantsPicker,
+    );
+
+    const syncSwatchActive = () => {
+      const mark = (btns: HTMLButtonElement[], palette: number[], cur: number) => {
+        btns.forEach((b, i) => b.classList.toggle('active', palette[i] === cur));
+      };
+      mark(skinSwatchBtns, SKIN_SWATCHES, editorSkinHex);
+      mark(shirtSwatchBtns, CLOTHING_SWATCHES, editorShirtHex);
+      mark(pantsSwatchBtns, CLOTHING_SWATCHES, editorPantsHex);
+    };
+
     const syncColorPickers = () => {
       skinPicker.value = hex(editorSkinHex);
       shirtPicker.value = hex(editorShirtHex);
@@ -866,18 +940,22 @@ export function buildUI(game: Game) {
       hwColorPicker.value = hex(
         editorHatStyle !== 'none' ? editorHatColor : editorHairColor
       );
+      syncSwatchActive();
     };
 
     skinPicker.addEventListener('input', () => {
       editorSkinHex = parseInt(skinPicker.value.slice(1), 16);
+      syncSwatchActive();
       refreshPreview();
     });
     shirtPicker.addEventListener('input', () => {
       editorShirtHex = parseInt(shirtPicker.value.slice(1), 16);
+      syncSwatchActive();
       refreshPreview();
     });
     pantsPicker.addEventListener('input', () => {
       editorPantsHex = parseInt(pantsPicker.value.slice(1), 16);
+      syncSwatchActive();
       refreshPreview();
     });
     hwColorPicker.addEventListener('input', () => {

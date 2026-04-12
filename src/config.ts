@@ -163,7 +163,31 @@ export type BlockType =
   | 'junglegym'
   | 'merrygoround'
   | 'minifig'
-  | 'dog';
+  | 'dog'
+  // 가구
+  | 'chair'
+  | 'table'
+  | 'sofa'
+  | 'bed'
+  | 'bookshelf'
+  | 'desk'
+  | 'cabinet'
+  | 'tvset'
+  | 'fridge'
+  // 소품
+  | 'bench'
+  | 'flowerpot'
+  | 'trashcan'
+  | 'mailbox'
+  | 'signpost'
+  | 'hydrant'
+  | 'barrel'
+  | 'campfire'
+  | 'fountain'
+  | 'trafficcone'
+  | 'barricade'
+  | 'well'
+  | 'tent';
 
 export type BlockCategory =
   | 'basic'
@@ -171,6 +195,8 @@ export type BlockCategory =
   | 'part'
   | 'special'
   | 'playground'
+  | 'furniture'
+  | 'prop'
   | 'character';
 
 export interface CategoryDef {
@@ -185,6 +211,8 @@ export const CATEGORIES: CategoryDef[] = [
   { id: 'part', label: '부품' },
   { id: 'special', label: '특수' },
   { id: 'playground', label: '놀이터' },
+  { id: 'furniture', label: '가구' },
+  { id: 'prop', label: '소품' },
   { id: 'character', label: '캐릭터' },
 ];
 
@@ -253,6 +281,30 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   // Lego minifig can actually sit on the seats and so the structure
   // visibly dominates the playground.
   { type: 'merrygoround', label: '회전무대', category: 'playground', ghostHeightPlates: 32, bodyHeightPlates: 32, usesSize: false, fixedSize: { w: 16, d: 16 } },
+  // 가구 — minifig-scale (minifig ≈ 4.8 units tall)
+  { type: 'chair', label: '의자', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 2 } },
+  { type: 'table', label: '테이블', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 4, d: 4 } },
+  { type: 'sofa', label: '소파', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 4, d: 2 } },
+  { type: 'bed', label: '침대', category: 'furniture', ghostHeightPlates: 4, bodyHeightPlates: 4, usesSize: false, fixedSize: { w: 4, d: 6 } },
+  { type: 'bookshelf', label: '책장', category: 'furniture', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 4, d: 1 } },
+  { type: 'desk', label: '책상', category: 'furniture', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 4, d: 2 } },
+  { type: 'cabinet', label: '서랍장', category: 'furniture', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 2, d: 2 } },
+  { type: 'tvset', label: 'TV', category: 'furniture', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 4, d: 1 } },
+  { type: 'fridge', label: '냉장고', category: 'furniture', ghostHeightPlates: 15, bodyHeightPlates: 15, usesSize: false, fixedSize: { w: 2, d: 2 } },
+  // 소품
+  { type: 'bench', label: '벤치', category: 'prop', ghostHeightPlates: 4, bodyHeightPlates: 4, usesSize: false, fixedSize: { w: 6, d: 2 } },
+  { type: 'flowerpot', label: '화분', category: 'prop', ghostHeightPlates: 4, bodyHeightPlates: 4, usesSize: false, fixedSize: { w: 2, d: 2 } },
+  { type: 'trashcan', label: '쓰레기통', category: 'prop', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 2 } },
+  { type: 'mailbox', label: '우체통', category: 'prop', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 2, d: 1 } },
+  { type: 'signpost', label: '표지판', category: 'prop', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 2, d: 1 } },
+  { type: 'hydrant', label: '소화전', category: 'prop', ghostHeightPlates: 5, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'barrel', label: '나무통', category: 'prop', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 2, d: 2 } },
+  { type: 'campfire', label: '캠프파이어', category: 'prop', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 3, d: 3 } },
+  { type: 'fountain', label: '분수', category: 'prop', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 6, d: 6 } },
+  { type: 'trafficcone', label: '라바콘', category: 'prop', ghostHeightPlates: 3, bodyHeightPlates: 3, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'barricade', label: '바리케이드', category: 'prop', ghostHeightPlates: 6, bodyHeightPlates: 6, usesSize: false, fixedSize: { w: 4, d: 1 } },
+  { type: 'well', label: '우물', category: 'prop', ghostHeightPlates: 9, bodyHeightPlates: 9, usesSize: false, fixedSize: { w: 4, d: 4 } },
+  { type: 'tent', label: '텐트', category: 'prop', ghostHeightPlates: 12, bodyHeightPlates: 12, usesSize: false, fixedSize: { w: 6, d: 6 } },
   // 캐릭터
   { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
   { type: 'dog', label: '강아지', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 1, d: 2 } },
