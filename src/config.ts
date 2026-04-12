@@ -391,7 +391,13 @@ export type HairStyle =
   | 'long'
   | 'ponytail'
   | 'mohawk'
-  | 'curly';
+  | 'curly'
+  | 'twintails'
+  | 'updo'
+  | 'sidepart'
+  | 'pixie'
+  | 'braid'
+  | 'afro';
 
 /** Per-part face expression config for the character editor. Each field
  *  is an index into the corresponding FACE_* catalog array. When
@@ -482,6 +488,12 @@ export const HAIR_STYLES: { id: HairStyle; label: string }[] = [
   { id: 'ponytail', label: '포니테일' },
   { id: 'mohawk', label: '모히칸' },
   { id: 'curly', label: '곱슬' },
+  { id: 'twintails', label: '트윈테일' },
+  { id: 'updo', label: '올림머리' },
+  { id: 'sidepart', label: '가르마' },
+  { id: 'pixie', label: '픽시컷' },
+  { id: 'braid', label: '땋은머리' },
+  { id: 'afro', label: '아프로' },
 ];
 
 export const HAT_STYLES: { id: HatStyle; label: string }[] = [
