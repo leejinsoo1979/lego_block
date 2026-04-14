@@ -235,6 +235,13 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'tent':
       group = createTentBlock(spec);
       break;
+    // 팩맨 펠릿
+    case 'pellet':
+      group = createPelletBlock(spec);
+      break;
+    case 'powerpellet':
+      group = createPowerPelletBlock(spec);
+      break;
     default:
       group = createBoxBlock(spec, 'brick');
   }
@@ -6409,5 +6416,159 @@ export function createDogGhost(): THREE.Group {
   group.userData.isDogGhost = true;
   delete group.userData.isBrick;
   delete group.userData.isDog;
+  return group;
+}
+
+// ==================================================================
+//                        PAC-MAN PELLETS
+// ==================================================================
+// Tiny yellow glowing sphere — scattered across the maze for the
+// player to collect in Pac-Man game mode. Uses MeshBasicMaterial with
+// a high emissive-equivalent yellow so they read as "dots" under any
+// lighting condition. Flagged with userData.isPellet so the game
+// loop's collection test can find and remove them.
+
+function createPelletBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+
+  // Small glowing dot — hovers at 0.35 above the baseplate so it's
+  // visible against dark floors without clipping into them.
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffe04a,
+    transparent: true,
+    opacity: 1,
+  });
+  const geo = new THREE.SphereGeometry(0.17, 12, 10);
+  const dot = new THREE.Mesh(geo, mat);
+  dot.position.y = 0.35;
+  dot.castShadow = false;
+  group.add(dot);
+
+  // Soft halo sprite — makes the pellet read as "glowing" even in the
+  // bright daytime lighting of the build mode. Additive blending so
+  // it stacks on the dark maze floor like a real dot.
+  const haloMat = new THREE.SpriteMaterial({
+    map: makeFireGlowTexture(),
+    color: 0xffe04a,
+    transparent: true,
+    opacity: 0.6,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const halo = new THREE.Sprite(haloMat);
+  halo.scale.set(0.6, 0.6, 1);
+  halo.position.y = 0.35;
+  group.add(halo);
+
+  group.userData.isPellet = true;
+  group.userData.pelletScore = 10;
+  return group;
+}
+
+function createPowerPelletBlock(_spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+
+  // Larger brighter sphere — pulsing animation is handled by
+  // animateEffects in game.ts (via userData.isPowerPellet tag).
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xfff08a,
+    transparent: true,
+    opacity: 1,
+  });
+  const geo = new THREE.SphereGeometry(0.42, 16, 12);
+  const dot = new THREE.Mesh(geo, mat);
+  dot.position.y = 0.6;
+  dot.castShadow = false;
+  group.add(dot);
+
+  // Big bloom halo
+  const haloMat = new THREE.SpriteMaterial({
+    map: makeFireGlowTexture(),
+    color: 0xffe04a,
+    transparent: true,
+    opacity: 0.75,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const halo = new THREE.Sprite(haloMat);
+  halo.scale.set(1.6, 1.6, 1);
+  halo.position.y = 0.6;
+  group.add(halo);
+
+  group.userData.isPellet = true;
+  group.userData.isPowerPellet = true;
+  group.userData.pelletScore = 50;
+  return group;
+}
+
+// ==================================================================
+//                        PAC-MAN GHOST
+// ==================================================================
+// Classic dome-shaped ghost — hemisphere head + cylindrical body with
+// a wavy skirt bottom, two big white eyes with a pupil pointing in the
+// direction of motion. `color` is the ghost's tint (red/pink/cyan/orange).
+// The body mesh is stored on userData.bodyMesh so the game can swap
+// its color to "frightened blue" when the player eats a power pellet.
+export function createPacmanGhost(color: number): THREE.Group {
+  const group = new THREE.Group();
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.35,
+    roughness: 0.4,
+  });
+
+  // Hemisphere top
+  const headGeom = new THREE.SphereGeometry(0.65, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+  const head = new THREE.Mesh(headGeom, bodyMat);
+  head.position.y = 1.2;
+  head.castShadow = true;
+  group.add(head);
+
+  // Cylinder body (same radius)
+  const bodyGeom = new THREE.CylinderGeometry(0.65, 0.65, 1.2, 18, 1, true);
+  const body = new THREE.Mesh(bodyGeom, bodyMat);
+  body.position.y = 0.6;
+  body.castShadow = true;
+  group.add(body);
+
+  // Wavy skirt — 5 small bumps around the bottom rim
+  const skirtMat = bodyMat;
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2;
+    const bump = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 10, 8),
+      skirtMat
+    );
+    bump.position.set(Math.cos(a) * 0.55, 0.0, Math.sin(a) * 0.55);
+    group.add(bump);
+  }
+
+  // Eyes — two white circles on the front, pupils inside
+  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+  const pupilMat = new THREE.MeshStandardMaterial({
+    color: 0x0a1060,
+    emissive: 0x0a1060,
+    emissiveIntensity: 0.2,
+    roughness: 0.3,
+  });
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), eyeWhiteMat);
+  eyeL.position.set(-0.24, 1.25, 0.5);
+  group.add(eyeL);
+  const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), eyeWhiteMat);
+  eyeR.position.set(0.24, 1.25, 0.5);
+  group.add(eyeR);
+  const pupilL = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), pupilMat);
+  pupilL.position.set(-0.24, 1.25, 0.65);
+  group.add(pupilL);
+  const pupilR = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), pupilMat);
+  pupilR.position.set(0.24, 1.25, 0.65);
+  group.add(pupilR);
+
+  // Expose the body material refs so the game can modulate color in
+  // frightened mode (ghost turns blue and blinks).
+  group.userData.bodyMesh = body;
+  group.userData.isPacmanGhost = true;
   return group;
 }

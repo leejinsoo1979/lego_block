@@ -195,7 +195,13 @@ export type BlockType =
   | 'road_tee'
   | 'rail_straight'
   | 'rail_curve'
-  | 'rail_crossing';
+  | 'rail_crossing'
+  // 탈것
+  | 'car'
+  | 'train'
+  // 팩맨
+  | 'pellet'
+  | 'powerpellet';
 
 export type BlockCategory =
   | 'basic'
@@ -206,7 +212,8 @@ export type BlockCategory =
   | 'furniture'
   | 'prop'
   | 'road'
-  | 'character';
+  | 'character'
+  | 'pacman';
 
 export interface CategoryDef {
   id: BlockCategory;
@@ -323,9 +330,15 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'rail_straight', label: '직선 레일', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
   { type: 'rail_curve', label: '커브 레일', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
   { type: 'rail_crossing', label: '건널목', category: 'road', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 8, d: 8 } },
+  // 탈것 — 도로/레일 위에 배치, 플레이 모드에서 E로 탑승 후 WASD 운전
+  { type: 'car', label: '자동차', category: 'road', ghostHeightPlates: 4, bodyHeightPlates: 4, usesSize: false, fixedSize: { w: 4, d: 2 } },
+  { type: 'train', label: '기차', category: 'road', ghostHeightPlates: 5, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 8, d: 3 } },
   // 캐릭터
   { type: 'minifig', label: '사람', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 7, usesSize: false },
   { type: 'dog', label: '강아지', category: 'character', ghostHeightPlates: 1, bodyHeightPlates: 5, usesSize: false, fixedSize: { w: 1, d: 2 } },
+  // 팩맨 — 수집용 펠릿. 게임 모드에서 모두 먹으면 클리어
+  { type: 'pellet', label: '펠릿', category: 'pacman', ghostHeightPlates: 1, bodyHeightPlates: 1, usesSize: false, fixedSize: { w: 1, d: 1 } },
+  { type: 'powerpellet', label: '파워펠릿', category: 'pacman', ghostHeightPlates: 2, bodyHeightPlates: 2, usesSize: false, fixedSize: { w: 1, d: 1 } },
 ];
 
 export interface ColorDef {

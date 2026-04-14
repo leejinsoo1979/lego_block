@@ -30,6 +30,7 @@ import {
   createGhost,
   createMinifigGhost,
   createMinifigure,
+  createPacmanGhost,
   getMinifigHeight,
 } from './blocks';
 import { SoundManager } from './sound';
@@ -95,6 +96,22 @@ interface PlaygroundRideState {
   seesawSide?: number;
   /** Merry-go-round: which seat (0..3) the player sits on. */
   merrySeatIdx?: number;
+}
+
+/** Runtime state for a vehicle the player is driving. Separate from
+ *  PlaygroundRideState because vehicles are freely controlled via WASD
+ *  rather than following a scripted animation loop. */
+interface VehicleRideState {
+  obj: THREE.Object3D;
+  type: 'car' | 'train';
+  /** Current speed in u/s (positive = forward along the vehicle's +Z). */
+  speed: number;
+  /** World-space yaw of the vehicle (for cars: steered by A/D). */
+  yaw: number;
+  /** For trains: the parameterized position along the rail spline (0..1). */
+  railT?: number;
+  /** For trains: the assembled rail spline (world-space points). */
+  railPath?: THREE.CatmullRomCurve3;
 }
 
 /** Random greetings shown when the player presses E near an NPC. */
@@ -257,6 +274,96 @@ export class Game {
   // Play mode state
   isPlaying = false;
   viewMode: ViewMode = 'first';
+
+  // Pac-Man game mode state (separate from isPlaying). When
+  // isPacmanPlaying is true, arrow-key grid movement drives the player
+  // and the camera is locked to a fixed top-down angle — no mouse look.
+  isPacmanPlaying = false;
+  private pacmanScore = 0;
+  private pacmanLives = 3;
+  /** Current stage (1..∞). Clearing the maze bumps this and rebuilds
+   *  with faster ghosts + shorter frightened time. */
+  private pacmanStage = 1;
+  private pacmanPelletCount = 0;
+  private pacmanPelletsRemaining = 0;
+  private pacmanStartTime = 0;
+  private pacmanHUDEl: HTMLElement | null = null;
+  private pacmanHUDScoreEl: HTMLElement | null = null;
+  private pacmanHUDPelletsEl: HTMLElement | null = null;
+  private pacmanHUDLivesEl: HTMLElement | null = null;
+  private pacmanHUDStageEl: HTMLElement | null = null;
+  private pacmanOverlayEl: HTMLElement | null = null;
+  /** Fruit bonus mesh — appears in the center after half the pellets
+   *  are eaten, disappears after a while if not collected. Points
+   *  scale with stage number for a classic risk/reward mechanic. */
+  private pacmanFruit: THREE.Mesh | null = null;
+  private pacmanFruitTimer = 0;
+  private pacmanFruitValue = 100;
+  /** True once the fruit has been spawned this stage (don't re-spawn). */
+  private pacmanFruitSpawned = false;
+  /** Per-axis arrow-key state + sprint flag. Separate from moveKeys so
+   *  normal WASD play mode isn't affected by Pac-Man controls. */
+  private pacmanKeys = {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    run: false,
+  };
+  /** Root group holding all auto-generated maze geometry for the Pac-Man
+   *  game. Added to the scene on startPacman, fully disposed + removed
+   *  on stopPacman so nothing leaks into the build-mode state. */
+  private pacmanMazeGroup: THREE.Group | null = null;
+  /** Parsed maze grid — each cell is a 1-stud square. Used by the
+   *  ghost AI for path planning and wrap-around tunnel handling. */
+  private pacmanGrid: string[] = [];
+  /** World-space origin of grid cell (0,0). Center-cell world X/Z =
+   *  pacmanGridOriginX + col, pacmanGridOriginZ + row. */
+  private pacmanGridOriginX = 0;
+  private pacmanGridOriginZ = 0;
+  /** Player start (world space) */
+  private pacmanPlayerSpawn = new THREE.Vector3();
+  /** Ghosts — 4 colored chasers with a small state machine. */
+  private pacmanGhosts: Array<{
+    obj: THREE.Group;
+    color: number;
+    personality: 'chase' | 'ambush' | 'random' | 'scatter';
+    spawn: THREE.Vector3;
+    dir: { x: number; z: number };
+    speed: number;
+    /** Grid cell the ghost is currently heading for (center of cell). */
+    target: { x: number; z: number };
+    state: 'scatter' | 'chase' | 'frightened' | 'eaten';
+    stateTimer: number;
+    /** Last grid cell this ghost was in. Used to detect cell-crossings
+     *  so we only re-pick direction ONCE per cell (without this the
+     *  ghost oscillates around the spawn cell center forever). */
+    lastCell: { c: number; r: number } | null;
+  }> = [];
+  /** If frightened > 0, ghosts are edible and fleeing. Counts down each
+   *  frame; entered by eating a power pellet. */
+  private pacmanFrightenedTime = 0;
+  /** Cell edge length in world units. Each grid cell is a PACMAN_CELL-
+   *  sized square. Bumping this makes corridors visibly wider for the
+   *  ~1-unit-wide minifig player. */
+  private readonly PACMAN_CELL = 2.2;
+  /** Which camera mode is active in Pac-Man game mode. */
+  private pacmanViewMode: 'top' | 'first' = 'top';
+  /** Cardinal facing direction used by first-person "tank controls"
+   *  (←/→ rotate 90°, ↑/↓ move forward/back). Always a unit cardinal
+   *  vector. In top-down mode the player moves in absolute directions
+   *  and this field is ignored. */
+  private pacmanFacing: { x: number; z: number } = { x: 0, z: -1 };
+  /** Minimap canvas + 2D context. Only visible in first-person mode. */
+  private pacmanMinimapEl: HTMLCanvasElement | null = null;
+  private pacmanMinimapCtx: CanvasRenderingContext2D | null = null;
+  /** Brief "ready" pause at the start of a life so the player sees the
+   *  maze before ghosts start moving. Counts down each frame. */
+  private pacmanReadyTimer = 0;
+  /** Death animation timer — ghosts pause, player spins and fades. */
+  private pacmanDeathTimer = 0;
+  /** Saved visibility of the build-mode brickGroup — restored on exit. */
+  private pacmanSavedBrickVisible = true;
   private playAABBs: THREE.Box3[] = [];
   /** Parallel array to playAABBs. Non-null entries mark a collider that
    *  belongs to an interactable door — collision skips these while the
@@ -288,6 +395,11 @@ export class Game {
    *  player to the equipment surface and overrides normal physics
    *  until they dismount (E) or the ride finishes (slide reaches exit). */
   private playgroundRide: PlaygroundRideState | null = null;
+  /** Active vehicle ride — player is driving a car/train. Exclusive
+   *  with playgroundRide (can't ride both at once). */
+  private vehicleRide: VehicleRideState | null = null;
+  /** Nearest driveable vehicle within interaction range. */
+  private vehicleHotspot: { obj: THREE.Object3D; type: 'car' | 'train' } | null = null;
   /** Nearest playground module within interaction range. Drives the
    *  on-screen "[E] 타기" prompt. Null when nothing is in range or the
    *  player is already riding. */
@@ -327,6 +439,19 @@ export class Game {
   onCharacterChange: (preset: MinifigPreset) => void = () => {};
   onModeChange: (mode: Mode) => void = () => {};
   onPlayChange: (playing: boolean) => void = () => {};
+  /** Fired after a block is actually added to the scene (local or remote).
+   *  Carries the full created group so consumers can read its userData. */
+  onBlockPlaced: (obj: THREE.Object3D, local: boolean) => void = () => {};
+  /** Fired before a block is removed from the scene. `local` is true if
+   *  the removal originated from this client's interaction. */
+  onBlockRemoved: (obj: THREE.Object3D, local: boolean) => void = () => {};
+  /** When true, Game will NOT fire local-place/remove callbacks and
+   *  won't play click sounds — used while applying remote changes so
+   *  they don't loop back through the multiplayer broadcast. */
+  suppressBlockCallbacks = false;
+  /** Fires when entering/leaving Pac-Man game mode. UI uses this to
+   *  toggle the game button's active state. */
+  onPacmanPlayChange: (playing: boolean) => void = () => {};
   onBoardSizeChange: (size: number) => void = () => {};
   onAddBaseplateModeChange: (active: boolean) => void = () => {};
   onEnvironmentChange: (env: EnvironmentDef) => void = () => {};
@@ -837,17 +962,26 @@ export class Game {
       mat.emissiveIntensity = 0.5 + n * 4.0;
     }
 
-    // SpotLight — pours warm light onto the surrounding ground.
+    // Light — pours warm light onto the surrounding ground. Lamp posts
+    // use a downward SpotLight; campfires use an omnidirectional
+    // PointLight. The light type is baked in at creation time, we only
+    // modulate intensity here via the night factor (plus an optional
+    // per-block scale for blocks that should glow extra brightly).
     // Three.js r155+ physical lighting expects candela. A real
     // streetlight ranges from a few hundred to a few thousand cd; we
     // use 600 so the floor pool clearly reads against the dim night
     // ambient (sun ~0.05, env ~0.08) without any fake decal helper.
-    const light = lamp.userData.lampLight as THREE.SpotLight | undefined;
+    const light = lamp.userData.lampLight as
+      | THREE.SpotLight
+      | THREE.PointLight
+      | undefined;
     if (light) {
-      light.intensity = n * 600;
+      const scale = (lamp.userData.lampIntensityScale as number) ?? 1;
+      light.intensity = n * 600 * scale;
     }
   }
 
+  /** Apply night factor to a campfire — brighter flames and stronger
   /** Read-only accessor for the current time-of-day (0..24 float). */
   getTimeOfDay(): number {
     return this.timeOfDay;
@@ -2118,6 +2252,62 @@ export class Game {
       target &&
       (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
 
+    // --- Pac-Man mode: movement + view toggle + exit ---
+    // Takes priority over every other handler while the game is active.
+    // In top-down mode arrow keys are ABSOLUTE (Up = world -Z). In
+    // first-person mode ←/→ rotate the facing 90° per tap and ↑/↓
+    // become forward/back along the current facing — classic tank
+    // controls so the camera aligns with the player's look direction.
+    if (this.isPacmanPlaying && !inTextInput) {
+      let handled = true;
+      const firstPerson = this.pacmanViewMode === 'first';
+      switch (e.code) {
+        case 'ArrowUp':
+        case 'KeyW':
+          if (firstPerson) this.pacmanKeys.up = true;
+          else this.pacmanKeys.up = true;
+          break;
+        case 'ArrowDown':
+        case 'KeyS':
+          if (firstPerson) this.pacmanKeys.down = true;
+          else this.pacmanKeys.down = true;
+          break;
+        case 'ArrowLeft':
+        case 'KeyA':
+          if (firstPerson) {
+            if (!e.repeat) this.rotatePacmanFacing(-1);
+          } else {
+            this.pacmanKeys.left = true;
+          }
+          break;
+        case 'ArrowRight':
+        case 'KeyD':
+          if (firstPerson) {
+            if (!e.repeat) this.rotatePacmanFacing(1);
+          } else {
+            this.pacmanKeys.right = true;
+          }
+          break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+          this.pacmanKeys.run = true;
+          break;
+        case 'KeyV':
+          if (!e.repeat) this.togglePacmanView();
+          break;
+        case 'Escape':
+          this.stopPacman();
+          break;
+        default:
+          handled = false;
+      }
+      if (handled) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
+
     // Play mode keys take priority and always preventDefault
     if (this.isPlaying && !inTextInput) {
       let handled = true;
@@ -2151,14 +2341,20 @@ export class Game {
         case 'KeyE':
           if (!e.repeat) {
             // Priority order:
-            //   1. If currently riding a playground module → dismount
-            //   2. Door hotspot → toggle door
-            //   3. Playground hotspot → start ride
-            //   4. NPC hotspot → talk
-            if (this.playgroundRide) {
+            //   1. Vehicle ride → dismount vehicle
+            //   2. Playground ride → dismount playground
+            //   3. Door hotspot → toggle door
+            //   4. Vehicle hotspot → board vehicle
+            //   5. Playground hotspot → start ride
+            //   6. NPC hotspot → talk
+            if (this.vehicleRide) {
+              this.dismountVehicle();
+            } else if (this.playgroundRide) {
               this.dismountPlayground();
             } else if (this.currentDoorHotspot) {
               this.toggleCurrentDoor();
+            } else if (this.vehicleHotspot) {
+              this.startVehicleRide();
             } else if (this.playgroundHotspot) {
               this.startPlaygroundRide();
             } else if (this.currentNpcHotspot) {
@@ -2274,6 +2470,32 @@ export class Game {
   }
 
   private onKeyUp(e: KeyboardEvent) {
+    // Pac-Man key release
+    if (this.isPacmanPlaying) {
+      switch (e.code) {
+        case 'ArrowUp':
+        case 'KeyW':
+          this.pacmanKeys.up = false;
+          break;
+        case 'ArrowDown':
+        case 'KeyS':
+          this.pacmanKeys.down = false;
+          break;
+        case 'ArrowLeft':
+        case 'KeyA':
+          this.pacmanKeys.left = false;
+          break;
+        case 'ArrowRight':
+        case 'KeyD':
+          this.pacmanKeys.right = false;
+          break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+          this.pacmanKeys.run = false;
+          break;
+      }
+      return;
+    }
     if (!this.isPlaying) return;
     switch (e.code) {
       case 'KeyW':
@@ -3472,7 +3694,11 @@ export class Game {
     // bulb glow / point light reflect the live time-of-day rather than
     // popping in only after the next slider drag.
     if (obj.userData.isLamp) this.updateLampForTime(obj);
-    this.sound.playClick();
+    if (!this.suppressBlockCallbacks) {
+      this.sound.playClick();
+      // Broadcast to multiplayer / any listeners
+      this.onBlockPlaced(obj, /* local */ true);
+    }
     this.onCountChange(this.brickGroup.children.length);
   }
 
@@ -3536,11 +3762,125 @@ export class Game {
     let obj: THREE.Object3D | null = hits[0].object;
     while (obj && !obj.userData.isBrick) obj = obj.parent;
     if (obj && obj.parent === this.brickGroup) {
-      this.brickGroup.remove(obj);
-      this.sound.playRemove();
+      const removedObj = obj;
+      this.brickGroup.remove(removedObj);
+      if (!this.suppressBlockCallbacks) {
+        this.sound.playRemove();
+        this.onBlockRemoved(removedObj, /* local */ true);
+      }
       this.onCountChange(this.brickGroup.children.length);
       this.updatePreview();
     }
+  }
+
+  // ------------------------------------------------------------------
+  //  Multiplayer remote application
+  //
+  //  These public methods let the multiplayer module apply block
+  //  changes received from remote peers without re-broadcasting or
+  //  playing local sounds. They also expose the raw brick group so
+  //  remote player avatars can be rendered on top.
+  // ------------------------------------------------------------------
+
+  /** Apply a block placement received from a remote peer. */
+  applyRemoteBlockPlace(info: {
+    type: string;
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+    d: number;
+    colorHex: number;
+    rotation: number;          // quarter turns (0..3)
+    characterId?: string;
+  }): void {
+    let obj: THREE.Group;
+    if (info.type === 'minifig') {
+      const preset =
+        MINIFIG_PRESETS.find((p) => p.id === info.characterId) ??
+        MINIFIG_PRESETS[0];
+      obj = createMinifigure(preset);
+      obj.userData.characterId = preset.id;
+    } else if (info.type === 'dog') {
+      obj = createDogCharacter();
+    } else {
+      obj = createBrick({
+        w: info.w,
+        d: info.d,
+        colorHex: info.colorHex,
+        type: info.type as BlockType,
+      });
+    }
+    obj.rotation.y = -info.rotation * (Math.PI / 2);
+    obj.position.set(info.x, info.y, info.z);
+    // Stamp spec with final footprint so overlap/collision logic sees
+    // the correct bounds (matches what local placeAtPosition does).
+    obj.userData.spec = {
+      ...(obj.userData.spec ?? {}),
+      type: info.type,
+      w: info.w,
+      d: info.d,
+      colorHex: info.colorHex,
+    };
+    // Use a remote stamp so we can find-and-remove the exact object later
+    // when a matching remote-remove arrives.
+    obj.userData.remoteKey = `${info.x.toFixed(2)},${info.y.toFixed(2)},${info.z.toFixed(2)}`;
+    this.brickGroup.add(obj);
+    if (obj.userData.isLamp) this.updateLampForTime(obj);
+    this.onCountChange(this.brickGroup.children.length);
+    this.onBlockPlaced(obj, /* local */ false);
+  }
+
+  /** Apply a block removal received from a remote peer. Finds the
+   *  topmost brick at the exact position and removes it. */
+  applyRemoteBlockRemove(info: { x: number; y: number; z: number }): void {
+    const key = `${info.x.toFixed(2)},${info.y.toFixed(2)},${info.z.toFixed(2)}`;
+    for (let i = this.brickGroup.children.length - 1; i >= 0; i--) {
+      const child = this.brickGroup.children[i];
+      if (child.userData.remoteKey === key) {
+        this.brickGroup.remove(child);
+        this.onCountChange(this.brickGroup.children.length);
+        this.onBlockRemoved(child, false);
+        return;
+      }
+      // Also match local-placed blocks by position
+      if (
+        child.userData.isBrick &&
+        Math.abs(child.position.x - info.x) < 0.01 &&
+        Math.abs(child.position.y - info.y) < 0.01 &&
+        Math.abs(child.position.z - info.z) < 0.01
+      ) {
+        this.brickGroup.remove(child);
+        this.onCountChange(this.brickGroup.children.length);
+        this.onBlockRemoved(child, false);
+        return;
+      }
+    }
+  }
+
+  /** Accessor for the scene — lets multiplayer add/remove remote
+   *  player avatars without touching internal fields. */
+  getScene(): THREE.Scene {
+    return this.scene;
+  }
+
+  /** Current local player position + facing (only meaningful while in
+   *  play mode). Yaw is derived from the camera's world-space Y rotation. */
+  getPlayerState(): { x: number; y: number; z: number; rotY: number; isPlaying: boolean } {
+    // Extract yaw from the camera's world quaternion — works in both 1st
+    // and 3rd person views because the camera always points toward the
+    // player's facing direction.
+    const e = new THREE.Euler().setFromQuaternion(
+      this.camera.quaternion,
+      'YXZ'
+    );
+    return {
+      x: this.playerPos.x,
+      y: this.playerPos.y,
+      z: this.playerPos.z,
+      rotY: e.y,
+      isPlaying: this.isPlaying,
+    };
   }
 
   // ------------------------------------------------------------------
@@ -3898,11 +4238,1384 @@ export class Game {
     this.controls.enabled = true;
     this.controls.update();
 
+    // Drop any active vehicle ride
+    if (this.vehicleRide) {
+      this.vehicleRide = null;
+    }
+    this.vehicleHotspot = null;
+
     this.onPlayChange(false);
     // Hide the dog-whistle UI on the way out of play mode.
     this.dogsFollowing = false;
     this.onDogsPresentChange(false);
     this.onDogsFollowingChange(false);
+  }
+
+  // ==================================================================
+  //                         PAC-MAN GAME MODE
+  // ==================================================================
+  //  Kept as its own set of entry/exit/update methods (rather than
+  //  reusing startPlay/stopPlay) because almost every physics and
+  //  camera rule is inverted: top-down fixed camera, arrow-key
+  //  grid-aligned movement, no gravity, no mouse look.
+  //
+  //  startPacman()   — snapshot colliders + pellet inventory, spawn
+  //                    player at the middle of the baseplate, lock the
+  //                    camera to a fixed high-angle shot, play the
+  //                    intro melody and start the siren BGM.
+  //  stopPacman()    — restore collected pellets to the scene so the
+  //                    build-mode map is unchanged on exit.
+  //  updatePacman()  — per-frame update driven from the render loop.
+
+  /** Enter Pac-Man game mode — generates the classic maze procedurally,
+   *  hides the build scene, spawns the player + 4 ghosts, then starts
+   *  the intro music. Call stopPacman() to exit. */
+  startPacman() {
+    if (this.isPlaying || this.isPacmanPlaying) return;
+    this.isPacmanPlaying = true;
+
+    // Save camera/controls state so the build view can be restored
+    this.savedCam.position.copy(this.camera.position);
+    this.savedCam.target.copy(this.controls.target);
+    this.controls.enabled = false;
+
+    // Hide the build-mode scene entirely — the Pac-Man maze lives in
+    // its own group so the user's blocks aren't disturbed.
+    this.pacmanSavedBrickVisible = this.brickGroup.visible;
+    this.brickGroup.visible = false;
+    this.ghost.visible = false;
+    this.hoverBox.visible = false;
+
+    // Hide every baseplate tile too (the maze provides its own floor)
+    for (const tile of this.baseplates.values()) tile.visible = false;
+
+    // Build the maze
+    this.buildPacmanMaze();
+
+    // Reset game state
+    this.pacmanScore = 0;
+    this.pacmanLives = 3;
+    this.pacmanStage = 1;
+    this.pacmanReadyTimer = 1.2;
+    this.pacmanDeathTimer = 0;
+    this.pacmanFrightenedTime = 0;
+    this.pacmanFruitSpawned = false;
+    this.pacmanFruitTimer = 0;
+    this.pacmanFruit = null;
+
+    // Spawn player at the maze's designated P cell
+    this.playerPos.copy(this.pacmanPlayerSpawn);
+    this.playerVel.set(0, 0, 0);
+    this.avatarYaw = 0;
+    if (!this.playerAvatar) {
+      this.playerAvatar = createMinifigure(this.character);
+      this.playerAvatar.rotation.order = 'YXZ';
+      this.scene.add(this.playerAvatar);
+    }
+    this.playerAvatar.position.copy(this.playerPos);
+    this.playerAvatar.rotation.set(0, 0, 0);
+    this.playerAvatar.visible = true;
+
+    // Overhead camera — fixed, angled so the player sees the whole
+    // maze like the reference images. Camera height scales with the
+    // maze size so the whole layout stays framed.
+    const mazeW = this.pacmanGrid[0].length * this.PACMAN_CELL;
+    const camY = mazeW * 1.35;
+    const camZ = mazeW * 0.55;
+    this.camera.position.set(0, camY, camZ);
+    this.camera.lookAt(0, 0, 0);
+
+    // Default to top-down view on each game entry
+    this.pacmanViewMode = 'top';
+
+    // Build HUD + minimap
+    this.buildPacmanHUD();
+    this.buildPacmanMinimap();
+    this.updatePacmanHUD();
+    if (this.pacmanOverlayEl) this.pacmanOverlayEl.classList.add('hidden');
+
+    this.onPacmanPlayChange(true);
+
+    // Intro melody → siren after the melody
+    const introDur = this.sound.playPacmanIntro();
+    setTimeout(() => {
+      if (this.isPacmanPlaying) this.sound.playPacmanSiren(1);
+    }, Math.round(introDur * 1000) + 200);
+  }
+
+  /** Exit Pac-Man game mode — tear down the maze + ghosts, restore
+   *  the build-mode scene as it was. */
+  stopPacman() {
+    if (!this.isPacmanPlaying) return;
+    this.isPacmanPlaying = false;
+    this.sound.stopPacmanSiren();
+
+    // Dispose maze group
+    if (this.pacmanMazeGroup) {
+      this.scene.remove(this.pacmanMazeGroup);
+      this.pacmanMazeGroup.traverse((c) => {
+        const m = c as THREE.Mesh;
+        if (m.geometry) m.geometry.dispose();
+        if (m.material) {
+          if (Array.isArray(m.material)) m.material.forEach((mm) => mm.dispose());
+          else (m.material as THREE.Material).dispose();
+        }
+      });
+      this.pacmanMazeGroup = null;
+    }
+    // Remove ghosts
+    for (const g of this.pacmanGhosts) {
+      this.scene.remove(g.obj);
+    }
+    this.pacmanGhosts = [];
+
+    // Despawn avatar
+    if (this.playerAvatar) {
+      this.scene.remove(this.playerAvatar);
+      this.playerAvatar = null;
+    }
+
+    // Restore build-mode scene visibility
+    this.brickGroup.visible = this.pacmanSavedBrickVisible;
+    for (const tile of this.baseplates.values()) tile.visible = true;
+
+    // Restore build camera
+    this.camera.position.copy(this.savedCam.position);
+    this.controls.target.copy(this.savedCam.target);
+    this.controls.enabled = true;
+    this.controls.update();
+
+    // Clear arrow-key state
+    this.pacmanKeys.up = false;
+    this.pacmanKeys.down = false;
+    this.pacmanKeys.left = false;
+    this.pacmanKeys.right = false;
+    this.pacmanKeys.run = false;
+
+    if (this.pacmanHUDEl) this.pacmanHUDEl.classList.add('hidden');
+    if (this.pacmanOverlayEl) this.pacmanOverlayEl.classList.add('hidden');
+    if (this.pacmanMinimapEl) this.pacmanMinimapEl.classList.add('hidden');
+
+    this.onPacmanPlayChange(false);
+  }
+
+  // ---- Maze geometry ----
+  // Each maze is 28 cols × 29 rows (each cell = 1 world unit). Symbols:
+  //   # = wall     . = pellet     o = power pellet
+  //   (space) = walkable empty (ghost house interior / tunnel)
+  //   _ = walkable empty (tunnel marker)
+  //   G = ghost spawn     P = player spawn
+  //
+  // The center band (rows 9–19) is IDENTICAL across all mazes because
+  // the ghost-house exit AI hardcodes GATE_C=13, GATE_R=12. Varying
+  // only the upper/lower halves gives each stage a visibly different
+  // layout while keeping the AI simple.
+
+  /** Upper + lower halves that differ per stage. Paired with the
+   *  shared middle band to produce the full maze. */
+  private static readonly PACMAN_CENTER: string[] = [
+    '######.##### ## #####.######', // row 9
+    '     #.##### ## #####.#     ', // 10
+    '     #.##          ##.#     ', // 11
+    '     #.## ###  ### ##.#     ', // 12  (gate opening between the `###  ###`)
+    '######.## #GGGGGG# ##.######', // 13
+    '_________ #GGGGGG# _________', // 14  (tunnel row)
+    '######.## ######## ##.######', // 15
+    '     #.##          ##.#     ', // 16
+    '     #.## ######## ##.#     ', // 17
+    '     #.## ######## ##.#     ', // 18
+    '######.## ######## ##.######', // 19
+  ];
+
+  /** Each entry defines rows 0-8 (upper half, top-to-bottom) and
+   *  rows 20-28 (lower half) that get spliced around the shared
+   *  center band to produce a full 29-row maze. */
+  private static readonly PACMAN_VARIANTS: Array<{
+    upper: string[];
+    lower: string[];
+  }> = [
+    // ---- Variant 1: classic ----
+    {
+      upper: [
+        '############################',
+        '#............##............#',
+        '#.####.#####.##.#####.####.#',
+        '#o####.#####.##.#####.####o#',
+        '#.####.#####.##.#####.####.#',
+        '#..........................#',
+        '#.####.##.########.##.####.#',
+        '#.####.##.########.##.####.#',
+        '#......##....##....##......#',
+      ],
+      lower: [
+        '#............##............#',
+        '#.####.#####.##.#####.####.#',
+        '#o..##................##..o#',
+        '###.##.##.########.##.##.###',
+        '###.##.##.########.##.##.###',
+        '#......##....##....##......#',
+        '#.##########.##.##########.#',
+        '#..............P...........#',
+        '############################',
+      ],
+    },
+    // ---- Variant 2: "flipped" — classic rotated top-to-bottom,
+    //      player spawn now at the top ----
+    {
+      upper: [
+        '############################',
+        '#..............P...........#',
+        '#.##########.##.##########.#',
+        '#......##....##....##......#',
+        '###.##.##.########.##.##.###',
+        '###.##.##.########.##.##.###',
+        '#o..##................##..o#',
+        '#.####.#####.##.#####.####.#',
+        '#............##............#',
+      ],
+      lower: [
+        '#......##....##....##......#',
+        '#.####.##.########.##.####.#',
+        '#.####.##.########.##.####.#',
+        '#..........................#',
+        '#.####.#####.##.#####.####.#',
+        '#o####.#####.##.#####.####o#',
+        '#.####.#####.##.#####.####.#',
+        '#............##............#',
+        '############################',
+      ],
+    },
+    // ---- Variant 3: "open" — large horizontal corridors top and
+    //      bottom with smaller central blocks. All rows 28 chars. ----
+    {
+      upper: [
+        '############################',
+        '#o........................o#',
+        '#.########.######.########.#',
+        '#.########.######.########.#',
+        '#..........................#',
+        '#.####.####.##.####.####.###',
+        '#.####.####.##.####.####.###',
+        '#......####.##.####......###',
+        '######.####.##.####.########',
+      ],
+      lower: [
+        '######.####.##.####.########',
+        '#......####.##.####......###',
+        '#.####.####.##.####.####.###',
+        '#.####.####.##.####.####.###',
+        '#..........................#',
+        '#.########.######.########.#',
+        '#.########.######.########.#',
+        '#o.............P..........o#',
+        '############################',
+      ],
+    },
+  ];
+
+  private getPacmanMazeLayout(): string[] {
+    const variant =
+      Game.PACMAN_VARIANTS[
+        (this.pacmanStage - 1) % Game.PACMAN_VARIANTS.length
+      ];
+    const rows = [
+      ...variant.upper,
+      ...Game.PACMAN_CENTER,
+      ...variant.lower,
+    ];
+    // Dev-time sanity check — every row must be exactly 28 chars.
+    if (import.meta.env?.DEV) {
+      for (const r of rows) {
+        if (r.length !== 28) {
+          console.warn(`[pacman] maze row wrong length: ${r.length} — "${r}"`);
+        }
+      }
+      if (rows.length !== 29) {
+        console.warn(`[pacman] maze row count wrong: ${rows.length}`);
+      }
+    }
+    return rows;
+  }
+
+  /** Build all maze meshes, pellets, and ghosts. Stores the grid for
+   *  AI and collision lookups. Cells are PACMAN_CELL world units wide
+   *  so the minifig has room to breathe in corridors. */
+  private buildPacmanMaze() {
+    const grid = this.getPacmanMazeLayout();
+    this.pacmanGrid = grid;
+    const rows = grid.length;
+    const cols = grid[0].length;
+    const S = this.PACMAN_CELL;
+
+    // Center the maze on the origin. World X of cell col c = originX + c*S.
+    this.pacmanGridOriginX = -((cols - 1) / 2) * S;
+    this.pacmanGridOriginZ = -((rows - 1) / 2) * S;
+
+    const mazeGroup = new THREE.Group();
+    mazeGroup.name = 'pacmanMaze';
+    this.pacmanMazeGroup = mazeGroup;
+    this.scene.add(mazeGroup);
+
+    // ---- Floor ----
+    // Dark Lego-style baseplate. We render ONE big box body, then
+    // instance stud cylinders across the top (one per grid cell —
+    // matching a Lego baseplate's 1-stud-per-cell grid). Using
+    // InstancedMesh keeps it cheap even on a 40+-cell-wide floor.
+    const floorGeom = new THREE.BoxGeometry((cols + 2) * S, 0.4, (rows + 2) * S);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a12,
+      roughness: 0.8,
+    });
+    const floor = new THREE.Mesh(floorGeom, floorMat);
+    floor.position.set(0, -0.2, 0);
+    floor.receiveShadow = true;
+    mazeGroup.add(floor);
+
+    // Floor studs — one per grid cell that ISN'T a wall. Walls get
+    // their own studs on top; covering the wall cells with floor-level
+    // studs too would be invisible anyway (walls overlap them).
+    const floorStudGeom = new THREE.CylinderGeometry(S * 0.18, S * 0.18, 0.18, 12);
+    const floorStudMat = new THREE.MeshStandardMaterial({
+      color: 0x0f0f20,
+      roughness: 0.7,
+      metalness: 0.05,
+    });
+    const floorStudCount = cols * rows;
+    const floorStuds = new THREE.InstancedMesh(
+      floorStudGeom,
+      floorStudMat,
+      floorStudCount
+    );
+    const dummy = new THREE.Object3D();
+    let idx = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const x = this.pacmanGridOriginX + c * S;
+        const z = this.pacmanGridOriginZ + r * S;
+        dummy.position.set(x, 0.09, z);
+        dummy.updateMatrix();
+        floorStuds.setMatrixAt(idx++, dummy.matrix);
+      }
+    }
+    floorStuds.instanceMatrix.needsUpdate = true;
+    mazeGroup.add(floorStuds);
+
+    // ---- Walls / pellets / spawns ----
+    // Each wall cell is a proper Lego-style brick: a colored box body
+    // plus a cylindrical stud on top (reference: real Lego bricks have
+    // one stud per stud-pitch on top). We share geometries + materials
+    // across every wall cell so placing hundreds of them stays cheap.
+    const WALL_BODY_H = 1.4;
+    const WALL_STUD_H = 0.3;
+    const WALL_STUD_R = S * 0.22; // ~22% of cell width, like a real stud
+    // Body fills the cell horizontally so adjacent walls visually merge
+    // into one continuous wall, matching the reference images.
+    const wallGeom = new THREE.BoxGeometry(S, WALL_BODY_H, S);
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: 0x1e3aff,
+      emissive: 0x0820b0,
+      emissiveIntensity: 0.35,
+      roughness: 0.4,
+      metalness: 0.05,
+    });
+    const studGeom = new THREE.CylinderGeometry(WALL_STUD_R, WALL_STUD_R, WALL_STUD_H, 16);
+    const pelletGeom = new THREE.SphereGeometry(0.26, 10, 8);
+    const pelletMat = new THREE.MeshBasicMaterial({ color: 0xffe04a });
+    const powerGeom = new THREE.SphereGeometry(0.62, 14, 10);
+    const powerMat = new THREE.MeshBasicMaterial({ color: 0xfff08a });
+
+    let pelletCount = 0;
+    const ghostSpawns: THREE.Vector3[] = [];
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const ch = grid[r][c];
+        const x = this.pacmanGridOriginX + c * S;
+        const z = this.pacmanGridOriginZ + r * S;
+
+        if (ch === '#') {
+          // Brick body
+          const wall = new THREE.Mesh(wallGeom, wallMat);
+          wall.position.set(x, WALL_BODY_H / 2, z);
+          wall.castShadow = true;
+          wall.receiveShadow = true;
+          mazeGroup.add(wall);
+          // Stud on top (one stud per cell — correct Lego 1×1 geometry,
+          // scaled to match the cell size so adjacent studs don't overlap).
+          const stud = new THREE.Mesh(studGeom, wallMat);
+          stud.position.set(x, WALL_BODY_H + WALL_STUD_H / 2, z);
+          stud.castShadow = true;
+          mazeGroup.add(stud);
+        } else if (ch === '.') {
+          const pellet = new THREE.Mesh(pelletGeom, pelletMat);
+          pellet.position.set(x, 0.4, z);
+          pellet.userData.isPacmanPellet = true;
+          pellet.userData.pelletScore = 10;
+          mazeGroup.add(pellet);
+          pelletCount++;
+        } else if (ch === 'o') {
+          const power = new THREE.Mesh(powerGeom, powerMat);
+          power.position.set(x, 0.6, z);
+          power.userData.isPacmanPellet = true;
+          power.userData.isPacmanPower = true;
+          power.userData.pelletScore = 50;
+          mazeGroup.add(power);
+          pelletCount++;
+        } else if (ch === 'G') {
+          ghostSpawns.push(new THREE.Vector3(x, 0, z));
+          // Remember grid cell too — ghosts use this to know they're
+          // still "inside" the ghost house and must exit upward.
+          // (c, r) with cell = 'G'. Stashed via spawn's userData.
+        } else if (ch === 'P') {
+          this.pacmanPlayerSpawn.set(x, 0, z);
+        }
+      }
+    }
+
+    this.pacmanPelletCount = pelletCount;
+    this.pacmanPelletsRemaining = pelletCount;
+
+    // ---- Ghosts ----
+    // Pick 4 distinct spawn cells. Initial direction is UP so every
+    // ghost tries to exit the house on its first cell-center step.
+    const colors = [0xff0000, 0xffb6ff, 0x00ffff, 0xffa040];
+    const personalities: Array<'chase' | 'ambush' | 'random' | 'scatter'> = [
+      'chase',
+      'ambush',
+      'random',
+      'scatter',
+    ];
+    for (let i = 0; i < 4; i++) {
+      // Spawn on the TOP row of the ghost house (row 13 in the grid),
+      // centered under the exit gate (cols 12-15). This puts every
+      // ghost adjacent to the gate cells so they exit on the first
+      // cell-step, matching the original arcade's "each ghost leaves
+      // in turn" feel.
+      const spawnIdx = Math.min(ghostSpawns.length - 1, 1 + i);
+      const spawn = ghostSpawns[spawnIdx] ?? ghostSpawns[i] ?? new THREE.Vector3();
+      const ghost = createPacmanGhost(colors[i]);
+      ghost.position.copy(spawn);
+      this.scene.add(ghost);
+      this.pacmanGhosts.push({
+        obj: ghost,
+        color: colors[i],
+        personality: personalities[i],
+        spawn: spawn.clone(),
+        // Start heading UP so the very first cell-center step tries
+        // the exit gate (the spaces above the ghost house).
+        dir: { x: 0, z: -1 },
+        // Speed scales with cell size (classic cells/sec feel) AND
+        // with stage — each stage bumps speed by 12%, capped at 2×.
+        speed: (3.6 + i * 0.1) *
+          S *
+          Math.min(2, 1 + (this.pacmanStage - 1) * 0.12),
+        target: { x: spawn.x, z: spawn.z },
+        state: 'scatter',
+        stateTimer: 3 + i * 0.5,
+        lastCell: null,
+      });
+    }
+  }
+
+  /** HUD DOM (lazy-build) */
+  private buildPacmanHUD() {
+    let hud = document.getElementById('pacman-hud');
+    if (!hud) {
+      hud = document.createElement('div');
+      hud.id = 'pacman-hud';
+      hud.className = 'pacman-hud';
+      hud.innerHTML = `
+        <div class="pacman-hud-row"><span class="pacman-hud-label">STAGE</span><span id="pacman-hud-stage">1</span></div>
+        <div class="pacman-hud-row"><span class="pacman-hud-label">SCORE</span><span id="pacman-hud-score">0</span></div>
+        <div class="pacman-hud-row"><span class="pacman-hud-label">PELLETS</span><span id="pacman-hud-pellets">0</span></div>
+        <div class="pacman-hud-row"><span class="pacman-hud-label">LIVES</span><span id="pacman-hud-lives">♥♥♥</span></div>
+      `;
+      document.body.appendChild(hud);
+    }
+    this.pacmanHUDEl = hud;
+    this.pacmanHUDStageEl = document.getElementById('pacman-hud-stage');
+    this.pacmanHUDScoreEl = document.getElementById('pacman-hud-score');
+    this.pacmanHUDPelletsEl = document.getElementById('pacman-hud-pellets');
+    this.pacmanHUDLivesEl = document.getElementById('pacman-hud-lives');
+    hud.classList.remove('hidden');
+
+    let overlay = document.getElementById('pacman-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'pacman-overlay';
+      overlay.className = 'pacman-overlay hidden';
+      overlay.innerHTML = `
+        <div class="pacman-overlay-inner">
+          <div class="pacman-overlay-title">CLEAR!</div>
+          <div class="pacman-overlay-score"></div>
+          <button class="pacman-overlay-close">확인</button>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const closeBtn = overlay.querySelector('.pacman-overlay-close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => this.stopPacman());
+      }
+    }
+    this.pacmanOverlayEl = overlay;
+  }
+
+  private updatePacmanHUD() {
+    if (this.pacmanHUDStageEl) {
+      this.pacmanHUDStageEl.textContent = String(this.pacmanStage);
+    }
+    if (this.pacmanHUDScoreEl) {
+      this.pacmanHUDScoreEl.textContent = String(this.pacmanScore);
+    }
+    if (this.pacmanHUDPelletsEl) {
+      this.pacmanHUDPelletsEl.textContent =
+        `${this.pacmanPelletCount - this.pacmanPelletsRemaining} / ${this.pacmanPelletCount}`;
+    }
+    if (this.pacmanHUDLivesEl) {
+      this.pacmanHUDLivesEl.textContent = '♥'.repeat(Math.max(0, this.pacmanLives));
+    }
+  }
+
+  // ---- Maze grid helpers ----
+
+  /** Translate world (x,z) to grid (col,row). */
+  private pacmanWorldToCell(x: number, z: number): { c: number; r: number } {
+    return {
+      c: Math.round((x - this.pacmanGridOriginX) / this.PACMAN_CELL),
+      r: Math.round((z - this.pacmanGridOriginZ) / this.PACMAN_CELL),
+    };
+  }
+  /** Translate grid (col,row) to world (x,z). */
+  private pacmanCellToWorld(c: number, r: number): { x: number; z: number } {
+    return {
+      x: this.pacmanGridOriginX + c * this.PACMAN_CELL,
+      z: this.pacmanGridOriginZ + r * this.PACMAN_CELL,
+    };
+  }
+  /** True when (col,row) is walkable (not a '#' wall and in-bounds).
+   *  The ghost-house 'G' cells are walkable for ghosts; the open '_'
+   *  tunnel ends are walkable too. */
+  private pacmanIsWalkable(c: number, r: number): boolean {
+    if (r < 0 || r >= this.pacmanGrid.length) return false;
+    const row = this.pacmanGrid[r];
+    if (c < 0 || c >= row.length) return false;
+    const ch = row[c];
+    return ch !== '#';
+  }
+
+  /** Per-frame update. */
+  private updatePacman(dt: number) {
+    if (!this.isPacmanPlaying) return;
+
+    // Countdown timers
+    if (this.pacmanReadyTimer > 0) this.pacmanReadyTimer -= dt;
+    if (this.pacmanDeathTimer > 0) {
+      this.pacmanDeathTimer -= dt;
+      if (this.pacmanDeathTimer <= 0) this.respawnPacmanPlayer();
+    }
+    if (this.pacmanFrightenedTime > 0) {
+      this.pacmanFrightenedTime -= dt;
+      if (this.pacmanFrightenedTime <= 0) {
+        for (const g of this.pacmanGhosts) {
+          if (g.state === 'frightened') g.state = 'chase';
+        }
+      }
+    }
+
+    // Don't process movement during the intro "ready" pause or death
+    // animation — keeps ghosts + player frozen visibly.
+    const frozen = this.pacmanReadyTimer > 0 || this.pacmanDeathTimer > 0;
+
+    if (!frozen) {
+      this.updatePacmanPlayer(dt);
+      this.updatePacmanGhosts(dt);
+      this.updatePacmanFruit(dt);
+      this.checkPacmanPelletCollision();
+      this.checkPacmanGhostCollision();
+    } else if (this.pacmanDeathTimer > 0 && this.playerAvatar) {
+      // Death spin animation
+      this.playerAvatar.rotation.y += dt * 10;
+    }
+
+    // Camera — top-down OR first-person from the player's head
+    if (this.pacmanViewMode === 'first') {
+      const S = this.PACMAN_CELL;
+      // Look direction is the player's facing (avatarYaw). +Z at yaw=0.
+      const fx = Math.sin(this.avatarYaw);
+      const fz = Math.cos(this.avatarYaw);
+      // Eye height roughly where a minifig's head sits
+      const eyeY = 1.8;
+      this.camera.position.set(
+        this.playerPos.x,
+        this.playerPos.y + eyeY,
+        this.playerPos.z
+      );
+      // Look one cell ahead so the view isn't staring at the wall
+      // immediately in front of the face.
+      this.camera.lookAt(
+        this.playerPos.x + fx * S * 1.5,
+        this.playerPos.y + eyeY * 0.9,
+        this.playerPos.z + fz * S * 1.5
+      );
+    } else {
+      const mazeW = this.pacmanGrid[0].length * this.PACMAN_CELL;
+      const camY = mazeW * 1.35;
+      const camZ = mazeW * 0.55;
+      this.camera.position.lerp(
+        new THREE.Vector3(0, camY, camZ),
+        Math.min(1, dt * 2)
+      );
+      this.camera.lookAt(0, 0, 0);
+    }
+
+    // Minimap — only rendered in first-person mode
+    if (this.pacmanViewMode === 'first') this.drawPacmanMinimap();
+  }
+
+  /** Cycle Pac-Man view mode: top-down ↔ first-person. Hides the avatar
+   *  in first-person so we don't see the inside of our own minifig head.
+   *  When entering first-person, snap the tank-control facing to the
+   *  player's current walk direction (or keep the previous facing if
+   *  they're standing still). */
+  togglePacmanView() {
+    if (!this.isPacmanPlaying) return;
+    this.pacmanViewMode = this.pacmanViewMode === 'top' ? 'first' : 'top';
+    if (this.playerAvatar) {
+      this.playerAvatar.visible = this.pacmanViewMode === 'top';
+    }
+    if (this.pacmanMinimapEl) {
+      this.pacmanMinimapEl.classList.toggle(
+        'hidden',
+        this.pacmanViewMode !== 'first'
+      );
+    }
+    if (this.pacmanViewMode === 'first') {
+      // Snap facing to the nearest cardinal from current avatarYaw so
+      // the initial camera points "where the player was just going".
+      const yaw = this.avatarYaw;
+      const fx = Math.sin(yaw);
+      const fz = Math.cos(yaw);
+      if (Math.abs(fx) > Math.abs(fz)) {
+        this.pacmanFacing = { x: fx > 0 ? 1 : -1, z: 0 };
+      } else {
+        this.pacmanFacing = { x: 0, z: fz > 0 ? 1 : -1 };
+      }
+      // Clear any held arrow keys so the held state doesn't leak across modes
+      this.pacmanKeys.left = false;
+      this.pacmanKeys.right = false;
+    }
+  }
+
+  /** Rotate the first-person facing 90° (delta = -1 CCW / +1 CW). */
+  private rotatePacmanFacing(delta: number) {
+    const cur = this.pacmanFacing;
+    // Rotating (x, z) by ±90° around the Y axis
+    if (delta > 0) {
+      // CW (right turn): (x, z) → (-z, x)
+      this.pacmanFacing = { x: -cur.z, z: cur.x };
+    } else {
+      // CCW (left turn): (x, z) → (z, -x)
+      this.pacmanFacing = { x: cur.z, z: -cur.x };
+    }
+  }
+
+  /** Build the minimap canvas lazily on first game entry. */
+  private buildPacmanMinimap() {
+    let canvas = document.getElementById(
+      'pacman-minimap'
+    ) as HTMLCanvasElement | null;
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.id = 'pacman-minimap';
+      canvas.className = 'pacman-minimap hidden';
+      canvas.width = 240;
+      canvas.height = 248;
+      document.body.appendChild(canvas);
+    }
+    this.pacmanMinimapEl = canvas;
+    this.pacmanMinimapCtx = canvas.getContext('2d');
+    canvas.classList.toggle('hidden', this.pacmanViewMode !== 'first');
+  }
+
+  /** Redraw the minimap. Called each frame while first-person is on. */
+  private drawPacmanMinimap() {
+    const ctx = this.pacmanMinimapCtx;
+    const canvas = this.pacmanMinimapEl;
+    if (!ctx || !canvas) return;
+    const W = canvas.width;
+    const H = canvas.height;
+    const cols = this.pacmanGrid[0].length;
+    const rows = this.pacmanGrid.length;
+    const sx = W / cols;
+    const sy = H / rows;
+
+    // BG
+    ctx.fillStyle = '#000010';
+    ctx.fillRect(0, 0, W, H);
+
+    // Walls
+    ctx.fillStyle = '#2050ff';
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (this.pacmanGrid[r][c] === '#') {
+          ctx.fillRect(c * sx, r * sy, sx + 0.5, sy + 0.5);
+        }
+      }
+    }
+
+    // Remaining pellets — uses the live maze children, so collected
+    // dots disappear from the minimap as the player eats them.
+    if (this.pacmanMazeGroup) {
+      for (const child of this.pacmanMazeGroup.children) {
+        if (!child.userData.isPacmanPellet) continue;
+        const cell = this.pacmanWorldToCell(child.position.x, child.position.z);
+        const cx = cell.c * sx + sx / 2;
+        const cy = cell.r * sy + sy / 2;
+        if (child.userData.isPacmanPower) {
+          ctx.fillStyle = '#fff080';
+          ctx.beginPath();
+          ctx.arc(cx, cy, sx * 0.45, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.fillStyle = '#ffe04a';
+          ctx.beginPath();
+          ctx.arc(cx, cy, sx * 0.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // Ghosts
+    for (const g of this.pacmanGhosts) {
+      const cell = this.pacmanWorldToCell(g.obj.position.x, g.obj.position.z);
+      const cx = cell.c * sx + sx / 2;
+      const cy = cell.r * sy + sy / 2;
+      const hex =
+        g.state === 'frightened'
+          ? '#0070ff'
+          : '#' + g.color.toString(16).padStart(6, '0');
+      ctx.fillStyle = hex;
+      ctx.beginPath();
+      ctx.arc(cx, cy, sx * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Player — yellow disc with a black heading arrow
+    const pCell = this.pacmanWorldToCell(this.playerPos.x, this.playerPos.z);
+    const px = pCell.c * sx + sx / 2;
+    const py = pCell.r * sy + sy / 2;
+    ctx.fillStyle = '#ffcf00';
+    ctx.beginPath();
+    ctx.arc(px, py, sx * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    const fx = Math.sin(this.avatarYaw);
+    const fz = Math.cos(this.avatarYaw);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + fx * sx * 0.9, py + fz * sy * 0.9);
+    ctx.stroke();
+
+    // Border
+    ctx.strokeStyle = '#2050ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, W - 2, H - 2);
+  }
+
+  /** Update player movement with wall collision via grid lookup. */
+  private updatePacmanPlayer(dt: number) {
+    const S = this.PACMAN_CELL;
+    // Sprint boost — holding Shift lets the player run at 1.7× speed.
+    // Works in both view modes so the tank-control first-person player
+    // can sprint-chomp through straight corridors too.
+    const sprinting = this.pacmanKeys.run ?? false;
+    const SPEED = (sprinting ? 6.8 : 4.0) * S;
+
+    let vx = 0;
+    let vz = 0;
+
+    if (this.pacmanViewMode === 'first') {
+      // ---- First-person tank controls ----
+      // ←/→ were consumed as 90° rotations in the key handler; they
+      // don't map to motion here. ↑ = move in current facing direction,
+      // ↓ = move backward.
+      if (this.pacmanKeys.up) {
+        vx = this.pacmanFacing.x;
+        vz = this.pacmanFacing.z;
+      } else if (this.pacmanKeys.down) {
+        vx = -this.pacmanFacing.x;
+        vz = -this.pacmanFacing.z;
+      }
+    } else {
+      // ---- Top-down absolute arrow keys ----
+      if (this.pacmanKeys.left) vx -= 1;
+      if (this.pacmanKeys.right) vx += 1;
+      if (this.pacmanKeys.up) vz -= 1;
+      if (this.pacmanKeys.down) vz += 1;
+
+      // Prefer single-axis motion for the classic Pac-Man feel.
+      // Probe a full cell ahead on each axis so the test reliably
+      // lands in the *next* cell rather than returning the current
+      // cell (which would always report walkable).
+      if (vx !== 0 && vz !== 0) {
+        const tryX = this.pacmanCanMoveFrom(
+          this.playerPos.x + vx * S,
+          this.playerPos.z
+        );
+        const tryZ = this.pacmanCanMoveFrom(
+          this.playerPos.x,
+          this.playerPos.z + vz * S
+        );
+        if (!tryX && tryZ) vx = 0;
+        else if (tryX && !tryZ) vz = 0;
+        else vx = 0;
+      }
+    }
+
+    if (vx !== 0) {
+      const newX = this.playerPos.x + vx * SPEED * dt;
+      if (this.pacmanCanMoveFrom(newX, this.playerPos.z)) {
+        this.playerPos.x = newX;
+      } else {
+        const cell = this.pacmanWorldToCell(this.playerPos.x, this.playerPos.z);
+        this.playerPos.x = this.pacmanGridOriginX + cell.c * S;
+      }
+      // Auto-center on the perpendicular axis while moving. If the
+      // player is slightly off-center after turning a corner, this
+      // gently pulls them toward the cell center so subsequent corners
+      // line up cleanly. Rate is 60% of forward speed — strong enough
+      // to correct drift quickly without feeling snappy.
+      const cz = this.pacmanWorldToCell(this.playerPos.x, this.playerPos.z).r;
+      const targetZ = this.pacmanGridOriginZ + cz * S;
+      const dz = targetZ - this.playerPos.z;
+      const maxStep = SPEED * dt * 0.6;
+      this.playerPos.z +=
+        Math.sign(dz) * Math.min(Math.abs(dz), maxStep);
+    }
+    if (vz !== 0) {
+      const newZ = this.playerPos.z + vz * SPEED * dt;
+      if (this.pacmanCanMoveFrom(this.playerPos.x, newZ)) {
+        this.playerPos.z = newZ;
+      } else {
+        const cell = this.pacmanWorldToCell(this.playerPos.x, this.playerPos.z);
+        this.playerPos.z = this.pacmanGridOriginZ + cell.r * S;
+      }
+      // Auto-center on the perpendicular axis (X side this time)
+      const cc = this.pacmanWorldToCell(this.playerPos.x, this.playerPos.z).c;
+      const targetX = this.pacmanGridOriginX + cc * S;
+      const dx = targetX - this.playerPos.x;
+      const maxStep = SPEED * dt * 0.6;
+      this.playerPos.x +=
+        Math.sign(dx) * Math.min(Math.abs(dx), maxStep);
+    }
+
+    // Horizontal tunnel wrap-around (`_____ ... ____` middle row).
+    const cols = this.pacmanGrid[0].length;
+    const leftEdge = this.pacmanGridOriginX - 0.5 * S;
+    const rightEdge = this.pacmanGridOriginX + (cols - 1 + 0.5) * S;
+    if (this.playerPos.x < leftEdge) this.playerPos.x = rightEdge;
+    if (this.playerPos.x > rightEdge) this.playerPos.x = leftEdge;
+
+    this.playerPos.y = 0;
+
+    // Avatar yaw — different target per view mode.
+    // Top-down: face the direction of motion (existing behavior).
+    // First-person: face the tank-control facing direction (so the
+    // camera which follows avatarYaw aligns with player's "look").
+    const isWalking = vx !== 0 || vz !== 0;
+    if (this.playerAvatar) {
+      let targetYaw: number | null = null;
+      if (this.pacmanViewMode === 'first') {
+        targetYaw = Math.atan2(this.pacmanFacing.x, this.pacmanFacing.z);
+      } else if (isWalking) {
+        targetYaw = Math.atan2(vx, vz);
+      }
+      if (targetYaw !== null) {
+        let delta = targetYaw - this.avatarYaw;
+        while (delta > Math.PI) delta -= 2 * Math.PI;
+        while (delta < -Math.PI) delta += 2 * Math.PI;
+        this.avatarYaw += delta * Math.min(1, dt * 12);
+      }
+      this.playerAvatar.position.copy(this.playerPos);
+      this.playerAvatar.rotation.y = this.avatarYaw;
+      this.playerAvatar.rotation.x = 0;
+      this.playerAvatar.rotation.z = 0;
+
+      // Walk/run cycle — sprint increases the swing rate + amplitude
+      if (isWalking) this.walkTime += dt * (sprinting ? 15 : 11);
+      const swingAmp = sprinting ? 0.6 : 0.35;
+      const swing = isWalking ? Math.sin(this.walkTime) * swingAmp : 0;
+      const parts = this.playerAvatar.userData.parts as
+        | {
+            rightLeg?: THREE.Group | null;
+            leftLeg?: THREE.Group | null;
+            rightArm?: THREE.Group | null;
+            leftArm?: THREE.Group | null;
+          }
+        | undefined;
+      if (parts) {
+        if (parts.rightLeg) parts.rightLeg.rotation.x = swing;
+        if (parts.leftLeg) parts.leftLeg.rotation.x = -swing;
+        if (parts.rightArm) parts.rightArm.rotation.x = -swing * 0.85;
+        if (parts.leftArm) parts.leftArm.rotation.x = swing * 0.85;
+      }
+    }
+  }
+
+  /** Single-point walkability test at the player's center. Classic
+   *  Pac-Man feel: as long as the center is in a walkable cell the
+   *  player moves freely; the snap-to-cell-center logic on collision
+   *  keeps them aligned so they never visually overlap a wall. Using
+   *  a 4-corner bounding-box check was causing the minifig to catch
+   *  on wall corners when turning into a corridor. */
+  private pacmanCanMoveFrom(x: number, z: number): boolean {
+    const cell = this.pacmanWorldToCell(x, z);
+    return this.pacmanIsWalkable(cell.c, cell.r);
+  }
+
+  /** Ghost AI — each ghost picks a new direction once per cell
+   *  crossing (detected by change in the grid cell it's standing on).
+   *  In frightened mode they all flee from the player. */
+  private updatePacmanGhosts(dt: number) {
+    const S = this.PACMAN_CELL;
+    for (const g of this.pacmanGhosts) {
+      const cell = this.pacmanWorldToCell(g.obj.position.x, g.obj.position.z);
+
+      // Decide direction ONCE per new cell. Without this gate, the
+      // ghost re-picks direction every frame while near the cell
+      // center and never actually moves (oscillation lock).
+      if (!g.lastCell || g.lastCell.c !== cell.c || g.lastCell.r !== cell.r) {
+        // Snap to the exact center of the cell we just entered so
+        // motion stays grid-aligned across intersections.
+        const cellCenterX = this.pacmanGridOriginX + cell.c * S;
+        const cellCenterZ = this.pacmanGridOriginZ + cell.r * S;
+        // Snap the perpendicular axis only (keep forward momentum)
+        if (g.dir.x !== 0) g.obj.position.z = cellCenterZ;
+        if (g.dir.z !== 0) g.obj.position.x = cellCenterX;
+        g.dir = this.chooseGhostDirection(g, cell);
+        g.lastCell = { c: cell.c, r: cell.r };
+      }
+
+      // Move forward
+      const speed = g.state === 'frightened' ? g.speed * 0.55 : g.speed;
+      g.obj.position.x += g.dir.x * speed * dt;
+      g.obj.position.z += g.dir.z * speed * dt;
+
+      // Tunnel wrap-around
+      const cols = this.pacmanGrid[0].length;
+      const leftEdge = this.pacmanGridOriginX - 0.5 * S;
+      const rightEdge = this.pacmanGridOriginX + (cols - 1 + 0.5) * S;
+      if (g.obj.position.x < leftEdge) g.obj.position.x = rightEdge;
+      if (g.obj.position.x > rightEdge) g.obj.position.x = leftEdge;
+
+      // Face direction of motion
+      g.obj.rotation.y = Math.atan2(g.dir.x, g.dir.z);
+
+      // Bob animation
+      g.obj.position.y = Math.sin(performance.now() * 0.01 + g.color) * 0.04;
+
+      // Tint when frightened
+      const body = g.obj.userData.bodyMesh as THREE.Mesh | undefined;
+      if (body && body.material instanceof THREE.MeshStandardMaterial) {
+        const mat = body.material;
+        if (g.state === 'frightened') {
+          mat.color.setHex(0x0050ff);
+          mat.emissive.setHex(0x0040cc);
+        } else {
+          mat.color.setHex(g.color);
+          mat.emissive.setHex(g.color);
+        }
+      }
+    }
+  }
+
+  /** True when (c,r) is inside the ghost house ('G' cells). Used by
+   *  the AI to force ghosts to exit upward before starting to chase. */
+  private pacmanIsInGhostHouse(c: number, r: number): boolean {
+    if (r < 0 || r >= this.pacmanGrid.length) return false;
+    const row = this.pacmanGrid[r];
+    if (c < 0 || c >= row.length) return false;
+    return row[c] === 'G';
+  }
+
+  /** Pick a valid direction at a cell intersection based on ghost
+   *  personality. Ghosts can't immediately reverse (180°) unless there
+   *  is no other option. */
+  private chooseGhostDirection(
+    g: Game['pacmanGhosts'][number],
+    cell: { c: number; r: number }
+  ): { x: number; z: number } {
+    const dirs: Array<{ x: number; z: number }> = [
+      { x: 0, z: -1 },
+      { x: 0, z: 1 },
+      { x: -1, z: 0 },
+      { x: 1, z: 0 },
+    ];
+
+    // ---- Ghost-house exit override ----
+    // When still inside the house (on a 'G' cell), treat the target
+    // as the gate cell directly above the house (col 13/14, row 12 in
+    // our layout — the two space cells that open upward). The ghost
+    // aims for (13, 12) and will always pick the direction that gets
+    // it closer to the gate, without the usual reverse-ban. Once
+    // above the top row of the house it's free to chase normally.
+    if (this.pacmanIsInGhostHouse(cell.c, cell.r)) {
+      const GATE_C = 13;
+      const GATE_R = 12;
+      const options = dirs.filter((d) =>
+        this.pacmanIsWalkable(cell.c + d.x, cell.r + d.z)
+      );
+      if (options.length === 0) return g.dir;
+      let bestDist = Infinity;
+      let bestDir = options[0];
+      for (const d of options) {
+        const nc = cell.c + d.x;
+        const nr = cell.r + d.z;
+        const dc = nc - GATE_C;
+        const dr = nr - GATE_R;
+        const dist = dc * dc + dr * dr;
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestDir = d;
+        }
+      }
+      return bestDir;
+    }
+
+    const valid = dirs.filter((d) => {
+      if (d.x === -g.dir.x && d.z === -g.dir.z) return false; // no reverse
+      return this.pacmanIsWalkable(cell.c + d.x, cell.r + d.z);
+    });
+    const options = valid.length > 0 ? valid : dirs.filter((d) =>
+      this.pacmanIsWalkable(cell.c + d.x, cell.r + d.z)
+    );
+    if (options.length === 0) return g.dir;
+
+    // Frightened: random choice
+    if (g.state === 'frightened') {
+      return options[Math.floor(Math.random() * options.length)];
+    }
+
+    // Compute the target grid cell based on personality
+    const playerCell = this.pacmanWorldToCell(this.playerPos.x, this.playerPos.z);
+    let tc = playerCell.c;
+    let tr = playerCell.r;
+    if (g.personality === 'ambush') {
+      const heading = this.getPlayerFacingGrid();
+      tc += heading.x * 4;
+      tr += heading.z * 4;
+    } else if (g.personality === 'random') {
+      return options[Math.floor(Math.random() * options.length)];
+    } else if (g.personality === 'scatter') {
+      const dx = this.playerPos.x - g.obj.position.x;
+      const dz = this.playerPos.z - g.obj.position.z;
+      const S = this.PACMAN_CELL;
+      const distCells = (dx * dx + dz * dz) / (S * S);
+      if (distCells < 64) {
+        // Flee — mirror the player direction
+        tc = cell.c - (playerCell.c - cell.c);
+        tr = cell.r - (playerCell.r - cell.r);
+      } else {
+        // Scatter corner
+        tc = 1;
+        tr = this.pacmanGrid.length - 2;
+      }
+    }
+
+    // Pick option closest to target
+    let bestDist = Infinity;
+    let bestDir = options[0];
+    for (const d of options) {
+      const nc = cell.c + d.x;
+      const nr = cell.r + d.z;
+      const dc = nc - tc;
+      const dr = nr - tr;
+      const dist = dc * dc + dr * dr;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestDir = d;
+      }
+    }
+    return bestDir;
+  }
+
+  /** Approximate player heading in grid terms (for the ambush ghost). */
+  private getPlayerFacingGrid(): { x: number; z: number } {
+    const s = Math.sin(this.avatarYaw);
+    const c = Math.cos(this.avatarYaw);
+    if (Math.abs(s) > Math.abs(c)) return { x: s > 0 ? 1 : -1, z: 0 };
+    return { x: 0, z: c > 0 ? 1 : -1 };
+  }
+
+  /** Pellet pickup check — iterate maze children and test against
+   *  player. Removes the mesh, adds score, plays sound. */
+  /** Spawn / despawn the fruit bonus. It appears once per stage after
+   *  the player has eaten half the pellets, stays visible for ~10s,
+   *  and awards a stage-scaled bonus on pickup. */
+  private updatePacmanFruit(dt: number) {
+    // Spawn condition — half pellets eaten & not yet spawned this stage
+    const eaten = this.pacmanPelletCount - this.pacmanPelletsRemaining;
+    if (
+      !this.pacmanFruitSpawned &&
+      eaten >= this.pacmanPelletCount / 2 &&
+      this.pacmanMazeGroup
+    ) {
+      this.spawnPacmanFruit();
+    }
+
+    if (!this.pacmanFruit || !this.pacmanMazeGroup) return;
+
+    // Bob animation
+    const t = performance.now() * 0.003;
+    this.pacmanFruit.position.y = 0.6 + Math.sin(t) * 0.1;
+    this.pacmanFruit.rotation.y += dt * 2;
+
+    // Lifetime countdown
+    this.pacmanFruitTimer -= dt;
+    if (this.pacmanFruitTimer <= 0) {
+      this.pacmanMazeGroup.remove(this.pacmanFruit);
+      this.pacmanFruit = null;
+      return;
+    }
+
+    // Collection check
+    const dx = this.pacmanFruit.position.x - this.playerPos.x;
+    const dz = this.pacmanFruit.position.z - this.playerPos.z;
+    const r = 0.7 * this.PACMAN_CELL;
+    if (dx * dx + dz * dz < r * r) {
+      this.pacmanScore += this.pacmanFruitValue;
+      this.sound.playPacmanJingle();
+      this.pacmanMazeGroup.remove(this.pacmanFruit);
+      this.pacmanFruit = null;
+      this.updatePacmanHUD();
+    }
+  }
+
+  /** Create the fruit bonus mesh and place it at the center of the
+   *  maze (just below the ghost house). Value scales with stage. */
+  private spawnPacmanFruit() {
+    if (!this.pacmanMazeGroup) return;
+    const S = this.PACMAN_CELL;
+    // Center column, row right below the ghost house (row 16 empty cell)
+    const x = this.pacmanGridOriginX + 13.5 * S;
+    const z = this.pacmanGridOriginZ + 20 * S;
+
+    // Simple "cherry" — red sphere with a green stem
+    const fruit = new THREE.Group();
+    const cherryMat = new THREE.MeshStandardMaterial({
+      color: 0xff2020,
+      emissive: 0x800000,
+      emissiveIntensity: 0.5,
+      roughness: 0.35,
+    });
+    const cherryGeom = new THREE.SphereGeometry(0.5 * (S / 2.2), 16, 12);
+    const c1 = new THREE.Mesh(cherryGeom, cherryMat);
+    c1.position.set(-0.25, 0, 0);
+    fruit.add(c1);
+    const c2 = new THREE.Mesh(cherryGeom, cherryMat);
+    c2.position.set(0.25, 0, 0);
+    fruit.add(c2);
+    const stemMat = new THREE.MeshStandardMaterial({ color: 0x20c030 });
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8),
+      stemMat
+    );
+    stem.position.set(0, 0.35, 0);
+    fruit.add(stem);
+
+    const mesh = fruit as unknown as THREE.Mesh;
+    mesh.position.set(x, 0.6, z);
+    this.pacmanMazeGroup.add(mesh);
+    this.pacmanFruit = mesh;
+    this.pacmanFruitTimer = 10;
+    this.pacmanFruitSpawned = true;
+    // Points: 100 × stage, capped at 1000
+    this.pacmanFruitValue = Math.min(1000, 100 * this.pacmanStage);
+  }
+
+  private checkPacmanPelletCollision() {
+    if (!this.pacmanMazeGroup) return;
+    const toRemove: THREE.Object3D[] = [];
+    for (const child of this.pacmanMazeGroup.children) {
+      if (!child.userData.isPacmanPellet) continue;
+      const dx = child.position.x - this.playerPos.x;
+      const dz = child.position.z - this.playerPos.z;
+      // Pickup radius = half a cell — generous enough to grab any
+      // pellet the player walks near without requiring pixel-perfect
+      // alignment.
+      const r = 0.55 * this.PACMAN_CELL;
+      if (dx * dx + dz * dz < r * r) toRemove.push(child);
+    }
+    if (toRemove.length === 0) return;
+    for (const obj of toRemove) {
+      this.pacmanMazeGroup.remove(obj);
+      const score = (obj.userData.pelletScore as number) ?? 10;
+      this.pacmanScore += score;
+      this.pacmanPelletsRemaining--;
+      if (obj.userData.isPacmanPower) {
+        this.sound.playPacmanPower();
+        // Enter frightened mode — ghosts turn blue and flee
+        // Frightened mode gets shorter each stage (7s → 3s floor).
+        this.pacmanFrightenedTime = Math.max(3, 7 - (this.pacmanStage - 1) * 0.5);
+        for (const g of this.pacmanGhosts) {
+          if (g.state !== 'eaten') {
+            g.state = 'frightened';
+            // Force immediate direction re-pick by nudging to center
+            g.dir = { x: -g.dir.x, z: -g.dir.z };
+          }
+        }
+      } else {
+        this.sound.playPacmanChomp();
+      }
+    }
+    this.updatePacmanHUD();
+
+    // Stage cleared → advance to next stage (maze is rebuilt with
+    // faster ghosts). Player keeps their score and lives.
+    if (this.pacmanPelletsRemaining <= 0 && this.pacmanPelletCount > 0) {
+      this.advancePacmanStage();
+    }
+  }
+
+  /** Advance to the next stage: briefly show a "STAGE CLEAR" banner,
+   *  rebuild the maze + ghosts with new speed, and resume play. */
+  private advancePacmanStage() {
+    this.sound.stopPacmanSiren();
+    this.sound.playPacmanVictory();
+
+    // Flash a short "STAGE X CLEAR" overlay for 1.5s, then rebuild.
+    if (this.pacmanOverlayEl) {
+      this.pacmanOverlayEl.classList.remove('hidden');
+      const titleEl = this.pacmanOverlayEl.querySelector('.pacman-overlay-title');
+      if (titleEl) {
+        titleEl.textContent = `STAGE ${this.pacmanStage} CLEAR!`;
+      }
+      const scoreEl = this.pacmanOverlayEl.querySelector('.pacman-overlay-score');
+      if (scoreEl) {
+        scoreEl.textContent = `SCORE: ${this.pacmanScore}  ·  NEXT STAGE →`;
+      }
+      // Hide the "close" button for the auto-advance flow (the overlay
+      // reappears with the button on true GAME OVER).
+      const closeBtn = this.pacmanOverlayEl.querySelector(
+        '.pacman-overlay-close'
+      ) as HTMLElement | null;
+      if (closeBtn) closeBtn.style.display = 'none';
+    }
+
+    // After a brief pause, tear down maze and build next stage
+    setTimeout(() => {
+      if (!this.isPacmanPlaying) return;
+      this.pacmanStage++;
+      this.rebuildPacmanMaze();
+      if (this.pacmanOverlayEl) {
+        this.pacmanOverlayEl.classList.add('hidden');
+        const closeBtn = this.pacmanOverlayEl.querySelector(
+          '.pacman-overlay-close'
+        ) as HTMLElement | null;
+        if (closeBtn) closeBtn.style.display = '';
+      }
+    }, 1800);
+  }
+
+  /** Dispose the current maze + ghosts and build a fresh one for the
+   *  current stage number. Player state (score, lives) is preserved. */
+  private rebuildPacmanMaze() {
+    // Dispose old maze
+    if (this.pacmanMazeGroup) {
+      this.scene.remove(this.pacmanMazeGroup);
+      this.pacmanMazeGroup.traverse((c) => {
+        const m = c as THREE.Mesh;
+        if (m.geometry) m.geometry.dispose();
+        if (m.material) {
+          if (Array.isArray(m.material)) m.material.forEach((mm) => mm.dispose());
+          else (m.material as THREE.Material).dispose();
+        }
+      });
+      this.pacmanMazeGroup = null;
+    }
+    for (const g of this.pacmanGhosts) this.scene.remove(g.obj);
+    this.pacmanGhosts = [];
+    this.pacmanFruit = null;
+    this.pacmanFruitSpawned = false;
+    this.pacmanFruitTimer = 0;
+
+    this.buildPacmanMaze();
+
+    // Re-seed player at the maze's spawn
+    this.playerPos.copy(this.pacmanPlayerSpawn);
+    this.avatarYaw = 0;
+    if (this.playerAvatar) {
+      this.playerAvatar.position.copy(this.playerPos);
+      this.playerAvatar.rotation.set(0, 0, 0);
+    }
+    this.pacmanReadyTimer = 1.0;
+    this.pacmanFrightenedTime = 0;
+    this.updatePacmanHUD();
+    // Resume siren
+    if (this.isPacmanPlaying) this.sound.playPacmanSiren(this.pacmanStage);
+  }
+
+  /** Ghost touch → lose a life (or eat ghost if in frightened mode). */
+  private checkPacmanGhostCollision() {
+    if (this.pacmanDeathTimer > 0) return;
+    for (const g of this.pacmanGhosts) {
+      const dx = g.obj.position.x - this.playerPos.x;
+      const dz = g.obj.position.z - this.playerPos.z;
+      const r = 0.6 * this.PACMAN_CELL;
+      if (dx * dx + dz * dz < r * r) {
+        if (g.state === 'frightened') {
+          // Eaten! Ghost rushes back to spawn.
+          this.sound.playPacmanGhostEaten();
+          this.pacmanScore += 200;
+          g.obj.position.copy(g.spawn);
+          g.dir = { x: 0, z: -1 };
+          g.lastCell = null;
+          g.state = 'chase';
+          this.updatePacmanHUD();
+        } else if (g.state !== 'eaten') {
+          // Death
+          this.sound.stopPacmanSiren();
+          this.sound.playPacmanDeath();
+          this.pacmanLives--;
+          this.pacmanDeathTimer = 1.8;
+          this.updatePacmanHUD();
+          return;
+        }
+      }
+    }
+  }
+
+  /** After the death animation: either respawn and continue, or show
+   *  the GAME OVER overlay. */
+  private respawnPacmanPlayer() {
+    if (this.pacmanLives <= 0) {
+      if (this.pacmanOverlayEl) {
+        this.pacmanOverlayEl.classList.remove('hidden');
+        const titleEl = this.pacmanOverlayEl.querySelector('.pacman-overlay-title');
+        if (titleEl) titleEl.textContent = 'GAME OVER';
+        const scoreEl = this.pacmanOverlayEl.querySelector('.pacman-overlay-score');
+        if (scoreEl) scoreEl.textContent = `SCORE: ${this.pacmanScore}`;
+      }
+      return;
+    }
+    // Respawn player + ghosts
+    this.playerPos.copy(this.pacmanPlayerSpawn);
+    this.avatarYaw = 0;
+    if (this.playerAvatar) {
+      this.playerAvatar.position.copy(this.playerPos);
+      this.playerAvatar.rotation.set(0, 0, 0);
+    }
+    for (const g of this.pacmanGhosts) {
+      g.obj.position.copy(g.spawn);
+      g.dir = { x: 0, z: -1 };
+      g.state = 'scatter';
+      g.stateTimer = 3;
+      g.lastCell = null;
+    }
+    this.pacmanReadyTimer = 1.0;
+    this.pacmanFrightenedTime = 0;
+    if (this.isPacmanPlaying) this.sound.playPacmanSiren(1);
   }
 
   /**
@@ -3989,8 +5702,16 @@ export class Game {
       return;
     }
 
+    // Vehicle ride: player is driving a car/train — WASD steers the
+    // vehicle, camera follows behind, normal physics are bypassed.
+    if (this.vehicleRide) {
+      this.updateVehicleRide(dt);
+      return;
+    }
+
     // Refresh the playground hotspot once per frame (skipped during a ride)
     this.updatePlaygroundHotspot();
+    this.updateVehicleHotspot();
 
     // Real Roblox-style run: significantly faster than walk. The walk
     // cycle amplitude + body lean changes below make it *feel* like a
@@ -5602,6 +7323,338 @@ export class Game {
   }
 
   // ------------------------------------------------------------------
+  //  Vehicle ride system
+  // ------------------------------------------------------------------
+
+  private static readonly VEHICLE_INTERACT_RANGE = 5;
+  private static readonly CAR_MAX_SPEED = 14;
+  private static readonly CAR_ACCEL = 12;
+  private static readonly CAR_BRAKE = 18;
+  private static readonly CAR_FRICTION = 6;
+  private static readonly CAR_TURN_SPEED = 2.5;
+  private static readonly TRAIN_MAX_SPEED = 10;
+  private static readonly TRAIN_ACCEL = 6;
+
+  /** Scan all bricks for the nearest vehicle within interaction range. */
+  private updateVehicleHotspot() {
+    if (this.vehicleRide) {
+      this.vehicleHotspot = null;
+      return;
+    }
+    let best: { obj: THREE.Object3D; type: 'car' | 'train' } | null = null;
+    let bestDist = Game.VEHICLE_INTERACT_RANGE;
+    for (const child of this.brickGroup.children) {
+      if (!child.userData.isVehicle) continue;
+      const dx = child.position.x - this.playerPos.x;
+      const dz = child.position.z - this.playerPos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = {
+          obj: child,
+          type: child.userData.vehicleType as 'car' | 'train',
+        };
+      }
+    }
+    this.vehicleHotspot = best;
+    // Show/hide the playground prompt (reuse the same [E] element)
+    this.renderVehiclePrompt();
+  }
+
+  private renderVehiclePrompt() {
+    const el = this.getPlaygroundPrompt();
+    if (!el) return;
+    if (this.vehicleRide) {
+      if (this.playgroundPromptLabelEl) {
+        this.playgroundPromptLabelEl.textContent = '내리기';
+      }
+      el.classList.remove('hidden');
+      return;
+    }
+    if (this.vehicleHotspot && !this.playgroundHotspot) {
+      if (this.playgroundPromptLabelEl) {
+        this.playgroundPromptLabelEl.textContent =
+          this.vehicleHotspot.type === 'car' ? '운전' : '탑승';
+      }
+      el.classList.remove('hidden');
+      return;
+    }
+    // Don't hide if playground prompt is showing
+    if (!this.playgroundHotspot && !this.playgroundRide) {
+      el.classList.add('hidden');
+    }
+  }
+
+  /** Board a vehicle. Hides the player avatar, locks the camera to the
+   *  vehicle, and starts accepting WASD as driving input. */
+  private startVehicleRide() {
+    const hotspot = this.vehicleHotspot;
+    if (!hotspot) return;
+    const obj = hotspot.obj;
+    const ride: VehicleRideState = {
+      obj,
+      type: hotspot.type,
+      speed: 0,
+      yaw: obj.rotation.y,
+    };
+
+    if (hotspot.type === 'train') {
+      // Build the rail path from connected tiles
+      const path = this.buildRailPath(obj);
+      if (path) {
+        ride.railPath = path.curve;
+        ride.railT = path.startT;
+      }
+    }
+
+    this.vehicleRide = ride;
+    // Hide the player avatar while driving
+    if (this.playerAvatar) this.playerAvatar.visible = false;
+    this.renderVehiclePrompt();
+  }
+
+  private dismountVehicle() {
+    if (!this.vehicleRide) return;
+    const obj = this.vehicleRide.obj;
+    // Place player next to the vehicle
+    const exitX = obj.position.x + Math.sin(obj.rotation.y + Math.PI / 2) * 2.5;
+    const exitZ = obj.position.z + Math.cos(obj.rotation.y + Math.PI / 2) * 2.5;
+    this.playerPos.set(
+      exitX,
+      Math.max(0, this.findGroundY(exitX, obj.position.y + 2, exitZ, 1.0)),
+      exitZ
+    );
+    this.avatarYaw = obj.rotation.y;
+    this.vehicleRide = null;
+    if (this.playerAvatar) this.playerAvatar.visible = this.viewMode === 'third';
+    this.renderVehiclePrompt();
+  }
+
+  /** Main vehicle update — called every frame while the player is
+   *  driving. Handles input → physics → position → camera. */
+  private updateVehicleRide(dt: number) {
+    const ride = this.vehicleRide;
+    if (!ride) return;
+
+    if (ride.type === 'car') {
+      this.updateCarDrive(ride, dt);
+    } else {
+      this.updateTrainDrive(ride, dt);
+    }
+
+    // Move the brick-group object to the vehicle's new world position.
+    // The vehicle obj is a child of brickGroup, so we set its LOCAL
+    // position (which equals world position since brickGroup is at origin).
+    ride.obj.rotation.y = ride.yaw;
+
+    // Camera follows behind the vehicle in 3rd-person chase view.
+    const camDist = ride.type === 'car' ? 10 : 14;
+    const camH = ride.type === 'car' ? 5 : 6;
+    const behindX = ride.obj.position.x - Math.sin(ride.yaw) * camDist;
+    const behindZ = ride.obj.position.z - Math.cos(ride.yaw) * camDist;
+    const targetY = ride.obj.position.y + 1.5;
+
+    // Smooth camera follow
+    this.camera.position.lerp(
+      new THREE.Vector3(behindX, targetY + camH, behindZ),
+      1 - Math.exp(-5 * dt)
+    );
+    this.camera.lookAt(
+      ride.obj.position.x,
+      targetY,
+      ride.obj.position.z
+    );
+
+    // Keep playerPos synced so dismount places correctly
+    this.playerPos.copy(ride.obj.position);
+  }
+
+  /** Car driving: free WASD steering on the ground plane. W/S =
+   *  accelerate/brake, A/D = turn. Speed boost on road tiles. */
+  private updateCarDrive(ride: VehicleRideState, dt: number) {
+    // Acceleration / braking
+    if (this.moveKeys.forward) {
+      ride.speed = Math.min(
+        Game.CAR_MAX_SPEED,
+        ride.speed + Game.CAR_ACCEL * dt
+      );
+    } else if (this.moveKeys.back) {
+      ride.speed = Math.max(
+        -Game.CAR_MAX_SPEED * 0.4,
+        ride.speed - Game.CAR_BRAKE * dt
+      );
+    } else {
+      // Friction deceleration
+      if (ride.speed > 0) {
+        ride.speed = Math.max(0, ride.speed - Game.CAR_FRICTION * dt);
+      } else if (ride.speed < 0) {
+        ride.speed = Math.min(0, ride.speed + Game.CAR_FRICTION * dt);
+      }
+    }
+
+    // Steering (only when moving)
+    if (Math.abs(ride.speed) > 0.5) {
+      const turnFactor = Math.min(1, Math.abs(ride.speed) / 5);
+      if (this.moveKeys.left) {
+        ride.yaw += Game.CAR_TURN_SPEED * turnFactor * dt;
+      }
+      if (this.moveKeys.right) {
+        ride.yaw -= Game.CAR_TURN_SPEED * turnFactor * dt;
+      }
+    }
+
+    // Road speed boost: check if the vehicle is on a road tile
+    const isOnRoad = this.isOnRoadTile(ride.obj.position.x, ride.obj.position.z);
+    const speedMult = isOnRoad ? 1.3 : 1.0;
+
+    // Move forward along the vehicle's facing direction
+    const moveSpeed = ride.speed * speedMult;
+    ride.obj.position.x += Math.sin(ride.yaw) * moveSpeed * dt;
+    ride.obj.position.z += Math.cos(ride.yaw) * moveSpeed * dt;
+
+    // Keep on the ground
+    ride.obj.position.y = Math.max(
+      0,
+      this.findGroundY(ride.obj.position.x, ride.obj.position.y + 2, ride.obj.position.z, 1.0)
+    );
+  }
+
+  /** Check if a world XZ position is on any road tile. */
+  private isOnRoadTile(x: number, z: number): boolean {
+    for (const child of this.brickGroup.children) {
+      const spec = child.userData.spec as { type?: string; w?: number; d?: number } | undefined;
+      if (!spec?.type?.startsWith('road_')) continue;
+      const hw = ((spec.w ?? 8) * GRID.X) / 2;
+      const hd = ((spec.d ?? 8) * GRID.Z) / 2;
+      if (
+        x >= child.position.x - hw &&
+        x <= child.position.x + hw &&
+        z >= child.position.z - hd &&
+        z <= child.position.z + hd
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Train driving: follows the assembled rail spline. W/S = forward/
+   *  back along the spline, the train auto-rotates to match the rail
+   *  tangent direction. */
+  private updateTrainDrive(ride: VehicleRideState, dt: number) {
+    if (!ride.railPath) {
+      // No connected rails — treat like a car but slower
+      this.updateCarDrive(ride, dt);
+      return;
+    }
+
+    // Acceleration along the spline
+    if (this.moveKeys.forward) {
+      ride.speed = Math.min(
+        Game.TRAIN_MAX_SPEED,
+        ride.speed + Game.TRAIN_ACCEL * dt
+      );
+    } else if (this.moveKeys.back) {
+      ride.speed = Math.max(
+        -Game.TRAIN_MAX_SPEED * 0.5,
+        ride.speed - Game.TRAIN_ACCEL * dt
+      );
+    } else {
+      if (ride.speed > 0) ride.speed = Math.max(0, ride.speed - 3 * dt);
+      else if (ride.speed < 0) ride.speed = Math.min(0, ride.speed + 3 * dt);
+    }
+
+    // Advance along the spline parameter
+    const pathLen = ride.railPath.getLength();
+    if (pathLen < 1) return;
+    const t = ride.railT ?? 0;
+    const newT = Math.max(0, Math.min(1, t + (ride.speed * dt) / pathLen));
+    ride.railT = newT;
+
+    // Sample position and tangent from the spline
+    const pos = ride.railPath.getPointAt(newT);
+    const tangent = ride.railPath.getTangentAt(newT);
+    ride.obj.position.set(pos.x, pos.y, pos.z);
+    ride.yaw = Math.atan2(tangent.x, tangent.z);
+  }
+
+  /** Scans all placed rail tiles, chains them together by matching
+   *  edges, and returns a CatmullRomCurve3 path + the starting t
+   *  parameter closest to the train's current position. Returns null
+   *  if the train isn't on a rail tile or no connected path exists. */
+  private buildRailPath(
+    trainObj: THREE.Object3D
+  ): { curve: THREE.CatmullRomCurve3; startT: number } | null {
+    // Gather all rail tiles
+    const railTiles: THREE.Object3D[] = [];
+    for (const child of this.brickGroup.children) {
+      const spec = child.userData.spec as { type?: string } | undefined;
+      if (spec?.type?.startsWith('rail_')) {
+        railTiles.push(child);
+      }
+    }
+    if (railTiles.length === 0) return null;
+
+    // For each rail tile, generate center-line waypoints (in world space).
+    // Straight: 2 points along Z; Curve: arc points; Crossing: 2 points.
+    const allPoints: THREE.Vector3[] = [];
+    // Sort by distance from train to get a rough ordering
+    railTiles.sort((a, b) => {
+      const da = a.position.distanceToSquared(trainObj.position);
+      const db = b.position.distanceToSquared(trainObj.position);
+      return da - db;
+    });
+
+    for (const tile of railTiles) {
+      const spec = tile.userData.spec as { type?: string; w?: number; d?: number };
+      const half = ((spec.w ?? 8) * GRID.X) / 2;
+      const ty = tile.position.y + PLATE_HEIGHT + 0.06;
+      const cosR = Math.cos(tile.rotation.y);
+      const sinR = Math.sin(tile.rotation.y);
+      const toWorld = (lx: number, lz: number) =>
+        new THREE.Vector3(
+          tile.position.x + lx * cosR + lz * sinR,
+          ty,
+          tile.position.z - lx * sinR + lz * cosR
+        );
+
+      if (spec.type === 'rail_straight' || spec.type === 'rail_crossing') {
+        // Straight segment along local Z
+        allPoints.push(toWorld(0, -half));
+        allPoints.push(toWorld(0, half));
+      } else if (spec.type === 'rail_curve') {
+        // Quarter arc: center at local (half, -half), R = half * 0.6
+        const cR = half * 0.6;
+        const cx = half;
+        const cz = -half;
+        for (let i = 0; i <= 8; i++) {
+          const a = Math.PI - (i / 8) * (Math.PI / 2);
+          allPoints.push(toWorld(cx + cR * Math.cos(a), cz + cR * Math.sin(a)));
+        }
+      }
+    }
+
+    if (allPoints.length < 2) return null;
+
+    const curve = new THREE.CatmullRomCurve3(allPoints, false, 'centripetal', 0.5);
+
+    // Find the t closest to the train's current position
+    let bestT = 0;
+    let bestDistSq = Infinity;
+    for (let i = 0; i <= 100; i++) {
+      const t = i / 100;
+      const p = curve.getPointAt(t);
+      const dsq = p.distanceToSquared(trainObj.position);
+      if (dsq < bestDistSq) {
+        bestDistSq = dsq;
+        bestT = t;
+      }
+    }
+
+    return { curve, startT: bestT };
+  }
+
+  // ------------------------------------------------------------------
   //  Render loop
   // ------------------------------------------------------------------
 
@@ -5613,6 +7666,8 @@ export class Game {
 
     if (this.isPlaying) {
       this.updatePlayMode(dt);
+    } else if (this.isPacmanPlaying) {
+      this.updatePacman(dt);
     } else {
       this.controls.update();
     }
@@ -5637,16 +7692,67 @@ export class Game {
   private animateEffects(now: number) {
     const t = now * 0.001;
     this.brickGroup.traverse((obj) => {
-      // Campfire flames: random flicker via scale + slight position jitter
+      // Campfire flames: layered cones (core / body / wisp) with per-layer
+      // flicker rates, plus a soft halo that pulses with the fire and
+      // ember particles that rise and reset.
       if (obj.userData.isCampfireFlame) {
         for (let i = 0; i < obj.children.length; i++) {
-          const flame = obj.children[i];
+          const child = obj.children[i];
+
+          // Halo sprite — gentle breathing pulse so it feels alive
+          if (child.userData.isCampfireHalo) {
+            const breathe = 1 + Math.sin(t * 2.5) * 0.08 + Math.sin(t * 5.7) * 0.04;
+            child.scale.set(5.5 * breathe, 5.5 * breathe, 1);
+            const mat = (child as THREE.Sprite).material as THREE.SpriteMaterial;
+            mat.opacity = 0.45 + Math.sin(t * 3.1) * 0.08;
+            continue;
+          }
+
+          // Ember sub-group — rise & reset loop
+          if (child.userData.isCampfireEmbers) {
+            for (let e = 0; e < child.children.length; e++) {
+              const ember = child.children[e] as THREE.Mesh;
+              const seed = ember.userData.seed as number;
+              const speed = ember.userData.speed as number;
+              const baseX = ember.userData.baseX as number;
+              const baseZ = ember.userData.baseZ as number;
+              // Lifecycle 0..1, looping; 0 = bottom, 1 = top
+              const life = ((t * speed + seed) % 1);
+              ember.position.y = 1.0 + life * 5.0;
+              // Drift sideways as it rises (heat shimmer)
+              ember.position.x = baseX + Math.sin(t * 3 + seed * 5) * 0.15 * life;
+              ember.position.z = baseZ + Math.cos(t * 2.7 + seed * 4) * 0.15 * life;
+              // Fade out near the top
+              const mat = ember.material as THREE.MeshBasicMaterial;
+              mat.opacity = Math.max(0, 1 - life) * 0.9;
+              const s = 1 - life * 0.4;
+              ember.scale.set(s, s, s);
+            }
+            continue;
+          }
+
+          // Flame cone — flicker scale + sway, no cumulative drift
+          const layer = child.userData.layer as
+            | 'core' | 'body' | 'wisp' | undefined;
+          if (!layer) continue;
           const seed = i * 1.7;
-          const scaleY = 0.8 + Math.sin(t * 8 + seed) * 0.25 + Math.sin(t * 13 + seed * 2) * 0.15;
-          const scaleXZ = 0.85 + Math.sin(t * 6 + seed * 3) * 0.15;
-          flame.scale.set(scaleXZ, scaleY, scaleXZ);
-          flame.position.x += Math.sin(t * 10 + seed) * 0.002;
-          flame.position.z += Math.cos(t * 11 + seed) * 0.002;
+          // Core flickers fast/sharp, body medium, wisps slow/wide
+          const rateY = layer === 'core' ? 11 : layer === 'body' ? 8 : 5.5;
+          const rateXZ = layer === 'core' ? 9 : layer === 'body' ? 6 : 4;
+          const ampY = layer === 'core' ? 0.30 : layer === 'body' ? 0.22 : 0.18;
+          const ampXZ = layer === 'core' ? 0.10 : layer === 'body' ? 0.14 : 0.20;
+          const scaleY = 1 + Math.sin(t * rateY + seed) * ampY
+            + Math.sin(t * rateY * 1.6 + seed * 2) * (ampY * 0.4);
+          const scaleXZ = 1 + Math.sin(t * rateXZ + seed * 3) * ampXZ;
+          child.scale.set(scaleXZ, scaleY, scaleXZ);
+          // Sway around the BASE position so it doesn't drift
+          const baseX = child.userData.baseX as number;
+          const baseZ = child.userData.baseZ as number;
+          const baseY = child.userData.baseY as number;
+          const swayAmp = layer === 'wisp' ? 0.08 : 0.04;
+          child.position.x = baseX + Math.sin(t * 2.3 + seed) * swayAmp;
+          child.position.z = baseZ + Math.cos(t * 2.1 + seed * 1.3) * swayAmp;
+          child.position.y = baseY + Math.sin(t * 3.5 + seed) * 0.05;
         }
       }
       // Fountain jets: gentle bobbing + scale pulse
@@ -5657,6 +7763,12 @@ export class Game {
           const pulse = 0.85 + Math.sin(t * 4 + seed) * 0.2;
           jet.scale.set(pulse, 0.9 + Math.sin(t * 3 + seed) * 0.15, pulse);
         }
+      }
+      // Power pellets pulse (bright ↔ dim) at ~3Hz so they read as
+      // "special" pickups even at a glance.
+      if (obj.userData.isPowerPellet) {
+        const pulse = 0.85 + Math.sin(t * 6) * 0.25;
+        obj.scale.set(pulse, pulse, pulse);
       }
     });
   }

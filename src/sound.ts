@@ -212,4 +212,299 @@ export class SoundManager {
     gain.connect(ctx.destination);
     source.start();
   }
+
+  // ==================================================================
+  //                         PAC-MAN SOUNDS
+  // ==================================================================
+  // All synthesized via Web Audio — no samples needed. Pitches are
+  // based on the classic arcade tunes, simplified but recognisable.
+
+  /** The "wakka" alternates between two toggling frequencies. Each call
+   *  plays ONE wakka (the next half of the pair), so chomps during rapid
+   *  pellet collection sound like the continuous waka-waka-waka-waka. */
+  private wakaToggle = false;
+  playPacmanChomp() {
+    if (!this.enabled) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const dur = 0.09;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    // Alternating "wa" (low) / "ka" (high) — two different pitches per pair
+    const hi = 880;
+    const lo = 440;
+    if (this.wakaToggle) {
+      osc.frequency.setValueAtTime(lo, now);
+      osc.frequency.linearRampToValueAtTime(hi, now + dur);
+    } else {
+      osc.frequency.setValueAtTime(hi, now);
+      osc.frequency.linearRampToValueAtTime(lo, now + dur);
+    }
+    this.wakaToggle = !this.wakaToggle;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.02);
+  }
+
+  /** Power-pellet eaten — a deeper, slower "wa-ka" than the regular chomp. */
+  playPacmanPower() {
+    if (!this.enabled) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const dur = 0.24;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.linearRampToValueAtTime(660, now + dur);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.02);
+    gain.gain.setValueAtTime(0.22, now + dur - 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.02);
+  }
+
+  /** Ghost eaten — short upward glissando, bright. */
+  playPacmanGhostEaten() {
+    if (!this.enabled) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const dur = 0.35;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(330, now);
+    osc.frequency.exponentialRampToValueAtTime(1320, now + dur);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.02);
+  }
+
+  /** Classic Pac-Man death — descending warble (pitch drop with vibrato). */
+  playPacmanDeath() {
+    if (!this.enabled) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const dur = 1.5;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    // Descending pitch with wobble
+    osc.frequency.setValueAtTime(660, now);
+    // Stepwise descent
+    const steps = 20;
+    for (let i = 1; i <= steps; i++) {
+      const t = now + (i / steps) * dur;
+      const f = 660 * Math.pow(0.1, i / steps);
+      osc.frequency.setValueAtTime(f, t);
+    }
+
+    // Vibrato LFO
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 14;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 45;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.04);
+    gain.gain.setValueAtTime(0.22, now + dur - 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    lfo.start(now);
+    osc.stop(now + dur + 0.05);
+    lfo.stop(now + dur + 0.05);
+  }
+
+  /** Extra-life / victory jingle — short rising arpeggio. */
+  playPacmanJingle() {
+    if (!this.enabled) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Notes (approx): C6 E6 G6 C7 — rising major arpeggio
+    const notes = [1047, 1319, 1568, 2093];
+    const noteDur = 0.12;
+    for (let i = 0; i < notes.length; i++) {
+      const t = now + i * noteDur;
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(notes[i], t);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + noteDur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + noteDur + 0.02);
+    }
+  }
+
+  /** Short victory fanfare (after clearing all pellets). */
+  playPacmanVictory() {
+    if (!this.enabled) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // G5 C6 E6 G6 C7 — bright fanfare
+    const notes = [784, 1047, 1319, 1568, 2093];
+    const noteDur = 0.16;
+    for (let i = 0; i < notes.length; i++) {
+      const t = now + i * noteDur;
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(notes[i], t);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.22, t + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + noteDur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + noteDur + 0.02);
+    }
+  }
+
+  // ---- Iconic Pac-Man intro melody ----
+  // Simplified transcription of the arcade intro, playable with a
+  // 2-oscillator lead + bass. ~4 seconds. Returns the estimated
+  // duration so callers can chain the siren after it finishes.
+  playPacmanIntro(): number {
+    if (!this.enabled) return 0;
+    const ctx = this.ensureContext();
+    if (!ctx) return 0;
+    const now = ctx.currentTime;
+    // Phrase: the famous opening.
+    // Rhythm: sixteenth-note pattern, ~168 bpm → each 16th ≈ 0.089s.
+    const u = 0.089; // unit = 1/16 note
+    type Note = { f: number; t: number; d: number };
+    // Melody voice (lead)
+    const lead: Note[] = [
+      // "C5 C6 G5 E5 C6 G5 E5"
+      { f: 523, t: 0,       d: u },
+      { f: 1047, t: u,      d: u },
+      { f: 784, t: u * 2,   d: u },
+      { f: 659, t: u * 3,   d: u * 2 },
+      { f: 1047, t: u * 5,  d: u * 0.5 },
+      { f: 784, t: u * 6,   d: u * 1.5 },
+      { f: 659, t: u * 7.5, d: u * 2 },
+      // Second half: "C#5 C#6 G#5 F5 C#6 G#5 F5"
+      { f: 554, t: u * 10,  d: u },
+      { f: 1109, t: u * 11, d: u },
+      { f: 831, t: u * 12,  d: u },
+      { f: 698, t: u * 13,  d: u * 2 },
+      { f: 1109, t: u * 15, d: u * 0.5 },
+      { f: 831, t: u * 16,  d: u * 1.5 },
+      { f: 698, t: u * 17.5, d: u * 2 },
+      // Final: chromatic run up + landing
+      { f: 659, t: u * 20,  d: u },
+      { f: 698, t: u * 21,  d: u },
+      { f: 740, t: u * 22,  d: u },
+      { f: 784, t: u * 23,  d: u * 2 },
+      { f: 880, t: u * 25,  d: u * 4 },
+    ];
+    const totalDur = u * 30;
+    for (const n of lead) {
+      const t0 = now + n.t;
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(n.f, t0);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.16, t0 + 0.008);
+      gain.gain.setValueAtTime(0.16, t0 + n.d - 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + n.d);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + n.d + 0.01);
+    }
+    return totalDur;
+  }
+
+  // ---- Siren loop (ghost chase background) ----
+  // Plays a repeating rising-falling tone that loops until stopped. Call
+  // stopPacmanSiren() to cancel.
+  private sirenOsc: OscillatorNode | null = null;
+  private sirenGain: GainNode | null = null;
+  playPacmanSiren(level = 1) {
+    if (!this.enabled) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    this.stopPacmanSiren();
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    const gain = ctx.createGain();
+    gain.gain.value = 0.06; // quiet background
+
+    // Each "cycle" rises from base to base*1.5 then back down — 0.5s loop.
+    // Higher levels speed it up and raise the base pitch, matching arcade.
+    const base = 180 + (level - 1) * 25;
+    const cycle = Math.max(0.28, 0.5 - (level - 1) * 0.04);
+    const cycles = 600; // enough for ~5 minutes at cycle=0.5
+    for (let i = 0; i < cycles; i++) {
+      const t = now + i * cycle;
+      osc.frequency.setValueAtTime(base, t);
+      osc.frequency.linearRampToValueAtTime(base * 1.5, t + cycle * 0.5);
+      osc.frequency.linearRampToValueAtTime(base, t + cycle);
+    }
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    this.sirenOsc = osc;
+    this.sirenGain = gain;
+  }
+  stopPacmanSiren() {
+    if (!this.ctx || !this.sirenOsc || !this.sirenGain) {
+      this.sirenOsc = null;
+      this.sirenGain = null;
+      return;
+    }
+    const now = this.ctx.currentTime;
+    try {
+      this.sirenGain.gain.cancelScheduledValues(now);
+      this.sirenGain.gain.setValueAtTime(this.sirenGain.gain.value, now);
+      this.sirenGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+      this.sirenOsc.stop(now + 0.1);
+    } catch {
+      /* already stopped */
+    }
+    this.sirenOsc = null;
+    this.sirenGain = null;
+  }
 }

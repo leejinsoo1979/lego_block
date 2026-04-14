@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@phosphor-icons/core": "^2.1.1",
+    "@supabase/supabase-js": "^2.103.0",
     "three": "^0.164.1"
   },
   "devDependencies": {

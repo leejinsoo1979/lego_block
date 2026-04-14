@@ -44,6 +44,7 @@ const PANEL_TITLES: Record<string, string> = {
   prop: '소품',
   road: '도로/철도',
   character: '캐릭터',
+  pacman: '팩맨',
   env: '환경',
 };
 
@@ -385,7 +386,8 @@ export function buildUI(game: Game) {
     // ignore the color picker — disable the panel so users don't get
     // confused.
     const isFurnitureOrProp = def?.category === 'furniture' || def?.category === 'prop';
-    const isColorless = isCharacter || isFurnitureOrProp || type === 'tree' || type === 'lamp';
+    // Sofa supports color customization — exclude it from colorless.
+    const isColorless = isCharacter || (isFurnitureOrProp && type !== 'sofa') || type === 'tree' || type === 'lamp';
     document
       .getElementById('color-panel')!
       .classList.toggle('disabled', isColorless);
@@ -622,8 +624,13 @@ export function buildUI(game: Game) {
 
   // --- Clear / count ---
   const clearBtn = document.getElementById('clear') as HTMLButtonElement;
-  clearBtn.addEventListener('click', () => {
-    if (confirm('모든 블록을 지울까요?')) game.clearAll();
+  clearBtn.addEventListener('click', async () => {
+    if (confirm('모든 블록을 지울까요?')) {
+      game.clearAll();
+      // Decouple from the saved map — next save will prompt for a new title
+      const { clearCurrentMap } = await import('./mapStorage');
+      clearCurrentMap();
+    }
   });
 
   // Count is mirrored in two places: sidebar footer + mobile drawer pill.
@@ -688,8 +695,20 @@ export function buildUI(game: Game) {
               if (game.isPlaying) game.stopPlay();
               else game.startPlay();
               break;
+            case 'pacman':
+              if (game.isPacmanPlaying) game.stopPacman();
+              else game.startPacman();
+              break;
             case 'help':
               if (helpPopover) helpPopover.classList.toggle('hidden');
+              break;
+            case 'save':
+              // Open the save dialog (it's wired in authUi.ts)
+              document.getElementById('map-save')?.click();
+              break;
+            case 'dashboard':
+              // Return to dashboard — wired in dashboard.ts via a global
+              document.dispatchEvent(new CustomEvent('goto-dashboard'));
               break;
           }
         }
@@ -717,6 +736,17 @@ export function buildUI(game: Game) {
         baseSyncPlay(playing);
         iconPlayBtn.textContent = playing ? '■' : '▶';
         iconPlayBtn.classList.toggle('active', playing);
+      };
+    }
+
+    // Mirror the Pac-Man game button visual state
+    const iconGameBtn = document.getElementById(
+      'iconbar-game'
+    ) as HTMLButtonElement | null;
+    if (iconGameBtn) {
+      game.onPacmanPlayChange = (playing: boolean) => {
+        iconGameBtn.classList.toggle('active', playing);
+        iconGameBtn.title = playing ? '게임 종료' : '팩맨 게임';
       };
     }
   }

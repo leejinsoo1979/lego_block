@@ -260,6 +260,14 @@ export function renderBlockTypeThumbnail(
       camera!.position.set(6, 10, 6);
       camera!.lookAt(0, 0, 0);
       break;
+    case 'car':
+      camera!.position.set(5, 4, 7);
+      camera!.lookAt(0, 0.6, 0);
+      break;
+    case 'train':
+      camera!.position.set(6, 5, 10);
+      camera!.lookAt(0, 0.8, 0);
+      break;
     // ------------------------------------------------------------------
     //  Playground modules
     // ------------------------------------------------------------------
