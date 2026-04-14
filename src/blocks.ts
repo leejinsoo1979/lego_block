@@ -160,6 +160,13 @@ export function createBrick(spec: BlockSpec): THREE.Group {
     case 'rail_crossing':
       group = createRailCrossingBlock(spec);
       break;
+    // 탈것
+    case 'car':
+      group = createCarBlock(spec);
+      break;
+    case 'train':
+      group = createTrainBlock(spec);
+      break;
     // 가구
     case 'chair':
       group = createChairBlock(spec);
@@ -2221,75 +2228,271 @@ function createMerryGoRoundBlock(spec: BlockSpec): THREE.Group {
 //  between two separated baseplate tiles. Fixed size 2 × 44 studs.
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
-//  Road tile factories — flat 8×8 stud tiles placed ON the baseplate.
-//  All tiles share a common asphalt-gray base slab (1 plate thick)
-//  with painted road markings (white center line, yellow edge lines)
-//  or rail geometry (brown sleepers + silver rails) on top.
+//  Road tile factories — Cities: Skylines-quality urban roads.
+//
+//  Each 8×8 tile has:
+//    - Dark asphalt surface (1 plate thick)
+//    - 2-lane markings: yellow DOUBLE center line + white solid edge
+//      lines + dashed white lane divider where appropriate
+//    - Concrete sidewalks with a darker curb strip at road edge
+//    - Sidewalk tile grooves (2×4 flagstone pattern)
+//    - Manhole covers and storm-drain grates as street details
+//    - Crosswalk zebra stripes at intersections / T-junctions
 // ------------------------------------------------------------------
 
-/** Shared asphalt base slab for all road/rail tiles. */
+// --- Shared constants ---
+const ROAD_W = 5.0; // road surface width in studs (2 lanes × 2.5 each)
+const HALF_ROAD = ROAD_W / 2;
+const LINE_H = PLATE_HEIGHT + 0.012; // painted line Y (above asphalt)
+const SIDEWALK_H = PLATE_HEIGHT + 0.15; // sidewalk top Y (curb height)
+const CURB_STRIP_W = 0.22; // darker strip at road-sidewalk boundary
+
+// --- Shared materials (built once, reused across tiles) ---
+const asphaltMat = new THREE.MeshStandardMaterial({
+  color: 0x23252b,
+  roughness: 0.92,
+  metalness: 0.02,
+});
+const sidewalkMat = new THREE.MeshStandardMaterial({
+  color: 0xb7babf,
+  roughness: 0.88,
+});
+const sidewalkDarkMat = new THREE.MeshStandardMaterial({
+  color: 0x8e9195,
+  roughness: 0.85,
+});
+const curbMat = new THREE.MeshStandardMaterial({
+  color: 0x3a3d42,
+  roughness: 0.8,
+});
+const yellowLineMat = new THREE.MeshStandardMaterial({
+  color: 0xe8c344,
+  roughness: 0.5,
+});
+const whiteLineMat = new THREE.MeshStandardMaterial({
+  color: 0xe8e8e8,
+  roughness: 0.55,
+});
+const manholeMat = new THREE.MeshStandardMaterial({
+  color: 0x171819,
+  roughness: 0.7,
+  metalness: 0.4,
+});
+const grateMat = new THREE.MeshStandardMaterial({
+  color: 0x1a1c20,
+  roughness: 0.6,
+  metalness: 0.3,
+});
+
+/** Asphalt base — the dark road surface. */
 function roadBase(w: number, d: number): { group: THREE.Group; mat: THREE.MeshStandardMaterial } {
   const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.85 });
   const slab = new THREE.Mesh(
     new THREE.BoxGeometry(w * GRID.X, PLATE_HEIGHT, d * GRID.Z),
-    mat
+    asphaltMat
   );
   slab.position.y = PLATE_HEIGHT / 2;
   slab.receiveShadow = true;
   slab.castShadow = true;
   group.add(slab);
-  return { group, mat };
+  return { group, mat: asphaltMat };
 }
 
-const ROAD_W = 4.5; // road-surface width in studs (leaves 1.75 sidewalk on each side)
-const LINE_H = PLATE_HEIGHT + 0.01; // line Y just above the slab surface
+/** Yellow DOUBLE center line along Z (two parallel yellow solid lines). */
+function addDoubleYellowCenter(group: THREE.Group, length: number) {
+  for (const sx of [-1, 1]) {
+    const line = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.02, length - 0.1),
+      yellowLineMat
+    );
+    line.position.set(sx * 0.14, LINE_H, 0);
+    group.add(line);
+  }
+}
 
-/** White dashed center line running along Z axis. */
-function addCenterLine(group: THREE.Group, length: number) {
-  const lineMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
-  const dashLen = 0.8;
-  const gapLen = 0.6;
+/** White DASHED lane divider along Z (single dashed line in road center). */
+function addDashedCenter(group: THREE.Group, length: number) {
+  const dashLen = 0.9;
+  const gapLen = 0.7;
   const step = dashLen + gapLen;
   const count = Math.floor(length / step);
   const startZ = -length / 2 + (length - count * step + dashLen) / 2;
   for (let i = 0; i < count; i++) {
     const dash = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.02, dashLen),
-      lineMat
+      new THREE.BoxGeometry(0.14, 0.02, dashLen),
+      whiteLineMat
     );
     dash.position.set(0, LINE_H, startZ + i * step);
     group.add(dash);
   }
 }
 
-/** Yellow solid edge lines on both sides of the road, running along Z. */
-function addEdgeLines(group: THREE.Group, length: number) {
-  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xddb832, roughness: 0.6 });
+/** Solid white edge lines along Z (both sides of the road surface). */
+function addWhiteEdgeLines(group: THREE.Group, length: number) {
   for (const sx of [-1, 1]) {
     const line = new THREE.Mesh(
-      new THREE.BoxGeometry(0.1, 0.02, length - 0.2),
-      edgeMat
+      new THREE.BoxGeometry(0.11, 0.02, length - 0.1),
+      whiteLineMat
     );
-    line.position.set(sx * (ROAD_W / 2), LINE_H, 0);
+    line.position.set(sx * (HALF_ROAD - 0.18), LINE_H, 0);
     group.add(line);
   }
 }
 
-/** Sidewalk curb strips on both sides. */
+/** Concrete sidewalks on both sides — raised top with darker curb edge,
+ *  flagstone tile grooves for texture. Runs along Z. */
 function addSidewalks(group: THREE.Group, w: number, d: number) {
-  const curbMat = new THREE.MeshStandardMaterial({ color: 0xa0a3a8, roughness: 0.75 });
   const totalW = w * GRID.X;
   const totalD = d * GRID.Z;
-  const curbW = (totalW - ROAD_W) / 2;
+  const walkW = (totalW - ROAD_W) / 2;
+  if (walkW < 0.2) return;
   for (const sx of [-1, 1]) {
+    const cx = sx * (HALF_ROAD + walkW / 2);
+    // Main sidewalk slab (raised)
+    const walk = new THREE.Mesh(
+      new THREE.BoxGeometry(walkW, SIDEWALK_H, totalD),
+      sidewalkMat
+    );
+    walk.position.set(cx, SIDEWALK_H / 2, 0);
+    walk.receiveShadow = true;
+    walk.castShadow = true;
+    group.add(walk);
+    // Darker curb strip on the road-facing edge
     const curb = new THREE.Mesh(
-      new THREE.BoxGeometry(curbW, PLATE_HEIGHT + 0.08, totalD),
+      new THREE.BoxGeometry(CURB_STRIP_W, SIDEWALK_H + 0.01, totalD),
       curbMat
     );
-    curb.position.set(sx * (ROAD_W / 2 + curbW / 2), (PLATE_HEIGHT + 0.08) / 2, 0);
-    curb.receiveShadow = true;
+    curb.position.set(
+      sx * (HALF_ROAD + CURB_STRIP_W / 2 - 0.01),
+      SIDEWALK_H / 2 + 0.005,
+      0
+    );
     group.add(curb);
+    // Flagstone grooves — shallow lines cutting the sidewalk into 2×N
+    // rectangles. Darker thin strips on top of the sidewalk surface.
+    const grooveCount = Math.floor(totalD / 2);
+    for (let i = 1; i < grooveCount; i++) {
+      const gz = -totalD / 2 + (i * totalD) / grooveCount;
+      const groove = new THREE.Mesh(
+        new THREE.BoxGeometry(walkW - 0.1, 0.012, 0.04),
+        sidewalkDarkMat
+      );
+      groove.position.set(cx, SIDEWALK_H + 0.006, gz);
+      group.add(groove);
+    }
+    // Center longitudinal groove
+    const longGroove = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.012, totalD - 0.1),
+      sidewalkDarkMat
+    );
+    longGroove.position.set(cx, SIDEWALK_H + 0.006, 0);
+    group.add(longGroove);
+  }
+}
+
+/** Storm-drain grate at the curb — small metal grille with parallel
+ *  slats. Placed at a specific world (x, z) on the road side near the
+ *  curb edge. */
+function addStormDrain(group: THREE.Group, x: number, z: number, sx: -1 | 1) {
+  const grateW = 0.5;
+  const grateL = 0.9;
+  // Base recess (slightly dark rectangle flush with asphalt)
+  const recess = new THREE.Mesh(
+    new THREE.BoxGeometry(grateW, 0.015, grateL),
+    grateMat
+  );
+  recess.position.set(x, LINE_H - 0.002, z);
+  group.add(recess);
+  // Parallel slats
+  const slatCount = 5;
+  const slatMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2d32,
+    roughness: 0.55,
+    metalness: 0.5,
+  });
+  for (let i = 0; i < slatCount; i++) {
+    const t = (i + 0.5) / slatCount;
+    const slat = new THREE.Mesh(
+      new THREE.BoxGeometry(grateW - 0.08, 0.01, 0.08),
+      slatMat
+    );
+    slat.position.set(x, LINE_H + 0.008, z - grateL / 2 + t * grateL);
+    group.add(slat);
+  }
+  void sx; // placement uses provided x directly
+}
+
+/** Round manhole cover — dark metal disc flush with the asphalt,
+ *  with a radial pattern suggesting the textured grip. */
+function addManhole(group: THREE.Group, x: number, z: number) {
+  const r = 0.45;
+  const cover = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r, 0.02, 20),
+    manholeMat
+  );
+  cover.position.set(x, LINE_H - 0.001, z);
+  group.add(cover);
+  // Inner ring
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(r * 0.7, r * 0.78, 20),
+    new THREE.MeshStandardMaterial({
+      color: 0x2e2f33,
+      roughness: 0.5,
+      metalness: 0.6,
+      side: THREE.DoubleSide,
+    })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(x, LINE_H + 0.006, z);
+  group.add(ring);
+  // Radial tick marks
+  const tickMat = new THREE.MeshStandardMaterial({
+    color: 0x2e2f33,
+    roughness: 0.5,
+    metalness: 0.5,
+  });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const tick = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.012, 0.2),
+      tickMat
+    );
+    tick.position.set(x + Math.cos(a) * r * 0.45, LINE_H + 0.005, z + Math.sin(a) * r * 0.45);
+    tick.rotation.y = -a;
+    group.add(tick);
+  }
+}
+
+/** Zebra crosswalk — 7 bold white stripes perpendicular to travel
+ *  direction, centered at (x0, z0). `axis: 0` = stripes perpendicular
+ *  to Z, `axis: 1` = perpendicular to X. */
+function addCrosswalk(
+  group: THREE.Group,
+  x0: number,
+  z0: number,
+  axis: 0 | 1
+) {
+  const stripes = 7;
+  const stripeW = 0.28;
+  const stripeGap = 0.22;
+  const stripeLen = ROAD_W - 0.4;
+  const band = stripes * stripeW + (stripes - 1) * stripeGap;
+  for (let i = 0; i < stripes; i++) {
+    const offset = -band / 2 + stripeW / 2 + i * (stripeW + stripeGap);
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        axis === 0 ? stripeLen : stripeW,
+        0.02,
+        axis === 0 ? stripeW : stripeLen
+      ),
+      whiteLineMat
+    );
+    if (axis === 0) {
+      stripe.position.set(x0, LINE_H, z0 + offset);
+    } else {
+      stripe.position.set(x0 + offset, LINE_H, z0);
+    }
+    group.add(stripe);
   }
 }
 
@@ -2297,90 +2500,95 @@ function createRoadStraightBlock(spec: BlockSpec): THREE.Group {
   const { group } = roadBase(spec.w, spec.d);
   const len = spec.d * GRID.Z;
   addSidewalks(group, spec.w, spec.d);
-  addCenterLine(group, len);
-  addEdgeLines(group, len);
+  addDoubleYellowCenter(group, len);
+  addWhiteEdgeLines(group, len);
+
+  // Add a manhole cover roughly centered in one lane
+  addManhole(group, -HALF_ROAD / 2, -0.4);
+  // Add a storm drain at the opposite lane curb
+  addStormDrain(group, HALF_ROAD - 0.35, 1.5, 1);
   return group;
 }
 
 function createRoadCurveBlock(spec: BlockSpec): THREE.Group {
   const { group } = roadBase(spec.w, spec.d);
   const half = (spec.w * GRID.X) / 2; // 4
-  const lineMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
-  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xddb832, roughness: 0.6 });
-  const curbMat = new THREE.MeshStandardMaterial({ color: 0xa0a3a8, roughness: 0.75 });
 
-  // 90° curve: road enters from the -Z edge center (x=0, z=-half) and
-  // exits from the +X edge center (x=+half, z=0). Arc center sits at
-  // the bottom-right corner (half, -half) with radius = half, so the
-  // openings line up exactly with adjacent straight tiles.
+  // 90° curve: enters at (0, -half), exits at (+half, 0). Arc center
+  // at the bottom-right corner with R = half, lining up with straight
+  // tiles on both ends.
   const arcCx = half;
   const arcCz = -half;
   const R = half;
 
-  // Dashed white center line along the arc (angle π → π/2)
-  const dashCount = 8;
-  for (let i = 0; i < dashCount; i++) {
-    const t = (i + 0.5) / dashCount;
-    const a = Math.PI - t * (Math.PI / 2);
-    const dash = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.02, 0.6),
-      lineMat
-    );
-    dash.position.set(
-      arcCx + R * Math.cos(a),
-      LINE_H,
-      arcCz + R * Math.sin(a)
-    );
-    dash.rotation.y = -(a - Math.PI / 2);
-    group.add(dash);
-  }
-
-  // Yellow edge arcs (inner + outer)
-  for (const rOffset of [-ROAD_W / 2, ROAD_W / 2]) {
-    const r = R + rOffset;
-    if (r <= 0) continue;
+  // Helper to build a single arc tube along a given radius
+  const arcTube = (
+    radius: number,
+    thickness: number,
+    yOffset: number,
+    mat: THREE.Material
+  ): THREE.Mesh | null => {
+    if (radius <= 0) return null;
     const pts: THREE.Vector3[] = [];
     for (let i = 0; i <= 32; i++) {
       const t = i / 32;
       const a = Math.PI - t * (Math.PI / 2);
       pts.push(new THREE.Vector3(
-        arcCx + r * Math.cos(a),
-        LINE_H,
-        arcCz + r * Math.sin(a)
+        arcCx + radius * Math.cos(a),
+        LINE_H + yOffset,
+        arcCz + radius * Math.sin(a)
       ));
     }
     const curve = new THREE.CatmullRomCurve3(pts);
-    const tube = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 32, 0.05, 4, false),
-      edgeMat
+    return new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 32, thickness, 5, false),
+      mat
     );
-    group.add(tube);
+  };
+
+  // Double yellow center lines (two parallel arcs, slightly offset)
+  for (const innerOffset of [-0.14, 0.14]) {
+    const t = arcTube(R + innerOffset, 0.05, 0, yellowLineMat);
+    if (t) group.add(t);
   }
 
-  // Sidewalk: inner corner fill near the arc center (bottom-right)
-  const innerR = R - ROAD_W / 2;
+  // White solid edge lines (slightly inset from the road edge)
+  for (const off of [-(HALF_ROAD - 0.18), HALF_ROAD - 0.18]) {
+    const t = arcTube(R + off, 0.055, 0, whiteLineMat);
+    if (t) group.add(t);
+  }
+
+  // Sidewalk: inner corner (the tight curve quadrant near arc center)
+  const innerR = R - HALF_ROAD;
   if (innerR > 0.3) {
-    const sz = innerR - 0.2;
+    const sz = innerR - 0.05;
     const inner = new THREE.Mesh(
-      new THREE.BoxGeometry(sz, PLATE_HEIGHT + 0.08, sz),
-      curbMat
+      new THREE.BoxGeometry(sz, SIDEWALK_H, sz),
+      sidewalkMat
     );
-    inner.position.set(half - sz / 2, (PLATE_HEIGHT + 0.08) / 2, -half + sz / 2);
+    inner.position.set(half - sz / 2, SIDEWALK_H / 2, -half + sz / 2);
     inner.receiveShadow = true;
     group.add(inner);
+    // Curb edge wrapping the inner corner — quarter-arc dark strip
+    const curbR = innerR + 0.04;
+    const curbT = arcTube(curbR, CURB_STRIP_W / 2, SIDEWALK_H / 2 - LINE_H, curbMat);
+    if (curbT) group.add(curbT);
   }
 
-  // Sidewalk: outer corner fill (top-left, opposite the curve)
-  const outerR = R + ROAD_W / 2;
-  const outerSz = half * 2 - outerR - 0.2;
+  // Sidewalk: outer corner (the large quadrant opposite the curve)
+  const outerR = R + HALF_ROAD;
+  const outerSz = half * 2 - outerR - 0.05;
   if (outerSz > 0.3) {
     const outer = new THREE.Mesh(
-      new THREE.BoxGeometry(outerSz, PLATE_HEIGHT + 0.08, outerSz),
-      curbMat
+      new THREE.BoxGeometry(outerSz, SIDEWALK_H, outerSz),
+      sidewalkMat
     );
-    outer.position.set(-half + outerSz / 2, (PLATE_HEIGHT + 0.08) / 2, half - outerSz / 2);
+    outer.position.set(-half + outerSz / 2, SIDEWALK_H / 2, half - outerSz / 2);
     outer.receiveShadow = true;
     group.add(outer);
+    // Outer curb arc
+    const curbT = arcTube(outerR, CURB_STRIP_W / 2, SIDEWALK_H / 2 - LINE_H, curbMat);
+    if (curbT) group.add(curbT);
   }
 
   return group;
@@ -2388,60 +2596,177 @@ function createRoadCurveBlock(spec: BlockSpec): THREE.Group {
 
 function createRoadCrossBlock(spec: BlockSpec): THREE.Group {
   const { group } = roadBase(spec.w, spec.d);
-  const len = spec.d * GRID.Z;
-  const wid = spec.w * GRID.X;
-  const lineMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
-  // Crosswalk stripes on all 4 approaches
-  for (let axis = 0; axis < 2; axis++) {
-    for (const sign of [-1, 1]) {
-      for (let i = 0; i < 4; i++) {
-        const stripe = new THREE.Mesh(
-          new THREE.BoxGeometry(0.35, 0.02, ROAD_W),
-          lineMat
+  const half = (spec.w * GRID.X) / 2;
+
+  // Four corner sidewalk blocks (the +/- quadrants outside the road)
+  const cornerSz = half - HALF_ROAD - 0.05;
+  if (cornerSz > 0.3) {
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const corner = new THREE.Mesh(
+          new THREE.BoxGeometry(cornerSz, SIDEWALK_H, cornerSz),
+          sidewalkMat
         );
-        const offset = sign * ((axis === 0 ? len : wid) / 2 - 0.8) + sign * (-i * 0.5);
-        if (axis === 0) {
-          stripe.position.set(0, LINE_H, offset);
-        } else {
-          stripe.rotation.y = Math.PI / 2;
-          stripe.position.set(offset, LINE_H, 0);
-        }
-        group.add(stripe);
+        corner.position.set(
+          sx * (half - cornerSz / 2),
+          SIDEWALK_H / 2,
+          sz * (half - cornerSz / 2)
+        );
+        corner.receiveShadow = true;
+        corner.castShadow = true;
+        group.add(corner);
+        // Corner curb strip (two-sided L shape)
+        const curbZ = new THREE.Mesh(
+          new THREE.BoxGeometry(cornerSz, SIDEWALK_H + 0.01, CURB_STRIP_W),
+          curbMat
+        );
+        curbZ.position.set(
+          sx * (half - cornerSz / 2),
+          SIDEWALK_H / 2 + 0.005,
+          sz * (HALF_ROAD + CURB_STRIP_W / 2)
+        );
+        group.add(curbZ);
+        const curbX = new THREE.Mesh(
+          new THREE.BoxGeometry(CURB_STRIP_W, SIDEWALK_H + 0.01, cornerSz),
+          curbMat
+        );
+        curbX.position.set(
+          sx * (HALF_ROAD + CURB_STRIP_W / 2),
+          SIDEWALK_H / 2 + 0.005,
+          sz * (half - cornerSz / 2)
+        );
+        group.add(curbX);
       }
     }
   }
+
+  // Four crosswalks — one on each approach, pulled in from the edge
+  const cwOffset = HALF_ROAD + 0.5;
+  addCrosswalk(group, 0, -cwOffset, 0);
+  addCrosswalk(group, 0, cwOffset, 0);
+  addCrosswalk(group, -cwOffset, 0, 1);
+  addCrosswalk(group, cwOffset, 0, 1);
+
+  // Center manhole
+  addManhole(group, 0, 0);
   return group;
 }
 
 function createRoadTeeBlock(spec: BlockSpec): THREE.Group {
   const { group } = roadBase(spec.w, spec.d);
+  const half = (spec.w * GRID.X) / 2;
   const len = spec.d * GRID.Z;
-  // Main road along Z + branch toward +X
-  addCenterLine(group, len);
-  addEdgeLines(group, len);
-  // Cut opening in +X edge line (already done by not extending it)
-  // T-junction: add crosswalk stripes at the branch
-  const lineMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
-  for (let i = 0; i < 4; i++) {
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.35, 0.02, ROAD_W),
-      lineMat
-    );
-    stripe.rotation.y = Math.PI / 2;
-    stripe.position.set((spec.w * GRID.X) / 2 - 0.8 - i * 0.5, LINE_H, 0);
-    group.add(stripe);
+
+  // Main road: double-yellow center along Z, split at branch
+  for (const sx of [-1, 1]) {
+    // Two center-line halves (above and below the intersection)
+    for (const sz of [-1, 1]) {
+      const segLen = half - HALF_ROAD - 0.2;
+      if (segLen > 0) {
+        const line = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.02, segLen),
+          yellowLineMat
+        );
+        line.position.set(sx * 0.14, LINE_H, sz * (half - segLen / 2));
+        group.add(line);
+      }
+    }
   }
-  // Sidewalk on -X side only (the non-branch side)
-  const curbMat = new THREE.MeshStandardMaterial({ color: 0xa0a3a8, roughness: 0.75 });
-  const totalW = spec.w * GRID.X;
-  const curbW = (totalW - ROAD_W) / 2;
-  const curb = new THREE.Mesh(
-    new THREE.BoxGeometry(curbW, PLATE_HEIGHT + 0.08, len),
-    curbMat
+
+  // Edge lines on main road sides (the -X side has continuous edge, +X side is interrupted)
+  // Left (−X) edge is continuous
+  const leftEdge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.11, 0.02, len - 0.1),
+    whiteLineMat
   );
-  curb.position.set(-(ROAD_W / 2 + curbW / 2), (PLATE_HEIGHT + 0.08) / 2, 0);
-  curb.receiveShadow = true;
-  group.add(curb);
+  leftEdge.position.set(-(HALF_ROAD - 0.18), LINE_H, 0);
+  group.add(leftEdge);
+  // Right (+X) edge — two segments, interrupted by branch
+  for (const sz of [-1, 1]) {
+    const segLen = half - HALF_ROAD - 0.1;
+    if (segLen > 0) {
+      const e = new THREE.Mesh(
+        new THREE.BoxGeometry(0.11, 0.02, segLen),
+        whiteLineMat
+      );
+      e.position.set(HALF_ROAD - 0.18, LINE_H, sz * (half - segLen / 2));
+      group.add(e);
+    }
+  }
+  // Branch edges (top/bottom of the branch opening on +X side)
+  for (const sz of [-1, 1]) {
+    const e = new THREE.Mesh(
+      new THREE.BoxGeometry(half - HALF_ROAD - 0.05, 0.02, 0.11),
+      whiteLineMat
+    );
+    e.position.set(HALF_ROAD + (half - HALF_ROAD) / 2, LINE_H, sz * (HALF_ROAD - 0.18));
+    group.add(e);
+  }
+
+  // Stop line for the branch (solid white bar across the branch mouth)
+  const stopLine = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.02, ROAD_W - 0.3),
+    whiteLineMat
+  );
+  stopLine.position.set(HALF_ROAD + 0.3, LINE_H, 0);
+  group.add(stopLine);
+
+  // Crosswalks on all 3 approaches
+  const cwOffset = HALF_ROAD + 0.5;
+  addCrosswalk(group, 0, -cwOffset, 0);
+  addCrosswalk(group, 0, cwOffset, 0);
+  addCrosswalk(group, cwOffset, 0, 1);
+
+  // Sidewalks: full strip on -X side (continuous), and two corners on +X
+  const walkW = (spec.w * GRID.X - ROAD_W) / 2;
+  if (walkW > 0.2) {
+    // Left full sidewalk
+    const leftWalk = new THREE.Mesh(
+      new THREE.BoxGeometry(walkW, SIDEWALK_H, len),
+      sidewalkMat
+    );
+    leftWalk.position.set(-(HALF_ROAD + walkW / 2), SIDEWALK_H / 2, 0);
+    leftWalk.receiveShadow = true;
+    leftWalk.castShadow = true;
+    group.add(leftWalk);
+    // Left curb
+    const leftCurb = new THREE.Mesh(
+      new THREE.BoxGeometry(CURB_STRIP_W, SIDEWALK_H + 0.01, len),
+      curbMat
+    );
+    leftCurb.position.set(-(HALF_ROAD + CURB_STRIP_W / 2 - 0.01), SIDEWALK_H / 2 + 0.005, 0);
+    group.add(leftCurb);
+
+    // Right: two corner blocks (above and below the branch)
+    const cornerSz = half - HALF_ROAD - 0.05;
+    for (const sz of [-1, 1]) {
+      const corner = new THREE.Mesh(
+        new THREE.BoxGeometry(walkW, SIDEWALK_H, cornerSz),
+        sidewalkMat
+      );
+      corner.position.set(HALF_ROAD + walkW / 2, SIDEWALK_H / 2, sz * (half - cornerSz / 2));
+      corner.receiveShadow = true;
+      corner.castShadow = true;
+      group.add(corner);
+      // Inner-facing curb (along Z)
+      const curbZ = new THREE.Mesh(
+        new THREE.BoxGeometry(CURB_STRIP_W, SIDEWALK_H + 0.01, cornerSz),
+        curbMat
+      );
+      curbZ.position.set(HALF_ROAD + CURB_STRIP_W / 2 - 0.01, SIDEWALK_H / 2 + 0.005, sz * (half - cornerSz / 2));
+      group.add(curbZ);
+      // Branch-facing curb (along X)
+      const curbX = new THREE.Mesh(
+        new THREE.BoxGeometry(walkW, SIDEWALK_H + 0.01, CURB_STRIP_W),
+        curbMat
+      );
+      curbX.position.set(HALF_ROAD + walkW / 2, SIDEWALK_H / 2 + 0.005, sz * (HALF_ROAD + CURB_STRIP_W / 2 - 0.01));
+      group.add(curbX);
+    }
+  }
+
+  // Manhole on the main road
+  addManhole(group, -HALF_ROAD / 3, 0);
   return group;
 }
 
@@ -2562,8 +2887,8 @@ function createRailCrossingBlock(spec: BlockSpec): THREE.Group {
   const { group } = roadBase(spec.w, spec.d);
   const len = spec.d * GRID.Z;
   // Road goes along Z, rails cross along X
-  addCenterLine(group, len);
-  addEdgeLines(group, len);
+  addDoubleYellowCenter(group, len);
+  addWhiteEdgeLines(group, len);
   addSidewalks(group, spec.w, spec.d);
   // Rails crossing perpendicular (along X)
   const railMat = new THREE.MeshStandardMaterial({
@@ -2600,6 +2925,331 @@ function createRailCrossingBlock(spec: BlockSpec): THREE.Group {
     stripe.position.set(0, PLATE_HEIGHT + 0.07, sz * (RAIL_GAUGE / 2 + 1.0));
     group.add(stripe);
   }
+  return group;
+}
+
+// ------------------------------------------------------------------
+//  Vehicle factories — rideable blocks placed on road/rail tiles.
+//  In play mode the player can press E to board, then WASD to drive.
+//  The geometry is built at origin facing +Z; placement rotation is
+//  handled by the standard placement pipeline.
+// ------------------------------------------------------------------
+
+function createCarBlock(spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const bodyColor = new THREE.Color(spec.colorHex);
+  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.45, metalness: 0.1 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x222228, roughness: 0.7 });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x88bbee,
+    roughness: 0.1,
+    metalness: 0.3,
+    transparent: true,
+    opacity: 0.55,
+  });
+  const chromeMat = new THREE.MeshStandardMaterial({
+    color: 0xcccccc,
+    roughness: 0.15,
+    metalness: 0.85,
+  });
+  const tireMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+  const hubMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, roughness: 0.3, metalness: 0.6 });
+
+  // Body dimensions (in world units, 4×2 studs footprint)
+  const bw = 1.8; // half-width X
+  const bl = 3.6; // half-length Z (total ~7.2 studs in visual, fits 4×2 grid)
+  const bh = 0.55; // body height
+  const baseY = 0.4; // ground clearance
+
+  // Lower body (main chassis)
+  const chassis = new THREE.Mesh(
+    new THREE.BoxGeometry(bw * 2, bh, bl * 2),
+    bodyMat
+  );
+  chassis.position.y = baseY + bh / 2;
+  chassis.castShadow = true;
+  chassis.receiveShadow = true;
+  group.add(chassis);
+
+  // Upper cabin (windowed section, narrower + shorter)
+  const cabW = bw - 0.2;
+  const cabH = 0.5;
+  const cabL = bl * 0.55;
+  const cab = new THREE.Mesh(
+    new THREE.BoxGeometry(cabW * 2, cabH, cabL * 2),
+    bodyMat
+  );
+  cab.position.set(0, baseY + bh + cabH / 2, -bl * 0.08);
+  cab.castShadow = true;
+  group.add(cab);
+
+  // Windshield (front glass, angled)
+  const ws = new THREE.Mesh(
+    new THREE.BoxGeometry(cabW * 1.8, cabH * 0.85, 0.06),
+    glassMat
+  );
+  ws.position.set(0, baseY + bh + cabH * 0.45, -bl * 0.08 + cabL + 0.03);
+  ws.rotation.x = 0.2;
+  group.add(ws);
+
+  // Rear window
+  const rw = new THREE.Mesh(
+    new THREE.BoxGeometry(cabW * 1.8, cabH * 0.75, 0.06),
+    glassMat
+  );
+  rw.position.set(0, baseY + bh + cabH * 0.45, -bl * 0.08 - cabL - 0.03);
+  rw.rotation.x = -0.15;
+  group.add(rw);
+
+  // Side windows
+  for (const sx of [-1, 1]) {
+    const sw = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, cabH * 0.7, cabL * 1.6),
+      glassMat
+    );
+    sw.position.set(sx * (cabW + 0.03), baseY + bh + cabH * 0.45, -bl * 0.08);
+    group.add(sw);
+  }
+
+  // Headlights
+  for (const sx of [-1, 1]) {
+    const hl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.15, 0.15, 0.08, 12),
+      chromeMat
+    );
+    hl.rotation.x = Math.PI / 2;
+    hl.position.set(sx * (bw - 0.35), baseY + bh * 0.5, bl + 0.04);
+    group.add(hl);
+  }
+
+  // Tail lights (red)
+  const tailMat = new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.4, metalness: 0.2 });
+  for (const sx of [-1, 1]) {
+    const tl = new THREE.Mesh(
+      new THREE.BoxGeometry(0.25, 0.15, 0.06),
+      tailMat
+    );
+    tl.position.set(sx * (bw - 0.3), baseY + bh * 0.5, -bl - 0.03);
+    group.add(tl);
+  }
+
+  // Front/rear bumpers
+  for (const sz of [-1, 1]) {
+    const bumper = new THREE.Mesh(
+      new THREE.BoxGeometry(bw * 2 + 0.1, 0.15, 0.12),
+      darkMat
+    );
+    bumper.position.set(0, baseY + 0.1, sz * (bl + 0.06));
+    group.add(bumper);
+  }
+
+  // 4 wheels (cylinder + hub cap)
+  const wheelR = 0.32;
+  const wheelW = 0.18;
+  const wheelPositions = [
+    [-bw - 0.05, baseY, bl * 0.6],
+    [bw + 0.05, baseY, bl * 0.6],
+    [-bw - 0.05, baseY, -bl * 0.6],
+    [bw + 0.05, baseY, -bl * 0.6],
+  ];
+  for (const [wx, wy, wz] of wheelPositions) {
+    const tire = new THREE.Mesh(
+      new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 16),
+      tireMat
+    );
+    tire.rotation.z = Math.PI / 2;
+    tire.position.set(wx, wy, wz);
+    tire.castShadow = true;
+    group.add(tire);
+    // Hub cap
+    const hub = new THREE.Mesh(
+      new THREE.CylinderGeometry(wheelR * 0.55, wheelR * 0.55, wheelW + 0.02, 12),
+      hubMat
+    );
+    hub.rotation.z = Math.PI / 2;
+    hub.position.set(wx + Math.sign(wx) * 0.01, wy, wz);
+    group.add(hub);
+  }
+
+  // Roof rack detail (two thin bars)
+  for (const oz of [-0.3, 0.3]) {
+    const bar = new THREE.Mesh(
+      new THREE.BoxGeometry(cabW * 1.6, 0.05, 0.08),
+      darkMat
+    );
+    bar.position.set(0, baseY + bh + cabH + 0.03, -bl * 0.08 + oz);
+    group.add(bar);
+  }
+
+  // Tag as vehicle for the ride system
+  group.userData.isVehicle = true;
+  group.userData.vehicleType = 'car';
+  return group;
+}
+
+function createTrainBlock(spec: BlockSpec): THREE.Group {
+  const group = new THREE.Group();
+  const bodyColor = new THREE.Color(spec.colorHex);
+  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.45, metalness: 0.1 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x222228, roughness: 0.7 });
+  const metalMat = new THREE.MeshStandardMaterial({
+    color: 0x888888,
+    roughness: 0.25,
+    metalness: 0.75,
+  });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x88bbee,
+    roughness: 0.1,
+    metalness: 0.3,
+    transparent: true,
+    opacity: 0.5,
+  });
+
+  // Train dimensions (8×3 stud footprint)
+  const tw = 1.3; // half-width X
+  const tl = 3.8; // half-length Z
+  const baseY = 0.35;
+  const bodyH = 0.9;
+  const cabH = 0.7;
+
+  // Undercarriage / chassis (dark frame)
+  const frame = new THREE.Mesh(
+    new THREE.BoxGeometry(tw * 2 + 0.3, 0.2, tl * 2 + 0.4),
+    darkMat
+  );
+  frame.position.y = baseY - 0.05;
+  frame.castShadow = true;
+  group.add(frame);
+
+  // Main body
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(tw * 2, bodyH, tl * 2),
+    bodyMat
+  );
+  body.position.y = baseY + bodyH / 2;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  group.add(body);
+
+  // Cabin (engineer's cab at the back)
+  const cabL = tl * 0.45;
+  const cab = new THREE.Mesh(
+    new THREE.BoxGeometry(tw * 2, cabH, cabL * 2),
+    bodyMat
+  );
+  cab.position.set(0, baseY + bodyH + cabH / 2, -tl + cabL);
+  cab.castShadow = true;
+  group.add(cab);
+
+  // Cab windows (front + sides)
+  const cabFront = new THREE.Mesh(
+    new THREE.BoxGeometry(tw * 1.6, cabH * 0.7, 0.06),
+    glassMat
+  );
+  cabFront.position.set(0, baseY + bodyH + cabH * 0.5, -tl + cabL * 2 + 0.03);
+  group.add(cabFront);
+  for (const sx of [-1, 1]) {
+    const sw = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, cabH * 0.65, cabL * 1.4),
+      glassMat
+    );
+    sw.position.set(sx * (tw + 0.03), baseY + bodyH + cabH * 0.5, -tl + cabL);
+    group.add(sw);
+  }
+
+  // Smokestack / chimney (front of the locomotive)
+  const chimney = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.28, 0.8, 14),
+    metalMat
+  );
+  chimney.position.set(0, baseY + bodyH + 0.4, tl - 0.7);
+  chimney.castShadow = true;
+  group.add(chimney);
+  // Chimney top rim
+  const rim = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.32, 0.22, 0.12, 14),
+    metalMat
+  );
+  rim.position.set(0, baseY + bodyH + 0.86, tl - 0.7);
+  group.add(rim);
+
+  // Boiler dome (rounded top on the body, in front of cab)
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(0.35, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+    metalMat
+  );
+  dome.position.set(0, baseY + bodyH, tl * 0.15);
+  group.add(dome);
+
+  // Headlight (front)
+  const headlight = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.18, 0.1, 12),
+    new THREE.MeshStandardMaterial({ color: 0xffffcc, roughness: 0.3, metalness: 0.2 })
+  );
+  headlight.rotation.x = Math.PI / 2;
+  headlight.position.set(0, baseY + bodyH * 0.6, tl + 0.05);
+  group.add(headlight);
+
+  // Cow catcher (front wedge)
+  const catcher = new THREE.Mesh(
+    new THREE.BoxGeometry(tw * 2 + 0.5, 0.2, 0.5),
+    metalMat
+  );
+  catcher.position.set(0, baseY * 0.6, tl + 0.3);
+  catcher.castShadow = true;
+  group.add(catcher);
+
+  // Wheels (3 pairs)
+  const wheelR = 0.3;
+  const wheelW = 0.15;
+  const tireMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+  const wheelZs = [-tl + 0.6, 0, tl - 0.6];
+  for (const wz of wheelZs) {
+    for (const sx of [-1, 1]) {
+      const tire = new THREE.Mesh(
+        new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 16),
+        tireMat
+      );
+      tire.rotation.z = Math.PI / 2;
+      tire.position.set(sx * (tw + 0.15), baseY - 0.1, wz);
+      tire.castShadow = true;
+      group.add(tire);
+      // Connecting rod detail
+      const rod = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.04, wheelR * 0.6, 6),
+        metalMat
+      );
+      rod.position.set(sx * (tw + 0.2), baseY - 0.1, wz);
+      group.add(rod);
+    }
+  }
+
+  // Coupling at front and back
+  for (const sz of [-1, 1]) {
+    const coupler = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.15, 0.4),
+      metalMat
+    );
+    coupler.position.set(0, baseY * 0.5, sz * (tl + 0.35));
+    group.add(coupler);
+  }
+
+  // Side stripe detail
+  const stripeMat = new THREE.MeshStandardMaterial({
+    color: bodyColor.clone().offsetHSL(0, 0, 0.15),
+    roughness: 0.5,
+  });
+  for (const sx of [-1, 1]) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.12, tl * 2 - 0.4),
+      stripeMat
+    );
+    stripe.position.set(sx * (tw + 0.02), baseY + bodyH * 0.4, 0);
+    group.add(stripe);
+  }
+
+  group.userData.isVehicle = true;
+  group.userData.vehicleType = 'train';
   return group;
 }
 
@@ -2924,198 +3574,249 @@ function createHat(style: HatStyle, color: number): THREE.Group | null {
 function createHair(style: HairStyle, color: number): THREE.Group | null {
   if (style === 'none') return null;
   const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
-  // Lego hair pieces are thick, smooth, and completely cover the top
-  // of the head with generous overhang on the sides. The head is
-  // roughly 1.0–1.2u wide (after GLB scaling), so a dome radius of
-  // 0.65 and side panels at ±0.6 give proper coverage.
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.52,
+    metalness: 0.04,
+    flatShading: false,
+  });
+
+  // ---- Helpers for smooth Lego-molded hair shapes ----
+
+  /** Rounded cap covering the top+sides of the head.  Hi-res sphere
+   *  slightly squashed vertically for the molded-plastic Lego look. */
+  const makeCap = (r: number, phi: number, squash = 0.92): THREE.Mesh => {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(r, 40, 28, 0, Math.PI * 2, 0, phi),
+      mat
+    );
+    m.scale.y = squash;
+    m.castShadow = true;
+    return m;
+  };
+
+  /** Curved bangs across the forehead — flattened partial torus that
+   *  wraps along the head's circumference. */
+  const makeBangs = (
+    ringR: number,
+    tubeR: number,
+    arc: number,
+    yOffset = -0.02,
+    flatten = 0.55
+  ): THREE.Mesh => {
+    const m = new THREE.Mesh(
+      new THREE.TorusGeometry(ringR, tubeR, 14, 28, arc),
+      mat
+    );
+    m.rotation.x = Math.PI / 2;
+    m.rotation.z = -Math.PI / 2 - arc / 2;
+    m.position.y = yOffset;
+    m.scale.y = flatten;
+    m.castShadow = true;
+    return m;
+  };
+
+  /** Flowing hair curtain — half-cylinder shell that curves around
+   *  the skull instead of being a flat slab. */
+  const makeBackCurtain = (
+    radius: number,
+    height: number,
+    yCenter: number,
+    arc = Math.PI,
+    thetaStart = Math.PI * 0.5
+  ): THREE.Mesh => {
+    const m = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        radius, radius * 0.95, height, 32, 1, true, thetaStart, arc
+      ),
+      mat
+    );
+    m.position.y = yCenter;
+    m.castShadow = true;
+    return m;
+  };
 
   switch (style) {
     case 'short': {
-      // Classic short Lego hair — thick rounded cap that covers the
-      // whole top + clips around the sides and back.
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.62, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.45),
-        mat
-      );
-      dome.position.y = 0.04;
-      dome.castShadow = true;
-      group.add(dome);
-      // Side volume wrapping around the head
+      // Full rounded cap + swept fringe + small back cowlick.
+      group.add(makeCap(0.72, Math.PI * 0.58, 0.88));
+      const fringe = makeBangs(0.6, 0.11, Math.PI * 0.75, 0.0, 0.55);
+      fringe.position.z = 0.05;
+      group.add(fringe);
+      // Sideburn tufts
       for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(
-          new THREE.BoxGeometry(0.2, 0.45, 0.9),
-          mat
+        const tuft = new THREE.Mesh(
+          new THREE.ConeGeometry(0.14, 0.28, 16), mat
         );
-        side.position.set(sx * 0.55, -0.12, -0.05);
-        side.castShadow = true;
-        group.add(side);
+        tuft.position.set(sx * 0.5, -0.3, 0.15);
+        tuft.rotation.z = sx * 0.25;
+        tuft.castShadow = true;
+        group.add(tuft);
       }
-      // Back volume
-      const back = new THREE.Mesh(
-        new THREE.BoxGeometry(1.0, 0.4, 0.25),
-        mat
+      // Back cowlick
+      const cowlick = new THREE.Mesh(
+        new THREE.ConeGeometry(0.12, 0.22, 12), mat
       );
-      back.position.set(0, -0.1, -0.45);
-      back.castShadow = true;
-      group.add(back);
+      cowlick.position.set(0.15, 0.35, -0.35);
+      cowlick.rotation.x = -0.3;
+      cowlick.rotation.z = 0.2;
+      cowlick.castShadow = true;
+      group.add(cowlick);
       break;
     }
+
     case 'bob': {
-      // Classic Lego bob cut — smooth dome + thick side panels to jaw
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.65, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
-        mat
-      );
-      dome.castShadow = true;
-      group.add(dome);
-      // Side panels reaching jaw level
+      // Smooth bob: rounded cap + thick curved fringe + flared back.
+      group.add(makeCap(0.74, Math.PI * 0.55, 0.94));
+      group.add(makeBangs(0.6, 0.12, Math.PI * 0.85, -0.02, 0.55));
+      // Soft side panels (tapered cylinders)
       for (const sx of [-1, 1]) {
         const panel = new THREE.Mesh(
-          new THREE.BoxGeometry(0.22, 0.8, 0.85),
-          mat
+          new THREE.CylinderGeometry(0.1, 0.14, 0.8, 16), mat
         );
-        panel.position.set(sx * 0.56, -0.3, -0.05);
+        panel.position.set(sx * 0.62, -0.35, 0.0);
         panel.castShadow = true;
         group.add(panel);
       }
-      // Thick back
+      // Flared back volume
       const back = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 0.75, 0.26),
+        new THREE.SphereGeometry(0.5, 24, 18, 0, Math.PI, Math.PI * 0.3, Math.PI * 0.5),
         mat
       );
-      back.position.set(0, -0.25, -0.48);
+      back.position.set(0, -0.3, -0.2);
+      back.scale.set(1.25, 1.3, 0.6);
       back.castShadow = true;
       group.add(back);
-      // Fringe bangs across the forehead
-      const bangs = new THREE.Mesh(
-        new THREE.BoxGeometry(0.9, 0.18, 0.25),
-        mat
+      // Blunt bottom edge
+      const edge = new THREE.Mesh(
+        new THREE.TorusGeometry(0.58, 0.06, 10, 24, Math.PI * 1.2), mat
       );
-      bangs.position.set(0, -0.06, 0.48);
-      bangs.castShadow = true;
-      group.add(bangs);
+      edge.rotation.x = Math.PI / 2;
+      edge.rotation.z = -Math.PI * 0.1;
+      edge.position.set(0, -0.72, -0.05);
+      edge.scale.y = 0.8;
+      group.add(edge);
       break;
     }
+
     case 'long': {
-      // Flowing long hair — dome + long thick back + side curtains
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.65, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      // Cap + curved fringe + long flowing back curtain + side strands.
+      group.add(makeCap(0.74, Math.PI * 0.55, 0.94));
+      group.add(makeBangs(0.6, 0.11, Math.PI * 0.9, -0.02, 0.55));
+      group.add(makeBackCurtain(0.58, 1.7, -0.72, Math.PI * 1.1, Math.PI * 0.45));
+      // Flared tips near the ends
+      const tips = new THREE.Mesh(
+        new THREE.SphereGeometry(0.55, 24, 14, 0, Math.PI, Math.PI * 0.45, Math.PI * 0.15),
         mat
       );
-      dome.castShadow = true;
-      group.add(dome);
-      // Long back portion reaching mid-torso
-      const longBack = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 1.5, 0.28),
-        mat
-      );
-      longBack.position.set(0, -0.7, -0.46);
-      longBack.castShadow = true;
-      group.add(longBack);
-      // Side curtains
+      tips.position.set(0, -1.55, -0.35);
+      tips.scale.set(1.1, 0.8, 0.8);
+      tips.castShadow = true;
+      group.add(tips);
+      // Side strand highlights
       for (const sx of [-1, 1]) {
+        const path = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(sx * 0.55, 0.1, 0.2),
+          new THREE.Vector3(sx * 0.62, -0.3, 0.1),
+          new THREE.Vector3(sx * 0.6, -0.8, -0.05),
+          new THREE.Vector3(sx * 0.5, -1.3, -0.15),
+        ]);
         const strand = new THREE.Mesh(
-          new THREE.BoxGeometry(0.22, 1.3, 0.7),
-          mat
+          new THREE.TubeGeometry(path, 20, 0.05, 8, false), mat
         );
-        strand.position.set(sx * 0.56, -0.55, -0.1);
         strand.castShadow = true;
         group.add(strand);
       }
-      // Fringe
-      const bangs = new THREE.Mesh(
-        new THREE.BoxGeometry(0.85, 0.15, 0.22),
-        mat
-      );
-      bangs.position.set(0, -0.04, 0.5);
-      bangs.castShadow = true;
-      group.add(bangs);
       break;
     }
+
     case 'ponytail': {
-      // Thick cap + chunky ponytail sticking out the back
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.62, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.45),
-        mat
+      // Swept-back cap + gathered bump + curved ponytail with tie.
+      group.add(makeCap(0.72, Math.PI * 0.55, 0.9));
+      const fringe = makeBangs(0.58, 0.09, Math.PI * 0.7, 0.02, 0.55);
+      fringe.position.z = 0.04;
+      group.add(fringe);
+      // Gathered bump at back
+      const gather = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 18, 14), mat
       );
-      dome.position.y = 0.04;
-      dome.castShadow = true;
-      group.add(dome);
-      // Sides
-      for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(
-          new THREE.BoxGeometry(0.2, 0.4, 0.8),
-          mat
-        );
-        side.position.set(sx * 0.55, -0.1, -0.05);
-        side.castShadow = true;
-        group.add(side);
-      }
-      // Ponytail — thick cylinder angled downward
+      gather.position.set(0, 0.1, -0.55);
+      gather.scale.set(1.0, 0.8, 0.9);
+      gather.castShadow = true;
+      group.add(gather);
+      // Curved ponytail
+      const tailPath = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0, 0.1, -0.6),
+        new THREE.Vector3(0, -0.1, -0.85),
+        new THREE.Vector3(0, -0.6, -0.85),
+        new THREE.Vector3(0, -1.0, -0.7),
+      ]);
       const tail = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.18, 0.12, 1.1, 12),
-        mat
+        new THREE.TubeGeometry(tailPath, 30, 0.14, 12, false), mat
       );
-      tail.position.set(0, -0.45, -0.55);
-      tail.rotation.x = 0.45;
       tail.castShadow = true;
       group.add(tail);
-      // Hair tie
-      const tie = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.22, 0.22, 0.1, 14),
-        new THREE.MeshStandardMaterial({ color: 0xc43030, roughness: 0.4 })
+      // Tail tip
+      const tip = new THREE.Mesh(
+        new THREE.ConeGeometry(0.13, 0.3, 14), mat
       );
-      tie.position.set(0, -0.05, -0.55);
-      tie.rotation.x = 0.45;
+      tip.position.set(0, -1.1, -0.65);
+      tip.rotation.x = -0.4;
+      tip.castShadow = true;
+      group.add(tip);
+      // Hair tie (torus)
+      const tieMat = new THREE.MeshStandardMaterial({
+        color: 0xc43030, roughness: 0.4, metalness: 0.1
+      });
+      const tie = new THREE.Mesh(
+        new THREE.TorusGeometry(0.16, 0.05, 10, 20), tieMat
+      );
+      tie.position.set(0, 0.05, -0.62);
+      tie.rotation.y = Math.PI / 2;
       group.add(tie);
       break;
     }
+
     case 'mohawk': {
-      // Flat sides + tall ridge of thick plates along center
-      // Base shell covering sides
-      for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(
-          new THREE.BoxGeometry(0.35, 0.3, 0.9),
-          mat
-        );
-        side.position.set(sx * 0.45, -0.08, -0.05);
-        side.castShadow = true;
-        group.add(side);
-      }
-      // Mohawk ridge — 7 thick plates tapering up in center
-      for (let i = 0; i < 7; i++) {
-        const t = i / 6; // 0..1
-        const h = 0.3 + 0.35 * Math.sin(t * Math.PI); // parabolic height
+      // Shaved sides + sculpted crest of cone spikes with base ridge.
+      group.add(makeCap(0.66, Math.PI * 0.5, 0.75));
+      const N = 9;
+      for (let i = 0; i < N; i++) {
+        const t = i / (N - 1);
+        const h = 0.35 + 0.55 * Math.sin(t * Math.PI);
+        const r = 0.08 + 0.04 * Math.sin(t * Math.PI);
         const spike = new THREE.Mesh(
-          new THREE.BoxGeometry(0.18, h, 0.16),
-          mat
+          new THREE.ConeGeometry(r, h, 10), mat
         );
-        spike.position.set(0, h / 2 + 0.02, -0.4 + i * 0.14);
+        spike.position.set(0, h / 2 + 0.25, -0.45 + i * 0.11);
         spike.castShadow = true;
         group.add(spike);
       }
+      const ridge = new THREE.Mesh(
+        new THREE.BoxGeometry(0.16, 0.12, 1.1), mat
+      );
+      ridge.position.set(0, 0.25, 0.1);
+      ridge.castShadow = true;
+      group.add(ridge);
       break;
     }
+
     case 'curly': {
-      // Voluminous curly hair — larger spheres clustered all around
-      const r = 0.22;
-      const positions: number[][] = [
-        // Top
-        [0, 0.18, 0.3], [-0.3, 0.14, 0.22], [0.3, 0.14, 0.22],
-        [0, 0.24, -0.05], [-0.25, 0.2, -0.25], [0.25, 0.2, -0.25],
-        [0, 0.16, -0.4],
-        // Sides
-        [-0.5, -0.05, 0.1], [0.5, -0.05, 0.1],
-        [-0.48, -0.05, -0.2], [0.48, -0.05, -0.2],
-        [-0.42, 0.1, 0.28], [0.42, 0.1, 0.28],
-        // Back
-        [-0.3, -0.1, -0.42], [0.3, -0.1, -0.42], [0, -0.08, -0.5],
+      // Voluminous curls — compact cap + layered curl spheres.
+      group.add(makeCap(0.62, Math.PI * 0.42, 0.85));
+      const curls: Array<[number, number, number, number]> = [
+        [0, 0.32, 0.25, 0.24], [-0.28, 0.28, 0.2, 0.22], [0.28, 0.28, 0.2, 0.22],
+        [0, 0.42, -0.05, 0.26], [-0.3, 0.36, -0.2, 0.22], [0.3, 0.36, -0.2, 0.22],
+        [0, 0.3, -0.4, 0.24], [-0.45, 0.1, 0.15, 0.2], [0.45, 0.1, 0.15, 0.2],
+        [-0.52, 0.0, -0.15, 0.22], [0.52, 0.0, -0.15, 0.22],
+        [-0.4, -0.15, -0.35, 0.2], [0.4, -0.15, -0.35, 0.2],
+        [0, -0.1, -0.55, 0.22],
+        [-0.15, 0.45, 0.15, 0.14], [0.15, 0.45, 0.15, 0.14],
+        [-0.35, 0.45, -0.05, 0.14], [0.35, 0.45, -0.05, 0.14],
       ];
-      for (const [px, py, pz] of positions) {
+      for (const [px, py, pz, r] of curls) {
         const ball = new THREE.Mesh(
-          new THREE.SphereGeometry(r, 12, 10),
-          mat
+          new THREE.SphereGeometry(r, 16, 12), mat
         );
         ball.position.set(px, py, pz);
         ball.castShadow = true;
@@ -3123,208 +3824,265 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
       }
       break;
     }
+
     case 'twintails': {
-      // Dome cap + two thick pigtails hanging on each side
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.62, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.45),
-        mat
-      );
-      dome.position.y = 0.04;
-      dome.castShadow = true;
-      group.add(dome);
-      // Bangs
-      const bangs = new THREE.Mesh(
-        new THREE.BoxGeometry(0.9, 0.18, 0.25), mat
-      );
-      bangs.position.set(0, -0.06, 0.48);
-      bangs.castShadow = true;
-      group.add(bangs);
-      // Two tails
+      // Cap + parted fringe + two curved pigtails with bow ties.
+      group.add(makeCap(0.72, Math.PI * 0.55, 0.92));
+      // Center-parted curved bangs
       for (const sx of [-1, 1]) {
-        const tail = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.16, 0.1, 1.2, 12), mat
+        const halfBangs = new THREE.Mesh(
+          new THREE.TorusGeometry(0.55, 0.1, 12, 16, Math.PI * 0.4), mat
         );
-        tail.position.set(sx * 0.55, -0.55, -0.15);
-        tail.rotation.z = sx * -0.15;
+        halfBangs.rotation.x = Math.PI / 2;
+        halfBangs.rotation.z = sx * -Math.PI * 0.45 - Math.PI / 2;
+        halfBangs.position.y = -0.02;
+        halfBangs.scale.y = 0.55;
+        halfBangs.castShadow = true;
+        group.add(halfBangs);
+      }
+      // Two pigtails
+      for (const sx of [-1, 1]) {
+        const path = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(sx * 0.55, 0.15, -0.1),
+          new THREE.Vector3(sx * 0.7, -0.1, -0.2),
+          new THREE.Vector3(sx * 0.78, -0.6, -0.15),
+          new THREE.Vector3(sx * 0.75, -1.1, -0.05),
+        ]);
+        const tail = new THREE.Mesh(
+          new THREE.TubeGeometry(path, 28, 0.13, 12, false), mat
+        );
         tail.castShadow = true;
         group.add(tail);
-        // Hair tie
-        const tie = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.2, 0.2, 0.08, 14),
-          new THREE.MeshStandardMaterial({ color: 0xe03050, roughness: 0.4 })
+        const tip = new THREE.Mesh(
+          new THREE.ConeGeometry(0.12, 0.22, 12), mat
         );
-        tie.position.set(sx * 0.52, -0.02, -0.15);
-        tie.rotation.z = sx * -0.15;
+        tip.position.set(sx * 0.73, -1.2, -0.05);
+        tip.castShadow = true;
+        group.add(tip);
+        // Bow tie
+        const tieMat = new THREE.MeshStandardMaterial({
+          color: 0xe03050, roughness: 0.4
+        });
+        const tie = new THREE.Mesh(
+          new THREE.TorusGeometry(0.15, 0.05, 10, 20), tieMat
+        );
+        tie.position.set(sx * 0.57, 0.12, -0.12);
+        tie.rotation.z = sx * 0.3;
         group.add(tie);
+        for (const wingSide of [-1, 1]) {
+          const wing = new THREE.Mesh(
+            new THREE.SphereGeometry(0.08, 12, 10), tieMat
+          );
+          wing.position.set(sx * 0.57 + sx * wingSide * 0.12, 0.12, -0.12);
+          wing.scale.set(1.2, 0.7, 0.7);
+          group.add(wing);
+        }
       }
       break;
     }
+
     case 'updo': {
-      // Elegant updo — dome + tall bun on top
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.63, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
-        mat
-      );
-      dome.castShadow = true;
-      group.add(dome);
-      // Swept sides
-      for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(
-          new THREE.BoxGeometry(0.2, 0.5, 0.75), mat
-        );
-        side.position.set(sx * 0.55, -0.15, -0.1);
-        side.castShadow = true;
-        group.add(side);
-      }
-      // Bun on top-back
+      // Cap + smooth bangs + prominent top bun + wrap detail + sweeps.
+      group.add(makeCap(0.72, Math.PI * 0.55, 0.94));
+      group.add(makeBangs(0.58, 0.08, Math.PI * 0.75, -0.02, 0.5));
+      // Tall bun
       const bun = new THREE.Mesh(
-        new THREE.SphereGeometry(0.3, 16, 12), mat
+        new THREE.SphereGeometry(0.35, 28, 20), mat
       );
-      bun.position.set(0, 0.35, -0.25);
+      bun.position.set(0, 0.52, -0.1);
+      bun.scale.set(1.0, 1.0, 0.95);
       bun.castShadow = true;
       group.add(bun);
-      // Bangs
-      const bangs = new THREE.Mesh(
-        new THREE.BoxGeometry(0.85, 0.14, 0.22), mat
+      // Wrap around bun base
+      const wrap = new THREE.Mesh(
+        new THREE.TorusGeometry(0.3, 0.06, 12, 24), mat
       );
-      bangs.position.set(0, -0.04, 0.5);
-      bangs.castShadow = true;
-      group.add(bangs);
-      break;
-    }
-    case 'sidepart': {
-      // Side-parted hair — asymmetric volume, more on one side
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.63, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48),
-        mat
-      );
-      dome.position.y = 0.02;
-      dome.castShadow = true;
-      group.add(dome);
-      // Thicker left side (the "sweep" side)
-      const leftPanel = new THREE.Mesh(
-        new THREE.BoxGeometry(0.28, 0.6, 0.85), mat
-      );
-      leftPanel.position.set(-0.52, -0.2, -0.05);
-      leftPanel.castShadow = true;
-      group.add(leftPanel);
-      // Thinner right side
-      const rightPanel = new THREE.Mesh(
-        new THREE.BoxGeometry(0.18, 0.45, 0.8), mat
-      );
-      rightPanel.position.set(0.55, -0.12, -0.05);
-      rightPanel.castShadow = true;
-      group.add(rightPanel);
-      // Swept bangs — angled across forehead
-      const bangs = new THREE.Mesh(
-        new THREE.BoxGeometry(0.7, 0.2, 0.25), mat
-      );
-      bangs.position.set(-0.15, -0.04, 0.48);
-      bangs.rotation.z = 0.15;
-      bangs.castShadow = true;
-      group.add(bangs);
-      // Back
-      const back = new THREE.Mesh(
-        new THREE.BoxGeometry(1.05, 0.5, 0.24), mat
-      );
-      back.position.set(0, -0.15, -0.46);
-      back.castShadow = true;
-      group.add(back);
-      break;
-    }
-    case 'pixie': {
-      // Short pixie cut — compact, textured, slightly tousled
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.6, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.42),
-        mat
-      );
-      dome.position.y = 0.06;
-      dome.castShadow = true;
-      group.add(dome);
-      // Very short sides
+      wrap.position.set(0, 0.3, -0.1);
+      wrap.rotation.x = Math.PI / 2;
+      wrap.scale.y = 0.7;
+      group.add(wrap);
+      // Sweep lines up from sides
       for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(
-          new THREE.BoxGeometry(0.18, 0.3, 0.7), mat
+        const path = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(sx * 0.55, -0.1, 0.15),
+          new THREE.Vector3(sx * 0.45, 0.2, 0.0),
+          new THREE.Vector3(sx * 0.2, 0.45, -0.1),
+        ]);
+        const sweep = new THREE.Mesh(
+          new THREE.TubeGeometry(path, 16, 0.06, 8, false), mat
         );
-        side.position.set(sx * 0.52, -0.06, -0.08);
-        side.castShadow = true;
-        group.add(side);
+        sweep.castShadow = true;
+        group.add(sweep);
       }
-      // Wispy bangs — small angled piece
-      const bangs = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.14, 0.22), mat
+      break;
+    }
+
+    case 'sidepart': {
+      // Asymmetric sweep — thick diagonal bangs + extra volume.
+      group.add(makeCap(0.73, Math.PI * 0.53, 0.93));
+      // Diagonal sweep across brow
+      const path = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.55, 0.1, 0.15),
+        new THREE.Vector3(-0.1, -0.05, 0.48),
+        new THREE.Vector3(0.35, -0.1, 0.38),
+        new THREE.Vector3(0.55, -0.05, 0.15),
+      ]);
+      const sweep = new THREE.Mesh(
+        new THREE.TubeGeometry(path, 28, 0.12, 12, false), mat
       );
-      bangs.position.set(0.1, 0.0, 0.47);
-      bangs.rotation.z = -0.1;
-      bangs.castShadow = true;
-      group.add(bangs);
+      sweep.castShadow = true;
+      group.add(sweep);
+      // Heavy-side volume
+      const volume = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 20, 16, 0, Math.PI, 0, Math.PI * 0.6),
+        mat
+      );
+      volume.position.set(-0.25, 0.15, 0.15);
+      volume.scale.set(1.0, 1.0, 0.9);
+      volume.castShadow = true;
+      group.add(volume);
       // Short back
       const back = new THREE.Mesh(
-        new THREE.BoxGeometry(0.9, 0.28, 0.2), mat
+        new THREE.SphereGeometry(0.4, 20, 14, 0, Math.PI, 0, Math.PI * 0.55),
+        mat
       );
-      back.position.set(0, -0.04, -0.44);
+      back.rotation.y = Math.PI;
+      back.position.set(0, -0.05, -0.25);
+      back.scale.set(1.3, 1.2, 0.65);
       back.castShadow = true;
       group.add(back);
       break;
     }
-    case 'braid': {
-      // Single thick braid down the back — dome + braided cylinder
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.64, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48),
-        mat
+
+    case 'pixie': {
+      // Short crop — scalp-hugging cap + swept fringe + tousled tufts.
+      group.add(makeCap(0.68, Math.PI * 0.48, 0.88));
+      const fringePath = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.4, 0.05, 0.4),
+        new THREE.Vector3(0, -0.03, 0.48),
+        new THREE.Vector3(0.4, 0.08, 0.32),
+      ]);
+      const fringe = new THREE.Mesh(
+        new THREE.TubeGeometry(fringePath, 20, 0.07, 10, false), mat
       );
-      dome.position.y = 0.02;
-      dome.castShadow = true;
-      group.add(dome);
-      // Side volume
-      for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(
-          new THREE.BoxGeometry(0.2, 0.45, 0.8), mat
+      fringe.castShadow = true;
+      group.add(fringe);
+      for (const [tx, ty, tz] of [
+        [0.1, 0.32, 0.0], [-0.15, 0.3, -0.15], [0.15, 0.3, -0.2],
+      ]) {
+        const tuft = new THREE.Mesh(
+          new THREE.ConeGeometry(0.09, 0.2, 10), mat
         );
-        side.position.set(sx * 0.55, -0.12, -0.05);
-        side.castShadow = true;
-        group.add(side);
+        tuft.position.set(tx, ty, tz);
+        tuft.rotation.z = (tx - 0) * 0.6;
+        tuft.castShadow = true;
+        group.add(tuft);
       }
-      // Bangs
-      const bangs = new THREE.Mesh(
-        new THREE.BoxGeometry(0.85, 0.16, 0.22), mat
-      );
-      bangs.position.set(0, -0.05, 0.49);
-      bangs.castShadow = true;
-      group.add(bangs);
-      // Braid — segmented look with alternating slight offsets
-      for (let i = 0; i < 8; i++) {
-        const seg = new THREE.Mesh(
-          new THREE.BoxGeometry(0.22, 0.18, 0.2), mat
+      for (const sx of [-0.25, 0.25]) {
+        const wisp = new THREE.Mesh(
+          new THREE.ConeGeometry(0.06, 0.18, 8), mat
         );
-        seg.position.set(
-          (i % 2 === 0 ? 0.04 : -0.04),
-          -0.1 - i * 0.16,
-          -0.52
-        );
-        seg.castShadow = true;
-        group.add(seg);
+        wisp.position.set(sx, -0.32, -0.22);
+        wisp.rotation.x = Math.PI + 0.3;
+        wisp.castShadow = true;
+        group.add(wisp);
       }
-      // Tie at the end
-      const tie = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.14, 0.14, 0.06, 12),
-        new THREE.MeshStandardMaterial({ color: 0xe03050, roughness: 0.4 })
-      );
-      tie.position.set(0, -1.35, -0.52);
-      group.add(tie);
       break;
     }
-    case 'afro': {
-      // Big round afro — large sphere covering the whole head
-      const afro = new THREE.Mesh(
-        new THREE.SphereGeometry(0.85, 24, 18), mat
+
+    case 'braid': {
+      // Center-parted hair + thick rope braid with cross-wrap detail.
+      group.add(makeCap(0.72, Math.PI * 0.55, 0.93));
+      group.add(makeBangs(0.58, 0.09, Math.PI * 0.85, -0.02, 0.55));
+      for (const sx of [-1, 1]) {
+        const strand = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.06, 0.09, 0.7, 12), mat
+        );
+        strand.position.set(sx * 0.58, -0.3, 0.08);
+        strand.castShadow = true;
+        group.add(strand);
+      }
+      // Braid — overlapping spheres forming a zigzag rope
+      const SEG = 9;
+      for (let i = 0; i < SEG; i++) {
+        const t = i / (SEG - 1);
+        const r = 0.18 - t * 0.08;
+        const side = i % 2 === 0 ? 1 : -1;
+        const seg = new THREE.Mesh(
+          new THREE.SphereGeometry(r, 16, 12), mat
+        );
+        seg.position.set(side * 0.05, 0.02 - i * 0.2, -0.5);
+        seg.scale.set(1.2, 0.85, 0.9);
+        seg.castShadow = true;
+        group.add(seg);
+        if (i < SEG - 1) {
+          const wrap = new THREE.Mesh(
+            new THREE.TorusGeometry(r * 0.95, 0.035, 8, 16), mat
+          );
+          wrap.position.set(0, -0.08 - i * 0.2, -0.5);
+          wrap.rotation.y = Math.PI / 2;
+          wrap.rotation.z = side * 0.4;
+          group.add(wrap);
+        }
+      }
+      // End tie + tip wisp
+      const tieMat = new THREE.MeshStandardMaterial({
+        color: 0xe03050, roughness: 0.4
+      });
+      const tie = new THREE.Mesh(
+        new THREE.TorusGeometry(0.11, 0.04, 10, 20), tieMat
       );
-      afro.position.y = 0.1;
-      afro.castShadow = true;
-      group.add(afro);
+      tie.position.set(0, -1.75, -0.5);
+      tie.rotation.y = Math.PI / 2;
+      group.add(tie);
+      const wisp = new THREE.Mesh(
+        new THREE.ConeGeometry(0.09, 0.2, 10), mat
+      );
+      wisp.position.set(0, -1.9, -0.5);
+      wisp.castShadow = true;
+      group.add(wisp);
+      break;
+    }
+
+    case 'afro': {
+      // Big textured afro — main sphere + surface curl bumps.
+      const main = new THREE.Mesh(
+        new THREE.SphereGeometry(0.85, 32, 24), mat
+      );
+      main.position.y = 0.18;
+      main.castShadow = true;
+      group.add(main);
+      const BUMPS = 40;
+      for (let i = 0; i < BUMPS; i++) {
+        const u = (i * 0.61803) % 1;
+        const v = (i * 0.41421) % 1;
+        const theta = u * Math.PI * 2;
+        const phi = v * Math.PI * 0.75 + Math.PI * 0.1;
+        const R = 0.88;
+        const bump = new THREE.Mesh(
+          new THREE.SphereGeometry(0.12 + 0.025 * ((i * 7) % 3), 10, 8), mat
+        );
+        bump.position.set(
+          R * Math.sin(phi) * Math.cos(theta),
+          R * Math.cos(phi) + 0.18,
+          R * Math.sin(phi) * Math.sin(theta),
+        );
+        bump.castShadow = true;
+        group.add(bump);
+      }
+      // Base hairline
+      const base = new THREE.Mesh(
+        new THREE.TorusGeometry(0.55, 0.1, 10, 24, Math.PI * 1.1), mat
+      );
+      base.rotation.x = Math.PI / 2;
+      base.rotation.z = -Math.PI / 2 - Math.PI * 0.55;
+      base.position.y = -0.25;
+      base.scale.y = 0.7;
+      group.add(base);
       break;
     }
   }
+
   return group;
 }
 
@@ -4670,6 +5428,34 @@ function _cyl(
   return _b(new THREE.CylinderGeometry(r, r, h, seg), x, y, z, mat);
 }
 
+/** Cached soft radial gradient texture used for the campfire halo
+ *  sprite. Built lazily on first use so blocks.ts has no init-time
+ *  side-effect, then reused across every campfire instance. */
+let _fireGlowTexture: THREE.CanvasTexture | null = null;
+function makeFireGlowTexture(): THREE.CanvasTexture {
+  if (_fireGlowTexture) return _fireGlowTexture;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createRadialGradient(
+      size / 2, size / 2, 0,
+      size / 2, size / 2, size / 2
+    );
+    grad.addColorStop(0, 'rgba(255, 220, 140, 1)');
+    grad.addColorStop(0.25, 'rgba(255, 150, 60, 0.65)');
+    grad.addColorStop(0.6, 'rgba(255, 80, 20, 0.2)');
+    grad.addColorStop(1, 'rgba(255, 50, 0, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+  }
+  _fireGlowTexture = new THREE.CanvasTexture(canvas);
+  _fireGlowTexture.colorSpace = THREE.SRGBColorSpace;
+  return _fireGlowTexture;
+}
+
 // ---- FURNITURE ----
 
 // 1. Chair — 2×2 footprint, 6 plates tall
@@ -4705,12 +5491,18 @@ function createTableBlock(_spec: BlockSpec): THREE.Group {
 }
 
 // 3. Sofa — 4×2 footprint, 6 plates tall
-function createSofaBlock(_spec: BlockSpec): THREE.Group {
+function createSofaBlock(spec: BlockSpec): THREE.Group {
   const group = new THREE.Group();
-  const baseMat = new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.6 });
-  const cushMat = new THREE.MeshStandardMaterial({ color: 0xdd3333, roughness: 0.5 });
-  const backMat = new THREE.MeshStandardMaterial({ color: 0x991111, roughness: 0.65 });
-  const armMat = new THREE.MeshStandardMaterial({ color: 0xaa1818, roughness: 0.65 });
+  // Use the user-selected color for the fabric. Derive lighter (cushion)
+  // and darker (back/arm) variants from it so it reads as one piece.
+  const base = new THREE.Color(spec.colorHex);
+  const lighter = base.clone().offsetHSL(0, 0, 0.08);
+  const darker = base.clone().offsetHSL(0, 0.02, -0.12);
+  const darkest = base.clone().offsetHSL(0, 0.02, -0.18);
+  const baseMat = new THREE.MeshStandardMaterial({ color: base, roughness: 0.6 });
+  const cushMat = new THREE.MeshStandardMaterial({ color: lighter, roughness: 0.5 });
+  const backMat = new THREE.MeshStandardMaterial({ color: darker, roughness: 0.65 });
+  const armMat = new THREE.MeshStandardMaterial({ color: darkest, roughness: 0.65 });
   // 8×4 footprint, minifig-scale sofa (3-seater)
   const hw = 4, hd = 2;
   // Base
@@ -5008,72 +5800,174 @@ function createBarrelBlock(_spec: BlockSpec): THREE.Group {
 
 // 17. Campfire — 3×3 footprint, 3 plates tall
 function createCampfireBlock(_spec: BlockSpec): THREE.Group {
+  const S = 1.6; // scale factor baked into all coordinates (no group.scale)
   const group = new THREE.Group();
   const logMat = new THREE.MeshStandardMaterial({ color: 0x5a3018, roughness: 0.8 });
   const charMat = new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 0.9 });
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.7 });
 
-  // Stone ring: 12 stones in a circle r=1.8
+  // Stone ring: 12 stones in a circle — castShadow off so SpotLight
+  // reaches the ground unobstructed (same reason the lamp bulb doesn't
+  // cast shadows).
   for (let i = 0; i < 12; i++) {
     const angle = (i / 12) * Math.PI * 2;
-    const sx = Math.cos(angle) * 1.8;
-    const sz = Math.sin(angle) * 1.8;
-    const s = _box(0.55, 0.4, 0.5, sx, 0.2, sz, stoneMat);
+    const sx = Math.cos(angle) * 2.9 * S;
+    const sz = Math.sin(angle) * 2.9 * S;
+    const s = _box(0.8, 0.5, 0.7, sx, 0.25, sz, stoneMat);
     s.rotation.y = angle + 0.3;
+    s.castShadow = false;
     group.add(s);
   }
 
   // Charred ground base
-  group.add(_cyl(1.3, 0.1, 0, 0.05, 0, charMat));
+  const charBase = _cyl(2.0, 0.12, 0, 0.06, 0, charMat);
+  charBase.castShadow = false;
+  group.add(charBase);
 
-  // 8 logs: thick horizontal cylinders in a teepee-like crossed pattern
+  // 8 logs: thick cylinders in teepee pattern
   for (let i = 0; i < 8; i++) {
     const angle = (i / 8) * Math.PI * 2;
-    const log = _b(new THREE.CylinderGeometry(0.18, 0.12, 2.0, 8), 0, 0.5, 0, logMat);
+    const log = _b(new THREE.CylinderGeometry(0.28, 0.2, 3.2, 8),
+      Math.cos(angle) * 0.5, 0.8, Math.sin(angle) * 0.5, logMat);
     log.rotation.z = Math.PI / 2 - 0.3;
     log.rotation.y = angle;
-    log.position.set(
-      Math.cos(angle) * 0.3,
-      0.5,
-      Math.sin(angle) * 0.3
-    );
+    log.castShadow = false;
     group.add(log);
   }
 
-  // Flames: many emissive cones of varying sizes — looks like roaring fire
+  // ---- Flames ----
+  // Real fire has a white-hot core, an orange body, and red/faint tips.
+  // We stack three layers of additive-blended cones so overlapping
+  // meshes brighten the shared center — that's what reads as "heat" on
+  // screen without any post-processing bloom.
+  //
+  // Each flame stores its base position/height on userData so the
+  // animateEffects loop can flicker and sway without cumulative drift.
   const flameGroup = new THREE.Group();
   flameGroup.userData.isCampfireFlame = true;
-  const flameDefs: { x: number; z: number; r: number; h: number; color: number }[] = [
-    { x: 0, z: 0, r: 0.35, h: 2.2, color: 0xff4400 },
-    { x: 0.25, z: 0.2, r: 0.25, h: 1.8, color: 0xff6600 },
-    { x: -0.3, z: 0.15, r: 0.22, h: 1.6, color: 0xff8800 },
-    { x: 0.15, z: -0.25, r: 0.28, h: 2.0, color: 0xff5500 },
-    { x: -0.2, z: -0.2, r: 0.2, h: 1.5, color: 0xffaa00 },
-    { x: 0, z: 0.3, r: 0.18, h: 1.3, color: 0xffcc00 },
-    { x: 0.35, z: -0.1, r: 0.15, h: 1.1, color: 0xffdd22 },
-    { x: -0.35, z: -0.05, r: 0.18, h: 1.4, color: 0xff7700 },
+
+  type FlameLayer = 'core' | 'body' | 'wisp';
+  const flameDefs: {
+    x: number; z: number; r: number; h: number;
+    color: number; layer: FlameLayer;
+  }[] = [
+    // White-hot core — tall, narrow, brightest
+    { x: 0,     z: 0,     r: 0.28, h: 3.4, color: 0xfff0b0, layer: 'core' },
+    { x: 0.15,  z: 0.1,   r: 0.22, h: 2.9, color: 0xffe890, layer: 'core' },
+    { x: -0.1,  z: -0.15, r: 0.20, h: 2.6, color: 0xffdd70, layer: 'core' },
+
+    // Orange body — the main mass of the fire
+    { x: 0,     z: 0,     r: 0.55, h: 3.1, color: 0xff8020, layer: 'body' },
+    { x: 0.35,  z: 0.25,  r: 0.42, h: 2.7, color: 0xff7018, layer: 'body' },
+    { x: -0.4,  z: 0.2,   r: 0.38, h: 2.4, color: 0xff9030, layer: 'body' },
+    { x: 0.2,   z: -0.35, r: 0.45, h: 2.8, color: 0xff6010, layer: 'body' },
+    { x: -0.25, z: -0.25, r: 0.34, h: 2.1, color: 0xffa040, layer: 'body' },
+
+    // Red wisps — short, curling outer flames
+    { x: 0.55,  z: -0.1,  r: 0.30, h: 1.5, color: 0xff4010, layer: 'wisp' },
+    { x: -0.55, z: 0,     r: 0.28, h: 1.7, color: 0xff3808, layer: 'wisp' },
+    { x: 0,     z: 0.55,  r: 0.26, h: 1.4, color: 0xff5018, layer: 'wisp' },
+    { x: 0.1,   z: -0.5,  r: 0.24, h: 1.3, color: 0xff4008, layer: 'wisp' },
   ];
   for (const f of flameDefs) {
-    const mat = new THREE.MeshStandardMaterial({
+    // Additive blending — overlapping flames brighten the shared area,
+    // which produces the white-hot core glow for free.
+    const mat = new THREE.MeshBasicMaterial({
       color: f.color,
-      emissive: f.color,
-      emissiveIntensity: 1.2,
       transparent: true,
-      opacity: 0.85,
-      roughness: 0.2,
+      opacity: f.layer === 'core' ? 0.95 : f.layer === 'body' ? 0.55 : 0.35,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
-    const cone = _b(new THREE.ConeGeometry(f.r, f.h, 8), f.x, 0.6 + f.h / 2, f.z, mat);
+    const cone = _b(
+      new THREE.ConeGeometry(f.r, f.h, 12, 1, true),
+      f.x, 1.0 + f.h / 2, f.z, mat
+    );
+    cone.castShadow = false;
+    cone.receiveShadow = false;
+    cone.renderOrder = f.layer === 'core' ? 3 : f.layer === 'body' ? 2 : 1;
+    cone.userData.baseX = f.x;
+    cone.userData.baseZ = f.z;
+    cone.userData.baseY = 1.0 + f.h / 2;
+    cone.userData.layer = f.layer;
     flameGroup.add(cone);
   }
+
+  // ---- Soft glow halo ----
+  // Billboard sprite behind the flames that fakes the atmospheric glow
+  // of fire heating the air. Additive blending so it reads as light.
+  const haloMat = new THREE.SpriteMaterial({
+    map: makeFireGlowTexture(),
+    color: 0xffaa44,
+    transparent: true,
+    opacity: 0.55,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const halo = new THREE.Sprite(haloMat);
+  halo.scale.set(5.5, 5.5, 1);
+  halo.position.set(0, 2.0, 0);
+  halo.renderOrder = 0;
+  halo.userData.isCampfireHalo = true;
+  flameGroup.add(halo);
+
+  // ---- Ember particles ----
+  // Tiny glowing specks that rise out of the fire and fade. Stored in a
+  // tagged sub-group so animateEffects can drive the rise/reset loop.
+  const emberGroup = new THREE.Group();
+  emberGroup.userData.isCampfireEmbers = true;
+  const emberGeom = new THREE.SphereGeometry(0.06, 6, 5);
+  for (let i = 0; i < 10; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffaa33,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ember = new THREE.Mesh(emberGeom, mat);
+    const theta = Math.random() * Math.PI * 2;
+    const radius = Math.random() * 0.3;
+    ember.userData.baseX = Math.cos(theta) * radius;
+    ember.userData.baseZ = Math.sin(theta) * radius;
+    ember.userData.seed = Math.random() * 10;
+    ember.userData.speed = 0.8 + Math.random() * 0.6;
+    ember.position.set(
+      ember.userData.baseX,
+      1.0 + Math.random() * 3.0,
+      ember.userData.baseZ
+    );
+    ember.renderOrder = 4;
+    emberGroup.add(ember);
+  }
+  flameGroup.add(emberGroup);
+
   group.add(flameGroup);
 
-  // Point light for warm glow
-  const fireLight = new THREE.PointLight(0xff6622, 5, 18);
-  fireLight.position.set(0, 2.5, 0);
+  // ----- Lighting -----
+  // PointLight at the flame center — radiates warmly in ALL directions
+  // (unlike the lamp post's downward-pointing SpotLight). A SpotLight
+  // from above was casting only a narrow pool that didn't read as
+  // firelight; a PointLight spills onto the surrounding ground, stones,
+  // and nearby blocks like a real campfire. Intensity is driven by
+  // Game.updateLampForTime so the fire brightens as the sun sets.
+  const fireLight = new THREE.PointLight(
+    0xff6622, // warm orange fire color
+    0,        // intensity — set live by Game.updateLampForTime
+    30,       // range
+    2         // physical inverse-square decay
+  );
+  // Middle of the flame column — so the cast highlights the ground and
+  // the surrounding stones/logs evenly.
+  fireLight.position.set(0, 2.2, 0);
   group.add(fireLight);
 
-  // Scale up to fill 8×8 footprint
-  group.scale.setScalar(1.6);
+  // Piggyback on the lamp system so updateLampForTime handles it
+  group.userData.isLamp = true;
+  group.userData.lampLight = fireLight;
+  // Campfires should read as "firelight" — punchier than the cool
+  // lamp bulb — so boost the night-driven intensity.
+  group.userData.lampIntensityScale = 1.5;
 
   return group;
 }
