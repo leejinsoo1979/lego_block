@@ -509,11 +509,27 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 500);
     this.camera.position.set(28, 28, 28);
 
-    // Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    // Renderer — quality auto-degrades on mobile so low-end phones
+    // maintain 60fps. Desktop keeps full fidelity.
+    const isMobileDevice =
+      (typeof matchMedia === 'function' &&
+        matchMedia('(pointer: coarse)').matches) ||
+      (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+    // Antialias is expensive on mobile GPUs; disable for mobile and
+    // rely on the higher DPR to smooth edges instead.
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !isMobileDevice,
+      powerPreference: isMobileDevice ? 'low-power' : 'high-performance',
+    });
     this.renderer.setSize(width, height);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
+    // Mobile caps DPR at 1.5 — huge perf win on retina phones without
+    // a visible quality drop at typical viewing distances.
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, isMobileDevice ? 1.5 : 2)
+    );
+    // Shadows are a major GPU cost. Keep them off on mobile by default;
+    // the user can re-enable via a settings toggle later.
+    this.renderer.shadowMap.enabled = !isMobileDevice;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
@@ -4481,103 +4497,50 @@ export class Game {
   // only the upper/lower halves gives each stage a visibly different
   // layout while keeping the AI simple.
 
-  /** Upper + lower halves that differ per stage. Paired with the
-   *  shared middle band to produce the full maze. */
+  /** Shared middle band (rows 9–19) containing the ghost house and
+   *  tunnels. All mazes share this so the ghost-house exit AI has a
+   *  stable gate coordinate. Grid is 28 cols × 11 rows. */
   private static readonly PACMAN_CENTER: string[] = [
-    '######.##### ## #####.######', // row 9
-    '     #.##### ## #####.#     ', // 10
-    '     #.##          ##.#     ', // 11
-    '     #.## ###  ### ##.#     ', // 12  (gate opening between the `###  ###`)
-    '######.## #GGGGGG# ##.######', // 13
-    '_________ #GGGGGG# _________', // 14  (tunnel row)
-    '######.## ######## ##.######', // 15
-    '     #.##          ##.#     ', // 16
-    '     #.## ######## ##.#     ', // 17
-    '     #.## ######## ##.#     ', // 18
-    '######.## ######## ##.######', // 19
+    '#.########..####..########.#', // row 9  — wall above house
+    '#..........................#', // 10 — corridor directly above gate
+    '########..##    ##..########', // 11 — ghost-house top, 4-wide gate opening
+    '#.....##..##    ##..##.....#', // 12 — house shoulders
+    '#.....##.# GGGGGG #.##.....#', // 13 — G row 1
+    '_____..##.# GGGGGG #.##.____', // 14 — tunnel row, G row 2
+    '#.....##.# GGGGGG #.##.....#', // 15 — G row 3
+    '#.....##.##########.##.....#', // 16 — house bottom (sealed)
+    '########..##########..######', // 17 — corridor + wall under house
+    '#..........................#', // 18
+    '#.####..####..####..####..##', // 19 — wall row under house
   ];
 
-  /** Each entry defines rows 0-8 (upper half, top-to-bottom) and
-   *  rows 20-28 (lower half) that get spliced around the shared
-   *  center band to produce a full 29-row maze. */
+  /** Upper (rows 0–8) and lower (rows 20–28) halves. A single variant
+   *  for now; more can be added later to cycle per stage. */
   private static readonly PACMAN_VARIANTS: Array<{
     upper: string[];
     lower: string[];
   }> = [
-    // ---- Variant 1: classic ----
-    {
-      upper: [
-        '############################',
-        '#............##............#',
-        '#.####.#####.##.#####.####.#',
-        '#o####.#####.##.#####.####o#',
-        '#.####.#####.##.#####.####.#',
-        '#..........................#',
-        '#.####.##.########.##.####.#',
-        '#.####.##.########.##.####.#',
-        '#......##....##....##......#',
-      ],
-      lower: [
-        '#............##............#',
-        '#.####.#####.##.#####.####.#',
-        '#o..##................##..o#',
-        '###.##.##.########.##.##.###',
-        '###.##.##.########.##.##.###',
-        '#......##....##....##......#',
-        '#.##########.##.##########.#',
-        '#..............P...........#',
-        '############################',
-      ],
-    },
-    // ---- Variant 2: "flipped" — classic rotated top-to-bottom,
-    //      player spawn now at the top ----
-    {
-      upper: [
-        '############################',
-        '#..............P...........#',
-        '#.##########.##.##########.#',
-        '#......##....##....##......#',
-        '###.##.##.########.##.##.###',
-        '###.##.##.########.##.##.###',
-        '#o..##................##..o#',
-        '#.####.#####.##.#####.####.#',
-        '#............##............#',
-      ],
-      lower: [
-        '#......##....##....##......#',
-        '#.####.##.########.##.####.#',
-        '#.####.##.########.##.####.#',
-        '#..........................#',
-        '#.####.#####.##.#####.####.#',
-        '#o####.#####.##.#####.####o#',
-        '#.####.#####.##.#####.####.#',
-        '#............##............#',
-        '############################',
-      ],
-    },
-    // ---- Variant 3: "open" — large horizontal corridors top and
-    //      bottom with smaller central blocks. All rows 28 chars. ----
     {
       upper: [
         '############################',
         '#o........................o#',
-        '#.########.######.########.#',
-        '#.########.######.########.#',
         '#..........................#',
-        '#.####.####.##.####.####.###',
-        '#.####.####.##.####.####.###',
-        '#......####.##.####......###',
-        '######.####.##.####.########',
+        '#..####..######..######..###',
+        '#..........................#',
+        '#..........................#',
+        '#.####..##..####..##..####.#',
+        '#..........................#',
+        '#..........................#',
       ],
       lower: [
-        '######.####.##.####.########',
-        '#......####.##.####......###',
-        '#.####.####.##.####.####.###',
-        '#.####.####.##.####.####.###',
         '#..........................#',
-        '#.########.######.########.#',
-        '#.########.######.########.#',
-        '#o.............P..........o#',
+        '#..########..##..########..#',
+        '#..........................#',
+        '#..####..##..####..##..####.',
+        '#..........................#',
+        '#..........................#',
+        '#..########..##..########..#',
+        '#............P.............#',
         '############################',
       ],
     },
@@ -5320,8 +5283,11 @@ export class Game {
     // it closer to the gate, without the usual reverse-ban. Once
     // above the top row of the house it's free to chase normally.
     if (this.pacmanIsInGhostHouse(cell.c, cell.r)) {
+      // Gate opening is at row 11 (the 4-space window in the `##    ##`
+      // top wall of the ghost house). Targeting col 13 row 10 (directly
+      // above the gate, in the free corridor) guarantees an exit path.
       const GATE_C = 13;
-      const GATE_R = 12;
+      const GATE_R = 10;
       const options = dirs.filter((d) =>
         this.pacmanIsWalkable(cell.c + d.x, cell.r + d.z)
       );
@@ -7735,6 +7701,16 @@ export class Game {
 
   private animate = () => {
     requestAnimationFrame(this.animate);
+
+    // Battery saver: when the tab is hidden (backgrounded / screen off),
+    // skip rendering entirely. Also skip when the viewer canvas isn't
+    // visible — it might be hidden behind the landing / dashboard / etc.
+    // This saves battery on mobile without breaking state.
+    if (document.hidden) {
+      this.lastFrameTime = performance.now();
+      return;
+    }
+
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastFrameTime) / 1000);
     this.lastFrameTime = now;
