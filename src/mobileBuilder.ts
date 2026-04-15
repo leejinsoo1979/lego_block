@@ -411,6 +411,10 @@ const CATEGORY_ICONS: Partial<Record<BlockCategory, string>> = {
   pacman: '👻',
 };
 
+/** Currently shown hotbar category. null = the user's saved 9-slot
+ *  custom hotbar (DEFAULT_HOTBAR or whatever they pinned). */
+let activeHotbarCategory: BlockCategory | null = null;
+
 function wireCategoryStrip(game: Game): void {
   const strip = document.getElementById('mb-cat-strip');
   if (!strip) return;
@@ -427,45 +431,52 @@ function wireCategoryStrip(game: Game): void {
     `;
     btn.addEventListener('click', () => {
       haptic('tap');
-      // Mark active visually
+      // Toggle: re-tap the active chip → return to default hotbar
+      if (activeHotbarCategory === cat.id) {
+        activeHotbarCategory = null;
+      } else {
+        activeHotbarCategory = cat.id;
+      }
       strip.querySelectorAll('.mb-cat-btn').forEach((b) =>
-        b.classList.toggle('is-active', b === btn)
+        b.classList.toggle(
+          'is-active',
+          activeHotbarCategory != null && b === btn
+        )
       );
-      // Open the bottom sheet at this category
-      openSheetAtCategory(cat.id);
+      rerenderHotbar(game);
     });
     strip.appendChild(btn);
   }
 
-  // Track active category whenever block type changes elsewhere
+  // When block type changes elsewhere (e.g. via a hotbar tap), keep
+  // the strip's highlight in sync with the block's category.
   const prev = game.onBlockTypeChange;
   game.onBlockTypeChange = (type) => {
     prev?.(type);
     const def = BLOCK_TYPES.find((t) => t.type === type);
     if (!def) return;
-    strip.querySelectorAll<HTMLButtonElement>('.mb-cat-btn').forEach((b) => {
-      b.classList.toggle('is-active', b.dataset.category === def.category);
-    });
+    if (activeHotbarCategory === null) {
+      strip.querySelectorAll('.mb-cat-btn').forEach((b) =>
+        b.classList.remove('is-active')
+      );
+    } else {
+      strip.querySelectorAll<HTMLButtonElement>('.mb-cat-btn').forEach((b) => {
+        b.classList.toggle('is-active', b.dataset.category === activeHotbarCategory);
+      });
+    }
   };
 }
 
-/** Open the bottom sheet (peek state) and switch to the given category. */
-function openSheetAtCategory(catId: BlockCategory): void {
-  // Sync the sheet's internal state and re-render its grid.
-  // We re-find the sheet's tab buttons and click the matching one.
-  const tab = document.querySelector<HTMLButtonElement>(
-    `#mb-sheet-tabs .mb-sheet-tab[data-category="${catId}"]`
-  );
-  if (tab) tab.click();
-  openSheet('peek');
-}
+/** Re-renders the hotbar. Called both when the user pins slots and
+ *  when the category strip toggles activeHotbarCategory. */
+let rerenderHotbar: (game: Game) => void = () => {};
 
 function wireHotbar(game: Game): void {
   const track = document.getElementById('mb-hotbar-track');
   const expand = document.getElementById('mb-hotbar-expand');
   if (!track || !expand) return;
 
-  // Persist hotbar between sessions
+  // Persist user-pinned hotbar between sessions
   try {
     const saved = localStorage.getItem('legoworld:hotbar');
     if (saved) {
@@ -476,13 +487,29 @@ function wireHotbar(game: Game): void {
 
   const render = () => {
     track.innerHTML = '';
-    hotbarSlots.forEach((t, i) => {
+
+    // What are we showing? Either the user's 9 pinned slots (default)
+    // or every block in the currently-active category.
+    const items: (BlockType | null)[] =
+      activeHotbarCategory === null
+        ? hotbarSlots
+        : BLOCK_TYPES.filter((t) => t.category === activeHotbarCategory).map(
+            (t) => t.type
+          );
+
+    items.forEach((t, i) => {
       const btn = document.createElement('button');
       btn.className = 'mb-hot-slot';
-      btn.classList.toggle('is-active', i === hotbarActiveIdx);
       btn.dataset.slot = String(i);
       btn.type = 'button';
-      btn.setAttribute('aria-label', `슬롯 ${i + 1}`);
+      btn.setAttribute(
+        'aria-label',
+        t ? (BLOCK_TYPES.find((x) => x.type === t)?.label ?? t) : `슬롯 ${i + 1}`
+      );
+
+      const isActiveBlock = t != null && t === game.blockType;
+      btn.classList.toggle('is-active', isActiveBlock);
+
       if (t) {
         const img = document.createElement('img');
         img.alt = '';
@@ -498,30 +525,30 @@ function wireHotbar(game: Game): void {
         btn.textContent = '＋';
       }
       btn.addEventListener('click', () => {
-        hotbarActiveIdx = i;
         haptic('tap');
         if (t) {
           game.setBlockType(t);
           if (t === 'minifig') game.setCharacter(MINIFIG_PRESETS[0]);
-        } else {
-          // Empty slot — open the sheet so user can pick something
-          openSheet();
         }
         render();
       });
-      // Long-press a slot to replace it with the current block type
-      wireLongPress(btn, () => {
-        haptic('success');
-        hotbarSlots[i] = game.blockType;
-        try {
-          localStorage.setItem('legoworld:hotbar', JSON.stringify(hotbarSlots));
-        } catch {}
-        render();
-      });
+      // Long-press a DEFAULT slot (only when no category is active)
+      // to replace it with the current block type.
+      if (activeHotbarCategory === null) {
+        wireLongPress(btn, () => {
+          haptic('success');
+          hotbarSlots[i] = game.blockType;
+          try {
+            localStorage.setItem('legoworld:hotbar', JSON.stringify(hotbarSlots));
+          } catch {}
+          render();
+        });
+      }
       track.appendChild(btn);
     });
   };
   render();
+  rerenderHotbar = () => render();
 
   // Expand arrow toggles the bottom sheet
   expand.addEventListener('click', () => {
