@@ -50,7 +50,79 @@ export function buildMobileBuilderUI(game: Game): void {
   wireBottomSheet(game);
   wireModeToggle(game);
   wireQuickActions(game);
+  wireDPad(game);
   syncFromGame(game);
+}
+
+// --------------------------------------------------------------------
+//  D-pad — nudges the placement ghost; center places
+// --------------------------------------------------------------------
+
+function wireDPad(game: Game): void {
+  // Map each direction to the key code the Game already listens for.
+  // Space places + starts line-streak; arrows then extend.
+  const mapping: Record<string, string> = {
+    up: 'ArrowUp',
+    down: 'ArrowDown',
+    left: 'ArrowLeft',
+    right: 'ArrowRight',
+    place: 'Space',
+  };
+
+  document.querySelectorAll<HTMLButtonElement>('.mb-dpad-btn').forEach((btn) => {
+    const dir = btn.dataset.dir;
+    if (!dir || !mapping[dir]) return;
+    const code = mapping[dir];
+
+    // Tap = single press. Hold = repeat every 120ms (key-repeat feel).
+    let holdTimer: number | null = null;
+    const fire = () => {
+      haptic(dir === 'place' ? 'place' : 'tap');
+      window.dispatchEvent(new KeyboardEvent('keydown', { code }));
+      // Release right after so the game registers a one-shot press
+      // (arrow handlers reset state on keyup).
+      window.dispatchEvent(new KeyboardEvent('keyup', { code }));
+    };
+
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      fire();
+      // Start repeat for direction buttons only — place shouldn't
+      // spam blocks on long-press.
+      if (dir !== 'place') {
+        holdTimer = window.setInterval(fire, 120);
+      }
+    });
+    const stop = () => {
+      if (holdTimer != null) {
+        clearInterval(holdTimer);
+        holdTimer = null;
+      }
+    };
+    btn.addEventListener('pointerup', stop);
+    btn.addEventListener('pointercancel', stop);
+    btn.addEventListener('pointerleave', stop);
+  });
+
+  // Hide D-pad in remove mode (arrows don't do anything there) + in
+  // play mode (the player controls replace it).
+  const apply = () => {
+    const dpad = document.querySelector<HTMLElement>('.mb-dpad');
+    if (!dpad) return;
+    const hidden = game.mode === 'remove' || game.isPlaying;
+    dpad.style.display = hidden ? 'none' : '';
+  };
+  const prevMode = game.onModeChange;
+  game.onModeChange = (m) => {
+    prevMode?.(m);
+    apply();
+  };
+  const prevPlay = game.onPlayChange;
+  game.onPlayChange = (p) => {
+    prevPlay?.(p);
+    apply();
+  };
+  apply();
 }
 
 // --------------------------------------------------------------------
@@ -82,7 +154,7 @@ function shellMarkup(): string {
       <button class="mb-mode-chip" data-mode="remove" type="button" role="radio" aria-checked="false">제거</button>
     </div>
 
-    <!-- Quick action bar: undo / rotate / clear — bottom-left -->
+    <!-- Quick action bar: rotate / undo — upper-left, above the D-pad -->
     <nav class="mb-quick-actions safe-bottom" aria-label="빠른 동작">
       <button class="mb-qa-btn" data-action="rotate" aria-label="회전" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -96,6 +168,21 @@ function shellMarkup(): string {
         </svg>
       </button>
     </nav>
+
+    <!-- D-pad — nudges the placement ghost one footprint at a time.
+         Center button places (same as tapping the canvas). Only visible
+         in build mode + place mode. Safe-area aware, left-bottom. -->
+    <div class="mb-dpad safe-bottom" role="group" aria-label="고스트 이동">
+      <button class="mb-dpad-btn mb-dpad-up" data-dir="up" aria-label="위" type="button">▲</button>
+      <button class="mb-dpad-btn mb-dpad-left" data-dir="left" aria-label="왼쪽" type="button">◀</button>
+      <button class="mb-dpad-btn mb-dpad-place" data-dir="place" aria-label="배치" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5" y="5" width="14" height="14" rx="2"/>
+        </svg>
+      </button>
+      <button class="mb-dpad-btn mb-dpad-right" data-dir="right" aria-label="오른쪽" type="button">▶</button>
+      <button class="mb-dpad-btn mb-dpad-down" data-dir="down" aria-label="아래" type="button">▼</button>
+    </div>
 
     <!-- FAB cluster: save / play / (expanded) — bottom-right, safe-area -->
     <div class="mb-fab-cluster safe-bottom" role="toolbar" aria-label="주요 동작">

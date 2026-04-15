@@ -3431,6 +3431,137 @@ body:not(.show-dashboard) #dashboard {
 }
 
 /* =====================================================================
+   DARK-THEME OVERRIDES — appear AFTER the legacy light dashboard rules
+   so cascade wins. Covers selectors dashboard.ts still writes at runtime
+   (.dash-map-card, .dash-empty, .dash-insp-card, filter chips, stats).
+   ===================================================================== */
+.dashboard .dash-filter {
+  display: flex; gap: 4px; padding: 4px;
+  background: #22232c; border: 1px solid #2e3039; border-radius: 10px;
+}
+.dashboard .dash-filter-btn {
+  padding: 6px 12px; background: transparent; border: none; border-radius: 6px;
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
+  color: #b6b9c2; cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.dashboard .dash-filter-btn:hover { color: #fff; background: transparent; }
+.dashboard .dash-filter-btn.active { background: #c4281c; color: #fff; }
+
+.dashboard .dash-insp-card {
+  background: #22232c; border: 1px solid #2e3039; border-radius: 12px;
+  overflow: hidden; cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  display: flex; flex-direction: column;
+}
+.dashboard .dash-insp-card:hover {
+  transform: translateY(-3px); border-color: #3c3f4a;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.dashboard .dash-insp-thumb {
+  aspect-ratio: 16 / 10;
+  background: linear-gradient(135deg, #3c3f4a, #2a2c36);
+}
+.dashboard .dash-insp-card.featured .dash-insp-thumb { aspect-ratio: 4 / 3; }
+.dashboard .dash-insp-body { padding: 10px 12px 12px; background: #22232c; }
+.dashboard .dash-insp-title {
+  font-size: 13.5px; font-weight: 700; color: #fff; margin-bottom: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dashboard .dash-insp-meta {
+  display: flex; gap: 8px; font-size: 11.5px; color: #8a8d97;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard .dash-map-card {
+  background: #22232c; border: 1px solid #2e3039; border-radius: 12px;
+  overflow: hidden; cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  display: flex; flex-direction: column;
+}
+.dashboard .dash-map-card:hover {
+  transform: translateY(-3px); border-color: #3c3f4a;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.dashboard .dash-map-thumb {
+  aspect-ratio: 16 / 10;
+  background: linear-gradient(135deg, #3c3f4a, #2a2c36);
+  background-size: cover; background-position: center; position: relative;
+}
+.dashboard .dash-map-thumb.placeholder {
+  background: linear-gradient(135deg, #2e3039, #22232c);
+}
+.dashboard .dash-map-badge {
+  position: absolute; top: 8px; left: 8px;
+  padding: 3px 8px; background: rgba(0, 0, 0, 0.6);
+  color: #e7e8ea; font-size: 10.5px; font-weight: 600;
+  border-radius: 6px; backdrop-filter: blur(6px);
+}
+.dashboard .dash-map-badge.public { background: #c4281c; color: #fff; }
+.dashboard .dash-map-body { padding: 10px 12px 4px; background: #22232c; }
+.dashboard .dash-map-title {
+  font-size: 13.5px; font-weight: 700; color: #fff; margin-bottom: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dashboard .dash-map-meta {
+  display: flex; gap: 8px; font-size: 11.5px; color: #8a8d97;
+  font-variant-numeric: tabular-nums;
+}
+.dashboard .dash-map-actions {
+  display: flex; gap: 6px; padding: 8px 12px 12px; background: #22232c;
+}
+.dashboard .dash-map-actions button {
+  flex: 1; padding: 6px 10px;
+  background: #2e3039; border: none; border-radius: 6px;
+  color: #e7e8ea; font-family: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: background 0.12s;
+}
+.dashboard .dash-map-actions button:hover { background: #3c3f4a; }
+.dashboard .dash-map-actions .danger {
+  background: transparent; border: 1px solid #4a2a2a; color: #e06a60;
+}
+.dashboard .dash-map-actions .danger:hover { background: rgba(196, 40, 28, 0.14); }
+
+.dashboard .dash-empty {
+  grid-column: 1 / -1;
+  padding: 32px 20px; text-align: center;
+  color: #8a8d97; font-size: 13px;
+  background: #22232c; border: 1px dashed #2e3039; border-radius: 12px;
+}
+
+.dashboard .dash-stat-num {
+  font-size: 24px; font-weight: 800; color: #fff;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-bottom: 2px;
+}
+.dashboard .dash-stat-label {
+  font-size: 11px; color: #8a8d97; font-weight: 500; letter-spacing: 0.02em;
+}
+
+/* Auth slot avatar inside the topbar */
+.dashboard .auth-slot .avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid #2e3039; cursor: pointer;
+  transition: border-color 0.15s;
+}
+.dashboard .auth-slot .avatar:hover { border-color: #c4281c; }
+
+/* Mobile layout — sidebar collapses to icons only */
+@media (max-width: 860px) {
+  .dash-topbar { padding: 0 14px; gap: 10px; }
+  .dash-topbar-brand { min-width: 0; }
+  .dash-topbar-nav { display: none; }
+  .dash-topbar-search { display: none; }
+  .dash-sidebar { width: 72px; padding: 14px 8px; }
+  .dash-sidebar-user .dash-sidebar-name { display: none; }
+  .dash-side-link span { display: none; }
+  .dash-side-link { justify-content: center; }
+  .dash-sidebar-premium span { display: none; }
+  .dash-content { padding: 16px 16px 40px; }
+  .dash-hero-banner { grid-template-columns: 1fr; padding: 20px; }
+  .dash-hero-banner-stats { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* =====================================================================
    PAC-MAN GAME MODE UI
    ===================================================================== */
 
@@ -6058,4 +6189,60 @@ body.is-mobile #viewer canvas {
 .mb-play-exit {
   pointer-events: auto;
   z-index: 152;
+}
+
+/* ====================================================================
+   D-PAD — mobile arrow keys replacement for ghost nudging
+   ==================================================================== */
+
+.mb-dpad {
+  position: fixed;
+  left: calc(env(safe-area-inset-left, 0px) + 14px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  z-index: 56;
+  display: grid;
+  grid-template-columns: repeat(3, 46px);
+  grid-template-rows: repeat(3, 46px);
+  gap: 4px;
+  pointer-events: none;
+}
+
+.mb-dpad-btn {
+  background: rgba(28, 29, 34, 0.82);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 11px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+  transition: transform 0.1s var(--ease-ios-default),
+              background 0.1s var(--ease-ios-default);
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.mb-dpad-btn:active {
+  transform: scale(0.92);
+  background: rgba(28, 29, 34, 0.95);
+}
+
+.mb-dpad-up    { grid-column: 2; grid-row: 1; }
+.mb-dpad-left  { grid-column: 1; grid-row: 2; }
+.mb-dpad-place { grid-column: 2; grid-row: 2; background: rgba(245, 205, 48, 0.95); color: #1c1d22; border-color: #c49d1c; }
+.mb-dpad-place:active { background: rgba(255, 216, 64, 1); }
+.mb-dpad-place svg { width: 18px; height: 18px; }
+.mb-dpad-right { grid-column: 3; grid-row: 2; }
+.mb-dpad-down  { grid-column: 2; grid-row: 3; }
+
+/* Move the quick actions bar up so it doesn't overlap the D-pad */
+body.is-mobile .mb-quick-actions {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 260px);
 }
