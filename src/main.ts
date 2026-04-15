@@ -8,7 +8,8 @@ import { buildMultiplayerUI } from './multiplayer';
 import { initLandingRouting, wireLandingButtons, enterApp } from './landing';
 import { loadCharacterModel } from './blocks';
 import { signInWithGoogle } from './auth';
-import { initMobile } from './mobile';
+import { initMobile, isMobile } from './mobile';
+import { buildMobileBuilderUI } from './mobileBuilder';
 
 // Mobile detection + safe-area + viewport height must run FIRST so any
 // CSS that depends on body.is-mobile / --sai-* / --vh has the right
@@ -55,6 +56,11 @@ async function init() {
   buildGalleryUI(game);
   buildStoreUI(game);
   buildMultiplayerUI(game);
+
+  // Mobile builder UI — only activates when body has .is-mobile.
+  // Appends a separate top bar + bottom sheet + hotbar + FAB that
+  // replaces the desktop sidebar flow. Desktop UI stays hidden by CSS.
+  if (isMobile()) buildMobileBuilderUI(game);
 
   // Auth-driven routing (dashboard / builder) — needs the UIs above to
   // already be built since it may immediately call showDashboard().

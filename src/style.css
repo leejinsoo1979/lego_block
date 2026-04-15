@@ -4577,3 +4577,425 @@ body.is-mobile #multiplayer {
 body.is-mobile #viewer {
   height: calc(var(--vh, 1vh) * 100);
 }
+
+/* ====================================================================
+   PHASE 2 — MOBILE BUILDER UI
+   Top bar + FAB + quick actions + hotbar + bottom sheet
+   ==================================================================== */
+
+/* Host is always in the DOM but hidden unless on mobile + not on any
+   fullscreen route (landing/dashboard/gallery/store/multiplayer). */
+.mb-host { display: none; }
+body.is-mobile:not(.show-landing):not(.show-dashboard):not(.show-gallery):not(.show-store):not(.show-multiplayer)
+  .mb-host {
+  display: block;
+}
+
+/* --- Top bar ------------------------------------------------------ */
+.mb-topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.92) 0%,
+    rgba(255, 255, 255, 0.7) 100%
+  );
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(28, 29, 34, 0.06);
+  pointer-events: auto;
+}
+
+.mb-top-btn {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(28, 29, 34, 0.05);
+  color: #1c1d22;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s var(--ease-ios-default);
+}
+.mb-top-btn:active { background: rgba(28, 29, 34, 0.12); }
+.mb-top-btn svg { width: 20px; height: 20px; }
+
+.mb-top-title {
+  flex: 1;
+  text-align: center;
+  font-family: 'Black Han Sans', 'Pretendard', sans-serif;
+  font-size: 18px;
+  color: #1c1d22;
+  letter-spacing: -0.01em;
+}
+
+/* --- Mode chips --------------------------------------------------- */
+.mb-mode-chips {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 68px);
+  right: 14px;
+  z-index: 55;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 999px;
+  border: 1px solid rgba(28, 29, 34, 0.08);
+  box-shadow: 0 4px 14px rgba(28, 29, 34, 0.08);
+}
+.mb-mode-chip {
+  padding: 8px 16px;
+  background: transparent;
+  color: #5b5f67;
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s var(--ease-ios-default);
+}
+.mb-mode-chip.is-active {
+  background: #1c1d22;
+  color: #fff;
+}
+body.mb-remove-mode .mb-mode-chip[data-mode='remove'].is-active {
+  background: #d24848;
+}
+
+/* --- Quick actions (left bottom) --------------------------------- */
+.mb-quick-actions {
+  position: fixed;
+  left: 14px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mb-qa-btn {
+  width: 52px;
+  height: 52px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #1c1d22;
+  border: 1px solid rgba(28, 29, 34, 0.06);
+  border-radius: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(28, 29, 34, 0.08);
+  transition: transform 0.15s var(--ease-ios-default);
+}
+.mb-qa-btn:active { transform: scale(0.94); }
+.mb-qa-btn svg { width: 20px; height: 20px; }
+.mb-qa-btn.is-rotated { color: #c4281c; border-color: rgba(196, 40, 28, 0.35); }
+
+/* --- FAB cluster (right bottom) ----------------------------------- */
+.mb-fab-cluster {
+  position: fixed;
+  right: 14px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mb-fab {
+  width: 56px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(28, 29, 34, 0.25), 0 2px 4px rgba(28, 29, 34, 0.08);
+  transition: transform 0.15s var(--ease-ios-default);
+}
+.mb-fab:active { transform: scale(0.92); }
+.mb-fab svg { width: 24px; height: 24px; }
+.mb-fab-save {
+  background: #f5cd30;
+  color: #1c1d22;
+}
+.mb-fab-play {
+  background: #1c1d22;
+  color: #fff;
+}
+.mb-fab-play.playing {
+  background: #d24848;
+}
+
+/* --- Hotbar ------------------------------------------------------- */
+.mb-hotbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 56;
+  padding: 10px calc(env(safe-area-inset-right, 0px) + 14px) calc(env(safe-area-inset-bottom, 0px) + 10px) calc(env(safe-area-inset-left, 0px) + 14px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(
+    to top,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(255, 255, 255, 0.85) 100%
+  );
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(28, 29, 34, 0.06);
+}
+.mb-hotbar-track {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-bottom: 2px;
+}
+.mb-hotbar-track::-webkit-scrollbar { display: none; }
+.mb-hot-slot {
+  flex: 0 0 auto;
+  width: 62px;
+  height: 62px;
+  background: #f1f2f4;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  transition: all 0.12s var(--ease-ios-default);
+  scroll-snap-align: start;
+  font-family: inherit;
+  font-size: 18px;
+  color: #8a8e96;
+}
+.mb-hot-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.mb-hot-slot.is-active {
+  border-color: #1c1d22;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(28, 29, 34, 0.1);
+}
+.mb-hot-slot.is-empty {
+  background: transparent;
+  border-style: dashed;
+  border-color: rgba(28, 29, 34, 0.15);
+}
+.mb-hot-slot:active { transform: scale(0.94); }
+
+.mb-hotbar-expand {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 62px;
+  background: #1c1d22;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s var(--ease-ios-default);
+}
+.mb-hotbar-expand:active { transform: scale(0.94); }
+.mb-hotbar-expand svg { width: 20px; height: 20px; }
+
+/* Flip the arrow when the sheet is open */
+body:has(#mb-sheet[data-state='peek']) .mb-hotbar-expand svg,
+body:has(#mb-sheet[data-state='open']) .mb-hotbar-expand svg {
+  transform: rotate(180deg);
+}
+
+/* --- Bottom sheet ------------------------------------------------- */
+.mb-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  height: 0;
+  overflow: hidden;
+  background: #fff;
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  box-shadow: 0 -10px 40px rgba(28, 29, 34, 0.2);
+  transition: height 0.32s var(--ease-out-expo);
+  will-change: height;
+}
+.mb-sheet[data-state='peek'] { /* height set by JS */ }
+.mb-sheet[data-state='open'] { /* height set by JS */ }
+
+.mb-sheet-handle {
+  width: 100%;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+.mb-sheet-handle:active { cursor: grabbing; }
+.mb-sheet-grip {
+  width: 44px;
+  height: 5px;
+  background: rgba(28, 29, 34, 0.2);
+  border-radius: 999px;
+}
+
+.mb-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 18px 20px;
+  height: calc(100% - 34px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mb-sheet-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.mb-sheet-tabs::-webkit-scrollbar { display: none; }
+
+.mb-sheet-tab {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  background: #f1f2f4;
+  color: #5b5f67;
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s var(--ease-ios-default);
+  white-space: nowrap;
+}
+.mb-sheet-tab.is-active {
+  background: #1c1d22;
+  color: #fff;
+}
+
+.mb-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.mb-sheet-item {
+  background: #f6f7f9;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  padding: 10px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s var(--ease-ios-default);
+}
+.mb-sheet-item img {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+.mb-sheet-item span {
+  font-size: 11px;
+  color: #5b5f67;
+  font-weight: 500;
+}
+.mb-sheet-item.is-active {
+  border-color: #1c1d22;
+  background: #fff;
+}
+.mb-sheet-item.is-active span { color: #1c1d22; font-weight: 600; }
+.mb-sheet-item:active { transform: scale(0.96); }
+
+.mb-sheet-section { display: flex; flex-direction: column; gap: 8px; }
+.mb-sheet-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5b5f67;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mb-sheet-colors {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 8px;
+}
+.mb-color-swatch {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 2px solid rgba(28, 29, 34, 0.08);
+  cursor: pointer;
+  transition: transform 0.12s var(--ease-ios-default);
+}
+.mb-color-swatch.is-active {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #1c1d22;
+}
+.mb-color-swatch:active { transform: scale(0.92); }
+
+.mb-sheet-sizes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mb-size-chip {
+  padding: 8px 14px;
+  background: #f1f2f4;
+  color: #5b5f67;
+  border: none;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s var(--ease-ios-default);
+}
+.mb-size-chip.is-active {
+  background: #1c1d22;
+  color: #fff;
+}
+
+/* Hide the desktop icon-bar + sidebar on mobile (already handled by the
+   sidebar media query, but we also hide the icon bar). */
+body.is-mobile #icon-bar { display: none !important; }
+
+/* In builder mode on mobile, hide the mobile drawer handle + sidebar —
+   we use our own bottom sheet. */
+body.is-mobile #sidebar { display: none !important; }
