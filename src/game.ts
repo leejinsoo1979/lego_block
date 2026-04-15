@@ -2299,6 +2299,16 @@ export class Game {
       return;
     }
 
+    // On mobile the dedicated 배치 FAB is the only way to place, and
+    // the desktop's tap-to-place reticle flow is unwanted (user finds
+    // stray taps placing random blocks confusing). We still honour
+    // taps in REMOVE mode — the user taps directly on the block they
+    // want gone, which works regardless of ghost position.
+    const isMobileHost = document.body.classList.contains('is-mobile');
+    if (isMobileHost && e.pointerType === 'touch' && this.mode !== 'remove') {
+      return;
+    }
+
     if (e.button === 0) {
       if (this.placementSuspended) return; // selection cleared by Escape
       if (this.mode === 'remove') {
