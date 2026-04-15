@@ -6930,3 +6930,18 @@ body.is-mobile #mb-sheet[data-state='peek'] ~ .mb-hotbar .mb-hotbar-expand svg,
 body.is-mobile #mb-sheet[data-state='open'] ~ .mb-hotbar .mb-hotbar-expand svg {
   transform: rotate(180deg);
 }
+
+/* ====================================================================
+   CATEGORY STRIP — pointer-events opt-in
+   The global `.mb-host > *` rule disables pointer events on every
+   container so taps can fall through to the canvas. The category
+   strip needs to re-enable them for its buttons, just like the
+   hotbar, top bar, and FAB do.
+   ==================================================================== */
+
+body.is-mobile .mb-cat-strip {
+  pointer-events: auto !important;
+}
+body.is-mobile .mb-cat-btn {
+  pointer-events: auto !important;
+}
