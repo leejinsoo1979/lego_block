@@ -6446,6 +6446,9 @@ body.is-mobile .mb-mode-chips .mb-mode-chip {
   transition: all 0.15s var(--ease-ios-default);
   min-width: 0;
   min-height: 0;
+  /* Prevent iOS double-tap zoom / delayed click handling */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .mb-view-btn.is-active {
   background: #fff;
@@ -6504,4 +6507,361 @@ body.is-mobile .mb-quick-actions { display: none !important; }
     padding: 6px 10px;
     font-size: 11px;
   }
+}
+
+/* ====================================================================
+   MOBILE UI v2 — FULL OVERRIDE / REDESIGN
+   This block supersedes every prior .mb-* rule via later-in-cascade
+   specificity + !important where needed. Goals:
+   - One opaque top bar with all non-placement controls inline
+   - Compact bottom-left D-pad, bottom-right place FAB
+   - Hotbar pinned to bottom
+   - Play mode completely hides builder UI
+   - No floating rogue buttons, no overlaps
+   ==================================================================== */
+
+/* ---- Visibility: show builder UI only while NOT in a route + NOT playing */
+.mb-host { display: none; }
+body.is-mobile:not(.show-landing):not(.show-dashboard):not(.show-gallery):not(.show-store):not(.show-multiplayer):not(.playing) .mb-host {
+  display: block;
+}
+body.is-mobile.playing .mb-host { display: none !important; }
+
+/* ---- Top bar: solid opaque strip -------------------------------- */
+body.is-mobile .mb-topbar {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  padding: calc(env(safe-area-inset-top, 0px) + 8px)
+           calc(env(safe-area-inset-right, 0px) + 12px)
+           8px
+           calc(env(safe-area-inset-left, 0px) + 12px);
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.97) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(28, 29, 34, 0.08) !important;
+  pointer-events: auto !important;
+  box-shadow: 0 2px 8px rgba(28, 29, 34, 0.04);
+}
+body.is-mobile .mb-topbar > * { pointer-events: auto; }
+
+body.is-mobile .mb-top-btn {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  background: rgba(28, 29, 34, 0.06) !important;
+  color: #1c1d22 !important;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0;
+}
+body.is-mobile .mb-top-btn:active {
+  background: rgba(28, 29, 34, 0.14) !important;
+}
+body.is-mobile .mb-top-btn svg { width: 19px; height: 19px; }
+
+body.is-mobile .mb-top-btn-save {
+  background: #f5cd30 !important;
+  color: #1c1d22 !important;
+}
+body.is-mobile .mb-top-btn-save:active { background: #ffd840 !important; }
+body.is-mobile .mb-top-btn-play {
+  background: #1c1d22 !important;
+  color: #fff !important;
+}
+body.is-mobile .mb-top-btn-play:active { background: #2d2e35 !important; }
+body.is-mobile .mb-top-btn-play.playing {
+  background: #d24848 !important;
+}
+
+body.is-mobile .mb-mode-chips {
+  position: static !important;
+  flex: 1 1 auto;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(28, 29, 34, 0.06);
+  border: none !important;
+  border-radius: 999px;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  max-width: 200px;
+  margin: 0;
+  top: auto;
+  right: auto;
+}
+body.is-mobile .mb-mode-chip {
+  flex: 1;
+  padding: 7px 10px;
+  background: transparent !important;
+  color: #5b5f67 !important;
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 0;
+  min-height: 0;
+}
+body.is-mobile .mb-mode-chip.is-active {
+  background: #1c1d22 !important;
+  color: #fff !important;
+}
+body.is-mobile.mb-remove-mode .mb-mode-chip[data-mode='remove'].is-active {
+  background: #d24848 !important;
+}
+
+/* ---- Hide the old top-title + old FAB cluster ------------------- */
+body.is-mobile .mb-top-title { display: none !important; }
+body.is-mobile .mb-fab-cluster { display: none !important; }
+body.is-mobile .mb-quick-actions { display: none !important; }
+
+/* ---- D-pad: tight to bottom-left corner, 40px cells ------------- */
+body.is-mobile .mb-dpad {
+  position: fixed;
+  left: calc(env(safe-area-inset-left, 0px) + 10px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  z-index: 56;
+  display: grid !important;
+  grid-template-columns: repeat(3, 40px);
+  grid-template-rows: repeat(3, 40px);
+  gap: 4px;
+  pointer-events: none;
+}
+body.is-mobile .mb-dpad-btn {
+  background: rgba(28, 29, 34, 0.82) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+  pointer-events: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+}
+body.is-mobile .mb-dpad-btn:active { transform: scale(0.92); }
+body.is-mobile .mb-dpad-up    { grid-column: 2; grid-row: 1; }
+body.is-mobile .mb-dpad-left  { grid-column: 1; grid-row: 2; }
+body.is-mobile .mb-dpad-rotate {
+  grid-column: 2;
+  grid-row: 2;
+  background: #4b974b !important;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+body.is-mobile .mb-dpad-rotate:active { background: #5aaf5a !important; }
+body.is-mobile .mb-dpad-rotate svg { width: 16px; height: 16px; }
+body.is-mobile .mb-dpad-right { grid-column: 3; grid-row: 2; }
+body.is-mobile .mb-dpad-down  { grid-column: 2; grid-row: 3; }
+
+/* Hide D-pad in remove mode */
+body.is-mobile.mb-remove-mode .mb-dpad,
+body.is-mobile.mb-remove-mode .mb-rot-readout,
+body.is-mobile.mb-remove-mode .mb-place-fab {
+  display: none !important;
+}
+
+/* ---- Rotation readout above D-pad ------------------------------- */
+body.is-mobile .mb-rot-readout {
+  position: fixed;
+  left: calc(env(safe-area-inset-left, 0px) + 12px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 224px);
+  z-index: 56;
+  padding: 4px 10px;
+  background: rgba(28, 29, 34, 0.78);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* ---- Big place FAB: bottom-right, single button ----------------- */
+body.is-mobile .mb-place-fab {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 100px);
+  z-index: 56;
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: #f5cd30;
+  color: #1c1d22;
+  border: 2px solid rgba(28, 29, 34, 0.14);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  box-shadow: 0 5px 0 #c49d1c, 0 10px 24px rgba(28, 29, 34, 0.28);
+  transition: transform 0.1s var(--ease-ios-default),
+              box-shadow 0.1s var(--ease-ios-default);
+  pointer-events: auto;
+}
+body.is-mobile .mb-place-fab:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #c49d1c, 0 6px 14px rgba(28, 29, 34, 0.2);
+}
+body.is-mobile .mb-place-fab svg { width: 26px; height: 26px; }
+body.is-mobile .mb-place-fab span { font-size: 11px; letter-spacing: -0.3px; }
+
+/* ---- Hotbar: bottom full width, compact height ------------------ */
+body.is-mobile .mb-hotbar {
+  position: fixed !important;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 55;
+  padding: 8px
+           calc(env(safe-area-inset-right, 0px) + 10px)
+           calc(env(safe-area-inset-bottom, 0px) + 8px)
+           calc(env(safe-area-inset-left, 0px) + 10px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(28, 29, 34, 0.08);
+  pointer-events: auto;
+}
+body.is-mobile .mb-hotbar-track {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+body.is-mobile .mb-hotbar-track::-webkit-scrollbar { display: none; }
+body.is-mobile .mb-hot-slot {
+  flex: 0 0 auto;
+  width: 56px !important;
+  height: 56px !important;
+  background: #f1f2f4 !important;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 3px;
+  min-width: 0;
+  min-height: 0;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body.is-mobile .mb-hot-slot.is-active {
+  border-color: #1c1d22;
+  background: #fff !important;
+}
+body.is-mobile .mb-hot-slot.is-empty {
+  background: transparent !important;
+  border: 2px dashed rgba(28, 29, 34, 0.15);
+  color: #8a8e96;
+}
+body.is-mobile .mb-hotbar-expand {
+  flex: 0 0 auto;
+  width: 38px !important;
+  height: 56px !important;
+  background: #1c1d22 !important;
+  color: #fff !important;
+  border: none;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Bottom sheet offset so it opens ABOVE the hotbar */
+body.is-mobile .mb-sheet {
+  bottom: 0 !important;
+}
+
+/* ====================================================================
+   MOBILE PLAY UI v2 — joystick hint + clear button layout
+   ==================================================================== */
+
+/* Always-visible joystick hint circle so the user knows the left
+   bottom area is the touch target for movement. */
+body.is-mobile.playing .mb-joystick-hotzone::before {
+  content: '';
+  position: absolute;
+  left: 30px;
+  bottom: 100px;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+/* Action cluster: horizontal at the bottom-right, not floating column */
+body.is-mobile.playing .mb-action-cluster {
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+  flex-direction: column-reverse;
+  gap: 12px;
+  align-items: flex-end;
+  z-index: 152;
+}
+body.is-mobile.playing .mb-action-btn {
+  width: 62px;
+  height: 62px;
+  font-size: 13px;
+  font-weight: 700;
+}
+body.is-mobile.playing .mb-action-jump { width: 72px; height: 72px; font-size: 14px; }
+body.is-mobile.playing .mb-action-sprint { width: 56px; height: 56px; font-size: 12px; }
+body.is-mobile.playing .mb-action-interact { width: 56px; height: 56px; }
+body.is-mobile.playing .mb-action-interact .mb-action-letter { font-size: 20px; }
+
+/* Exit pill — top-left, safe-area aware, always above everything */
+body.is-mobile.playing .mb-play-exit {
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: calc(env(safe-area-inset-left, 0px) + 12px);
+  z-index: 160;
+}
+
+/* View toggle — top-right, larger tap targets, z-index above joystick */
+body.is-mobile.playing .mb-view-toggle {
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
+  z-index: 160;
+}
+body.is-mobile.playing .mb-view-btn {
+  padding: 8px 16px;
+  font-size: 12px;
 }

@@ -135,19 +135,36 @@ function wireDPad(game: Game): void {
 
 function shellMarkup(): string {
   return `
-    <!-- Top bar: home button, mode segmented control, help button -->
+    <!-- ============================================================
+         SINGLE TOP BAR — contains every non-placement control in one
+         solid, clearly-anchored strip. Left→right:
+           home · mode segmented · save · play · help
+         Nothing outside this bar floats at the top; nothing floats in
+         the right column. Clicks outside individual buttons pass
+         straight through to the canvas (see CSS).
+         ============================================================ -->
     <header class="mb-topbar" role="toolbar" aria-label="상단 도구모음">
       <button class="mb-top-btn" id="mb-home" aria-label="대시보드로" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3 12L12 3l9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/>
         </svg>
       </button>
-      <!-- Mode chips moved INSIDE the top bar so they never overlap
-           with the bottom-right FAB cluster on small screens. -->
+
       <div class="mb-mode-chips" role="radiogroup" aria-label="모드">
         <button class="mb-mode-chip is-active" data-mode="place" type="button" role="radio" aria-checked="true">설치</button>
         <button class="mb-mode-chip" data-mode="remove" type="button" role="radio" aria-checked="false">제거</button>
       </div>
+
+      <button class="mb-top-btn mb-top-btn-save" id="mb-save" aria-label="저장" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+      </button>
+      <button class="mb-top-btn mb-top-btn-play" id="mb-play" aria-label="플레이" type="button">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5L8 5.5z"/></svg>
+      </button>
       <button class="mb-top-btn" id="mb-help" aria-label="도움말" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="9"/>
@@ -157,16 +174,16 @@ function shellMarkup(): string {
       </button>
     </header>
 
-    <!-- Rotation degree label only — appears above the D-pad rotate
-         button so the user can see the current rotation step. -->
-    <div class="mb-rot-readout safe-bottom" aria-live="polite">
+    <!-- ============================================================
+         BOTTOM-LEFT: compact D-pad. Arrows + center rotate. Rotation
+         readout is tucked ABOVE the D-pad (small pill). The D-pad
+         sits tight against the screen corner so it doesn't cover
+         the canvas middle.
+         ============================================================ -->
+    <div class="mb-rot-readout" aria-live="polite">
       <span id="mb-rot-label">0°</span>
     </div>
-
-    <!-- D-pad — nudges the placement ghost one footprint at a time.
-         Center button ROTATES the ghost (tap-to-rotate shortcut; the
-         user places by tapping the canvas instead). Left-bottom. -->
-    <div class="mb-dpad safe-bottom" role="group" aria-label="고스트 이동">
+    <div class="mb-dpad" role="group" aria-label="고스트 이동">
       <button class="mb-dpad-btn mb-dpad-up" data-dir="up" aria-label="위" type="button">▲</button>
       <button class="mb-dpad-btn mb-dpad-left" data-dir="left" aria-label="왼쪽" type="button">◀</button>
       <button class="mb-dpad-btn mb-dpad-rotate" data-dir="rotate" aria-label="회전" type="button">
@@ -178,28 +195,22 @@ function shellMarkup(): string {
       <button class="mb-dpad-btn mb-dpad-down" data-dir="down" aria-label="아래" type="button">▼</button>
     </div>
 
-    <!-- FAB cluster: PLACE (big yellow) + save + play — bottom-right -->
-    <div class="mb-fab-cluster safe-bottom" role="toolbar" aria-label="주요 동작">
-      <button class="mb-fab mb-fab-place" id="mb-place" aria-label="블록 배치" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="4" y="4" width="16" height="16" rx="2"/>
-          <path d="M9 12l2 2 4-4"/>
-        </svg>
-      </button>
-      <button class="mb-fab mb-fab-save" id="mb-save" aria-label="저장" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-          <polyline points="17 21 17 13 7 13 7 21"/>
-          <polyline points="7 3 7 8 15 8"/>
-        </svg>
-      </button>
-      <button class="mb-fab mb-fab-play" id="mb-play" aria-label="플레이" type="button">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5L8 5.5z"/></svg>
-      </button>
-    </div>
+    <!-- ============================================================
+         BOTTOM-RIGHT: single big place button. Nothing else. Sits
+         above the hotbar and below the top bar's safe area.
+         ============================================================ -->
+    <button class="mb-place-fab" id="mb-place" aria-label="블록 배치" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="4" y="4" width="16" height="16" rx="2"/>
+        <path d="M9 12l2 2 4-4"/>
+      </svg>
+      <span>배치</span>
+    </button>
 
-    <!-- Hotbar: 9 quick-access block slots, scrollable horizontally -->
-    <nav class="mb-hotbar safe-bottom" role="tablist" aria-label="빠른 블록 선택">
+    <!-- ============================================================
+         BOTTOM: Hotbar with 9 block slots + bottom-sheet expand.
+         ============================================================ -->
+    <nav class="mb-hotbar" role="tablist" aria-label="빠른 블록 선택">
       <div class="mb-hotbar-track" id="mb-hotbar-track"></div>
       <button class="mb-hotbar-expand" id="mb-hotbar-expand" aria-label="전체 블록 라이브러리 열기" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
