@@ -12,11 +12,17 @@ import { initMobile, isMobile } from './mobile';
 import { buildMobileBuilderUI } from './mobileBuilder';
 import { initMobilePlayControls } from './mobilePlayControls';
 import { initGestures } from './gestures';
+import { initPWA } from './pwa';
 
 // Mobile detection + safe-area + viewport height must run FIRST so any
 // CSS that depends on body.is-mobile / --sai-* / --vh has the right
 // values from the very first paint.
 initMobile();
+
+// PWA — service worker + install banner. Runs before init() so the SW
+// starts caching assets as soon as possible; the install banner only
+// surfaces after the browser fires beforeinstallprompt.
+initPWA();
 
 // Expose landing button actions as global functions FIRST, so the inline
 // onclick handlers in index.html have something to call even if the rest

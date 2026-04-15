@@ -5432,3 +5432,88 @@ body.is-mobile .auth-menu .menu-item {
 body.is-mobile #toast-host {
   bottom: calc(env(safe-area-inset-bottom, 0px) + 110px) !important;
 }
+
+/* ====================================================================
+   PHASE 6 — PWA INSTALL BANNER
+   ==================================================================== */
+
+.pwa-install-banner {
+  position: fixed;
+  left: 14px;
+  right: 14px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 110px);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #1c1d22;
+  color: #fff;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  animation: pwaBannerSlide 0.3s var(--ease-out-expo);
+}
+@keyframes pwaBannerSlide {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.pwa-banner-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.pwa-banner-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.pwa-banner-text { min-width: 0; }
+.pwa-banner-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pwa-banner-sub {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pwa-banner-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.pwa-banner-dismiss {
+  padding: 8px 12px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pwa-banner-install {
+  padding: 8px 16px;
+  background: #f5cd30;
+  color: #1c1d22;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pwa-banner-install:active { transform: scale(0.95); }
+
+/* Desktop: no banner needed */
+body:not(.is-mobile) .pwa-install-banner { display: none; }
