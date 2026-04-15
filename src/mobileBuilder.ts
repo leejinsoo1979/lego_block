@@ -65,7 +65,7 @@ function wireDPad(game: Game): void {
       | 'down'
       | 'left'
       | 'right'
-      | 'place'
+      | 'rotate'
       | undefined;
     if (!dir) return;
 
@@ -73,9 +73,9 @@ function wireDPad(game: Game): void {
     // buttons (lets the user scrub the ghost across the board).
     let holdTimer: number | null = null;
     const fire = () => {
-      if (dir === 'place') {
-        haptic('place');
-        game.placeAtGhost();
+      if (dir === 'rotate') {
+        haptic('rotate');
+        game.rotateClockwise();
       } else {
         const moved = game.nudgeGhost(dir);
         haptic(moved ? 'tap' : 'error');
@@ -85,7 +85,8 @@ function wireDPad(game: Game): void {
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       fire();
-      if (dir !== 'place') {
+      // Direction buttons repeat on hold; rotate fires once per tap.
+      if (dir !== 'rotate') {
         holdTimer = window.setInterval(fire, 140);
       }
     });
@@ -127,14 +128,19 @@ function wireDPad(game: Game): void {
 
 function shellMarkup(): string {
   return `
-    <!-- Top bar: safe-area aware, no-background glass -->
+    <!-- Top bar: home button, mode segmented control, help button -->
     <header class="mb-topbar" role="toolbar" aria-label="상단 도구모음">
       <button class="mb-top-btn" id="mb-home" aria-label="대시보드로" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3 12L12 3l9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/>
         </svg>
       </button>
-      <div class="mb-top-title" id="mb-top-title">빌드</div>
+      <!-- Mode chips moved INSIDE the top bar so they never overlap
+           with the bottom-right FAB cluster on small screens. -->
+      <div class="mb-mode-chips" role="radiogroup" aria-label="모드">
+        <button class="mb-mode-chip is-active" data-mode="place" type="button" role="radio" aria-checked="true">설치</button>
+        <button class="mb-mode-chip" data-mode="remove" type="button" role="radio" aria-checked="false">제거</button>
+      </div>
       <button class="mb-top-btn" id="mb-help" aria-label="도움말" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="9"/>
@@ -143,12 +149,6 @@ function shellMarkup(): string {
         </svg>
       </button>
     </header>
-
-    <!-- Mode chips (place / remove) — top-right under topbar -->
-    <div class="mb-mode-chips" role="radiogroup" aria-label="모드">
-      <button class="mb-mode-chip is-active" data-mode="place" type="button" role="radio" aria-checked="true">설치</button>
-      <button class="mb-mode-chip" data-mode="remove" type="button" role="radio" aria-checked="false">제거</button>
-    </div>
 
     <!-- Quick action bar: rotate / undo — upper-left, above the D-pad -->
     <nav class="mb-quick-actions safe-bottom" aria-label="빠른 동작">
@@ -166,14 +166,14 @@ function shellMarkup(): string {
     </nav>
 
     <!-- D-pad — nudges the placement ghost one footprint at a time.
-         Center button places (same as tapping the canvas). Only visible
-         in build mode + place mode. Safe-area aware, left-bottom. -->
+         Center button ROTATES the ghost (tap-to-rotate shortcut; the
+         user places by tapping the canvas instead). Left-bottom. -->
     <div class="mb-dpad safe-bottom" role="group" aria-label="고스트 이동">
       <button class="mb-dpad-btn mb-dpad-up" data-dir="up" aria-label="위" type="button">▲</button>
       <button class="mb-dpad-btn mb-dpad-left" data-dir="left" aria-label="왼쪽" type="button">◀</button>
-      <button class="mb-dpad-btn mb-dpad-place" data-dir="place" aria-label="배치" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="5" y="5" width="14" height="14" rx="2"/>
+      <button class="mb-dpad-btn mb-dpad-rotate" data-dir="rotate" aria-label="회전" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
         </svg>
       </button>
       <button class="mb-dpad-btn mb-dpad-right" data-dir="right" aria-label="오른쪽" type="button">▶</button>
