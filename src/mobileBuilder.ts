@@ -46,6 +46,7 @@ export function buildMobileBuilderUI(game: Game): void {
 
   wireTopBar(game);
   wireFAB(game);
+  wireCategoryStrip(game);
   wireHotbar(game);
   wireBottomSheet(game);
   wireModeToggle(game);
@@ -206,6 +207,12 @@ function shellMarkup(): string {
       </svg>
       <span>배치</span>
     </button>
+
+    <!-- ============================================================
+         Category strip — always-visible row of category icons above
+         the hotbar. Tap to open the bottom sheet at that category.
+         ============================================================ -->
+    <nav class="mb-cat-strip" id="mb-cat-strip" role="tablist" aria-label="블록 카테고리"></nav>
 
     <!-- ============================================================
          BOTTOM: Hotbar with 9 block slots + bottom-sheet expand.
@@ -387,6 +394,71 @@ const DEFAULT_HOTBAR: BlockType[] = [
 let hotbarSlots: (BlockType | null)[] = [...DEFAULT_HOTBAR];
 let hotbarActiveIdx = 0;
 
+// --------------------------------------------------------------------
+//  Category strip — always-visible row of category icons
+// --------------------------------------------------------------------
+
+const CATEGORY_ICONS: Partial<Record<BlockCategory, string>> = {
+  basic: '🧱',
+  shape: '⬡',
+  part: '🚪',
+  special: '✨',
+  playground: '🎠',
+  furniture: '🪑',
+  prop: '🌳',
+  road: '🛣️',
+  character: '🤖',
+};
+
+function wireCategoryStrip(game: Game): void {
+  const strip = document.getElementById('mb-cat-strip');
+  if (!strip) return;
+  strip.innerHTML = '';
+  for (const cat of CATEGORIES) {
+    const btn = document.createElement('button');
+    btn.className = 'mb-cat-btn';
+    btn.dataset.category = cat.id;
+    btn.type = 'button';
+    btn.setAttribute('aria-label', cat.label);
+    btn.innerHTML = `
+      <span class="mb-cat-icon">${CATEGORY_ICONS[cat.id] || '◻'}</span>
+      <span class="mb-cat-label">${cat.label}</span>
+    `;
+    btn.addEventListener('click', () => {
+      haptic('tap');
+      // Mark active visually
+      strip.querySelectorAll('.mb-cat-btn').forEach((b) =>
+        b.classList.toggle('is-active', b === btn)
+      );
+      // Open the bottom sheet at this category
+      openSheetAtCategory(cat.id);
+    });
+    strip.appendChild(btn);
+  }
+
+  // Track active category whenever block type changes elsewhere
+  const prev = game.onBlockTypeChange;
+  game.onBlockTypeChange = (type) => {
+    prev?.(type);
+    const def = BLOCK_TYPES.find((t) => t.type === type);
+    if (!def) return;
+    strip.querySelectorAll<HTMLButtonElement>('.mb-cat-btn').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.category === def.category);
+    });
+  };
+}
+
+/** Open the bottom sheet (peek state) and switch to the given category. */
+function openSheetAtCategory(catId: BlockCategory): void {
+  // Sync the sheet's internal state and re-render its grid.
+  // We re-find the sheet's tab buttons and click the matching one.
+  const tab = document.querySelector<HTMLButtonElement>(
+    `#mb-sheet-tabs .mb-sheet-tab[data-category="${catId}"]`
+  );
+  if (tab) tab.click();
+  openSheet('peek');
+}
+
 function wireHotbar(game: Game): void {
   const track = document.getElementById('mb-hotbar-track');
   const expand = document.getElementById('mb-hotbar-expand');
@@ -562,6 +634,7 @@ function wireBottomSheet(game: Game): void {
     for (const cat of CATEGORIES) {
       const b = document.createElement('button');
       b.className = 'mb-sheet-tab';
+      b.dataset.category = cat.id;
       b.classList.toggle('is-active', cat.id === sheetActiveCategory);
       b.textContent = cat.label;
       b.type = 'button';
