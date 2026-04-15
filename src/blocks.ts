@@ -3643,10 +3643,40 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     return m;
   };
 
+  /** Back-of-head flap extending the hair DOWN the nape of the neck.
+   *  A partial sphere segment covering only the rear arc of the head,
+   *  from phiStart (usually where the cap ends) down to phiEnd. This
+   *  is what makes Lego hair actually cover the back of the neck
+   *  instead of stopping at ear height like a skullcap. */
+  const makeNape = (
+    r: number,
+    phiStart: number,
+    phiEnd: number,
+    arc = Math.PI * 1.0
+  ): THREE.Mesh => {
+    // In THREE.SphereGeometry theta convention: 0 at -X, π/2 at +Z
+    // (front), π at +X, 3π/2 at -Z (back). Center arc on the back.
+    const thetaStart = Math.PI * 1.5 - arc / 2;
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(
+        r, 40, 24,
+        thetaStart, arc,
+        phiStart, phiEnd - phiStart
+      ),
+      mat
+    );
+    m.castShadow = true;
+    return m;
+  };
+
   switch (style) {
     case 'short': {
-      // Full rounded cap + swept fringe + small back cowlick.
+      // Full rounded cap + nape flap + swept fringe + back cowlick.
       group.add(makeCap(0.72, Math.PI * 0.58, 0.88));
+      // Nape: drops from below ear level down to mid-neck
+      const nape = makeNape(0.72, Math.PI * 0.55, Math.PI * 0.78, Math.PI * 1.0);
+      nape.scale.y = 0.88;
+      group.add(nape);
       const fringe = makeBangs(0.6, 0.11, Math.PI * 0.75, 0.0, 0.55);
       fringe.position.z = 0.05;
       group.add(fringe);
@@ -3673,8 +3703,13 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'bob': {
-      // Smooth bob: rounded cap + thick curved fringe + flared back.
+      // Smooth bob: rounded cap + full nape coverage + thick curved
+      // fringe + flared back.
       group.add(makeCap(0.74, Math.PI * 0.55, 0.94));
+      // Full nape — bob hair covers to jaw at back too
+      const nape = makeNape(0.74, Math.PI * 0.52, Math.PI * 0.85, Math.PI * 1.05);
+      nape.scale.y = 0.94;
+      group.add(nape);
       group.add(makeBangs(0.6, 0.12, Math.PI * 0.85, -0.02, 0.55));
       // Soft side panels (tapered cylinders)
       for (const sx of [-1, 1]) {
@@ -3707,8 +3742,13 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'long': {
-      // Cap + curved fringe + long flowing back curtain + side strands.
+      // Cap + nape (bridges cap to flowing curtain) + curved fringe +
+      // long flowing back curtain + side strands.
       group.add(makeCap(0.74, Math.PI * 0.55, 0.94));
+      // Short nape to smoothly connect cap to the long back curtain
+      const longNape = makeNape(0.74, Math.PI * 0.52, Math.PI * 0.8, Math.PI * 1.1);
+      longNape.scale.y = 0.95;
+      group.add(longNape);
       group.add(makeBangs(0.6, 0.11, Math.PI * 0.9, -0.02, 0.55));
       group.add(makeBackCurtain(0.58, 1.7, -0.72, Math.PI * 1.1, Math.PI * 0.45));
       // Flared tips near the ends
@@ -3738,8 +3778,12 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'ponytail': {
-      // Swept-back cap + gathered bump + curved ponytail with tie.
+      // Swept-back cap + nape + gathered bump + curved ponytail.
       group.add(makeCap(0.72, Math.PI * 0.55, 0.9));
+      // Nape — even with hair pulled back, there's a hairline at nape
+      const nape = makeNape(0.72, Math.PI * 0.52, Math.PI * 0.75, Math.PI * 0.9);
+      nape.scale.y = 0.9;
+      group.add(nape);
       const fringe = makeBangs(0.58, 0.09, Math.PI * 0.7, 0.02, 0.55);
       fringe.position.z = 0.04;
       group.add(fringe);
@@ -3785,8 +3829,12 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'mohawk': {
-      // Shaved sides + sculpted crest of cone spikes with base ridge.
+      // Shaved sides + short back stubble + sculpted crest of cone spikes.
       group.add(makeCap(0.66, Math.PI * 0.5, 0.75));
+      // Short back stubble (mohawk nape — kept short)
+      const mohawkNape = makeNape(0.66, Math.PI * 0.48, Math.PI * 0.62, Math.PI * 0.95);
+      mohawkNape.scale.y = 0.75;
+      group.add(mohawkNape);
       const N = 9;
       for (let i = 0; i < N; i++) {
         const t = i / (N - 1);
@@ -3809,8 +3857,11 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'curly': {
-      // Voluminous curls — compact cap + layered curl spheres.
+      // Voluminous curls — compact cap + nape curls + layered curls.
       group.add(makeCap(0.62, Math.PI * 0.42, 0.85));
+      const curlyNape = makeNape(0.62, Math.PI * 0.4, Math.PI * 0.72, Math.PI * 1.0);
+      curlyNape.scale.y = 0.88;
+      group.add(curlyNape);
       const curls: Array<[number, number, number, number]> = [
         [0, 0.32, 0.25, 0.24], [-0.28, 0.28, 0.2, 0.22], [0.28, 0.28, 0.2, 0.22],
         [0, 0.42, -0.05, 0.26], [-0.3, 0.36, -0.2, 0.22], [0.3, 0.36, -0.2, 0.22],
@@ -3833,8 +3884,12 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'twintails': {
-      // Cap + parted fringe + two curved pigtails with bow ties.
+      // Cap + nape + parted fringe + two curved pigtails with bows.
       group.add(makeCap(0.72, Math.PI * 0.55, 0.92));
+      // Thin nape between the two gathered pigtails
+      const ttNape = makeNape(0.72, Math.PI * 0.52, Math.PI * 0.72, Math.PI * 0.7);
+      ttNape.scale.y = 0.9;
+      group.add(ttNape);
       // Center-parted curved bangs
       for (const sx of [-1, 1]) {
         const halfBangs = new THREE.Mesh(
@@ -3889,8 +3944,12 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'updo': {
-      // Cap + smooth bangs + prominent top bun + wrap detail + sweeps.
+      // Cap + nape + smooth bangs + top bun + wrap detail + sweeps.
       group.add(makeCap(0.72, Math.PI * 0.55, 0.94));
+      // Clean nape (hair swept up)
+      const updoNape = makeNape(0.72, Math.PI * 0.52, Math.PI * 0.72, Math.PI * 0.95);
+      updoNape.scale.y = 0.92;
+      group.add(updoNape);
       group.add(makeBangs(0.58, 0.08, Math.PI * 0.75, -0.02, 0.5));
       // Tall bun
       const bun = new THREE.Mesh(
@@ -3925,8 +3984,11 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'sidepart': {
-      // Asymmetric sweep — thick diagonal bangs + extra volume.
+      // Asymmetric sweep — cap + nape + thick diagonal bangs.
       group.add(makeCap(0.73, Math.PI * 0.53, 0.93));
+      const sidepartNape = makeNape(0.73, Math.PI * 0.5, Math.PI * 0.78, Math.PI * 1.05);
+      sidepartNape.scale.y = 0.93;
+      group.add(sidepartNape);
       // Diagonal sweep across brow
       const path = new THREE.CatmullRomCurve3([
         new THREE.Vector3(-0.55, 0.1, 0.15),
@@ -3962,8 +4024,12 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'pixie': {
-      // Short crop — scalp-hugging cap + swept fringe + tousled tufts.
+      // Short crop — scalp-hugging cap + nape + swept fringe + tufts.
       group.add(makeCap(0.68, Math.PI * 0.48, 0.88));
+      // Short nape (pixie cuts taper at the back)
+      const pixieNape = makeNape(0.68, Math.PI * 0.46, Math.PI * 0.68, Math.PI * 0.95);
+      pixieNape.scale.y = 0.85;
+      group.add(pixieNape);
       const fringePath = new THREE.CatmullRomCurve3([
         new THREE.Vector3(-0.4, 0.05, 0.4),
         new THREE.Vector3(0, -0.03, 0.48),
@@ -3998,8 +4064,12 @@ function createHair(style: HairStyle, color: number): THREE.Group | null {
     }
 
     case 'braid': {
-      // Center-parted hair + thick rope braid with cross-wrap detail.
+      // Center-parted hair + nape + thick rope braid with cross-wrap.
       group.add(makeCap(0.72, Math.PI * 0.55, 0.93));
+      // Nape where hair is gathered before braiding
+      const braidNape = makeNape(0.72, Math.PI * 0.52, Math.PI * 0.75, Math.PI * 1.0);
+      braidNape.scale.y = 0.92;
+      group.add(braidNape);
       group.add(makeBangs(0.58, 0.09, Math.PI * 0.85, -0.02, 0.55));
       for (const sx of [-1, 1]) {
         const strand = new THREE.Mesh(
