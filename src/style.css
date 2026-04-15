@@ -5149,3 +5149,286 @@ body.is-mobile.playing #play-overlay .dog-whistle {
   right: 16px;
   top: calc(env(safe-area-inset-top, 0px) + 68px);
 }
+
+/* ====================================================================
+   PHASE 5 — MOBILE LAYOUT FOR LANDING / DASHBOARD / GALLERY / STORE / MULTIPLAYER
+   Full-width single-column layouts, thumb-reachable CTAs, safe-area.
+   ==================================================================== */
+
+/* --- LANDING --------------------------------------------------- */
+body.is-mobile .landing-nav {
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+body.is-mobile .landing-nav-links {
+  gap: 12px;
+}
+body.is-mobile .landing-nav-links a:not(#landing-login-top) {
+  display: none;
+}
+body.is-mobile .landing-hero {
+  padding: 32px 18px 60px;
+}
+body.is-mobile .landing-badge {
+  font-size: 11px;
+  padding: 5px 12px;
+  margin-bottom: 20px;
+}
+body.is-mobile .landing-title {
+  font-size: clamp(40px, 12vw, 64px);
+  line-height: 1.02;
+  margin-bottom: 18px;
+}
+body.is-mobile .landing-subtitle {
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 28px;
+}
+body.is-mobile .landing-cta {
+  flex-direction: column;
+  width: 100%;
+}
+body.is-mobile .landing-btn-primary,
+body.is-mobile .landing-btn-secondary {
+  width: 100%;
+  padding: 16px 22px;
+  font-size: 15px;
+  justify-content: center;
+}
+body.is-mobile .landing-features,
+body.is-mobile .landing-gallery,
+body.is-mobile .landing-cta-footer {
+  padding: 48px 18px;
+}
+body.is-mobile .landing-section-head h2 {
+  font-size: clamp(26px, 7vw, 40px);
+}
+body.is-mobile .landing-feature-grid {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+body.is-mobile .landing-gallery-grid {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+body.is-mobile .landing-footer {
+  padding: 32px 18px calc(env(safe-area-inset-bottom, 0px) + 40px);
+}
+
+/* --- DASHBOARD -------------------------------------------------- */
+body.is-mobile .dash-nav {
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px;
+  flex-direction: column;
+  gap: 10px;
+}
+body.is-mobile .dash-nav-left,
+body.is-mobile .dash-nav-right {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+}
+body.is-mobile .dash-nav-center {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 4px;
+  justify-content: flex-start;
+  -ms-overflow-style: none;
+}
+body.is-mobile .dash-nav-center::-webkit-scrollbar { display: none; }
+body.is-mobile .dash-nav-item {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  padding: 8px 14px;
+}
+body.is-mobile .dash-main {
+  padding: 16px 16px calc(env(safe-area-inset-bottom, 0px) + 40px);
+}
+body.is-mobile .dash-hero {
+  grid-template-columns: 1fr;
+  gap: 20px;
+  padding: 24px 0 32px;
+}
+body.is-mobile .dash-hero-text h1 {
+  font-size: clamp(28px, 7vw, 40px);
+}
+body.is-mobile .dash-hero-sub {
+  font-size: 13.5px;
+}
+body.is-mobile .dash-stats {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+body.is-mobile .dash-stat-card {
+  padding: 14px 10px;
+}
+body.is-mobile .dash-stat-num {
+  font-size: 24px;
+}
+body.is-mobile .dash-actions {
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-bottom: 36px;
+}
+body.is-mobile .dash-action-card {
+  padding: 18px 16px;
+}
+body.is-mobile .dash-action-body h3 {
+  font-size: 16px;
+}
+body.is-mobile .dash-action-body p {
+  font-size: 12px;
+}
+body.is-mobile .dash-section {
+  margin-bottom: 36px;
+}
+body.is-mobile .dash-section-head {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+body.is-mobile .dash-section-head h2 {
+  font-size: 22px;
+}
+body.is-mobile .dash-filter {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+body.is-mobile .dash-filter::-webkit-scrollbar { display: none; }
+body.is-mobile .dash-maps-grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+body.is-mobile .dash-map-body {
+  padding: 10px 12px;
+}
+body.is-mobile .dash-map-title {
+  font-size: 12.5px;
+}
+body.is-mobile .dash-map-meta {
+  font-size: 10.5px;
+}
+body.is-mobile .dash-inspiration {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+/* --- GALLERY --------------------------------------------------- */
+body.is-mobile .gallery,
+body.is-mobile .store,
+body.is-mobile .multiplayer {
+  overflow-y: auto;
+}
+body.is-mobile .gallery-nav {
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+body.is-mobile .gallery-nav-left {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+body.is-mobile .gallery-nav-tools {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+body.is-mobile .gallery-title {
+  font-size: 22px;
+}
+body.is-mobile .gallery-search,
+body.is-mobile .gallery-sort {
+  flex: 1 1 auto;
+  min-width: 130px;
+}
+body.is-mobile .gallery-main,
+body.is-mobile .store-main,
+body.is-mobile .multiplayer-main {
+  padding: 14px 14px calc(env(safe-area-inset-bottom, 0px) + 40px);
+}
+body.is-mobile .gallery-grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+/* Gallery detail modal — fullscreen on mobile */
+body.is-mobile .gallery-detail {
+  width: 100vw;
+  height: calc(var(--vh, 1vh) * 100);
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+body.is-mobile .gallery-detail-thumb {
+  aspect-ratio: 4 / 3;
+}
+
+/* --- STORE ------------------------------------------------------ */
+body.is-mobile .store-grid {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+body.is-mobile .store-card {
+  padding: 18px 16px;
+}
+
+/* --- MULTIPLAYER ----------------------------------------------- */
+body.is-mobile .mp-room-layout {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+body.is-mobile .mp-room-aside {
+  position: static;
+}
+body.is-mobile .mp-chat {
+  height: calc(var(--vh, 1vh) * 50);
+}
+body.is-mobile .mp-room-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+/* --- MODAL DIALOGS — fullscreen on mobile ---------------------- */
+body.is-mobile .modal {
+  width: 100vw;
+  max-width: none;
+  max-height: calc(var(--vh, 1vh) * 100);
+  min-height: calc(var(--vh, 1vh) * 60);
+  border-radius: 20px 20px 0 0;
+  align-self: flex-end;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+body.is-mobile .modal-backdrop {
+  align-items: flex-end;
+}
+body.is-mobile .modal-wide {
+  width: 100vw;
+}
+body.is-mobile .modal-footer {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+}
+
+/* --- AUTH MENU — larger on mobile ------------------------------ */
+body.is-mobile .auth-menu {
+  right: 14px;
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
+  min-width: 220px;
+}
+body.is-mobile .auth-menu .menu-item {
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+/* --- TOAST — positioned above mobile bottom bars -------------- */
+body.is-mobile #toast-host {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 110px) !important;
+}
