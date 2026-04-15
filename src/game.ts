@@ -3010,7 +3010,13 @@ export class Game {
     const worldNormal = hit.face.normal
       .clone()
       .transformDirection(hit.object.matrixWorld);
-    if (worldNormal.y < 0.5) return null;
+    // Door/window can be aimed at the SIDE of a wall (normal.y ≈ 0) —
+    // they're meant to replace a column/row of wall bricks, so the user
+    // should be able to click the wall face directly. All other types
+    // keep the top-surface-only rule.
+    const isDoorWindow =
+      this.blockType === 'door' || this.blockType === 'window';
+    if (!isDoorWindow && worldNormal.y < 0.5) return null;
 
     const eff = this.effectiveSize();
     const pt = hit.point.clone();
@@ -3025,6 +3031,21 @@ export class Game {
       const isPlaneHit = hitObj === this.bridgePlane;
       if (isSurroundHit || isPlaneHit) {
         pt.y = 0;
+      }
+    }
+
+    // Door/window Y-snap:
+    //   - Door always sits on the ground (y=0). Aiming anywhere on a wall
+    //     column should drop the door to ground level.
+    //   - Window aligns its TOP with the clicked surface when the user
+    //     hits a top face (so clicking the top of a wall puts the window
+    //     flush at the top). Side hits use the clicked Y directly.
+    if (this.blockType === 'door') {
+      pt.y = 0;
+    } else if (this.blockType === 'window') {
+      if (worldNormal.y >= 0.5) {
+        const h = this.blockBodyHeight('window');
+        pt.y = Math.max(0, pt.y - h);
       }
     }
 
@@ -3081,12 +3102,39 @@ export class Game {
       if (!this.isFootprintOnBaseplate(x, z, bw, bd)) return null;
     }
 
-    // Auto-stack: if the placement footprint overlaps an existing block,
-    // raise bottomY to sit on top of it. Loop until the candidate is clear,
-    // so a column of blocked layers is skipped one tier at a time.
     const h = this.blockBodyHeight(this.blockType);
     const XZ_EPS = 0.02;
     const Y_EPS = 1e-4;
+
+    // Door/window: no auto-stack. Instead, REQUIRE that at least one
+    // existing wall brick overlaps the proposed footprint × height.
+    // Without an overlap, placement is invalid (you can't place a door
+    // in mid-air — it has to replace a chunk of wall). The overlapping
+    // bricks are removed at placement time in placeAtPosition().
+    if (this.blockType === 'door' || this.blockType === 'window') {
+      let overlapCount = 0;
+      for (const child of this.brickGroup.children) {
+        if (!this.isDoorWindowReplaceable(child)) continue;
+        const box = this.getBlockAABB(child);
+        if (
+          box.max.x <= x - bw + XZ_EPS ||
+          box.min.x >= x + bw - XZ_EPS ||
+          box.max.z <= z - bd + XZ_EPS ||
+          box.min.z >= z + bd - XZ_EPS
+        )
+          continue;
+        if (box.max.y <= bottomY + Y_EPS) continue;
+        if (box.min.y >= bottomY + h - Y_EPS) continue;
+        overlapCount++;
+        break; // one is enough to validate
+      }
+      if (overlapCount === 0) return null;
+      return { x, y: bottomY, z };
+    }
+
+    // Auto-stack: if the placement footprint overlaps an existing block,
+    // raise bottomY to sit on top of it. Loop until the candidate is clear,
+    // so a column of blocked layers is skipped one tier at a time.
     for (let iter = 0; iter < 64; iter++) {
       let nextTop = -Infinity;
       for (const child of this.brickGroup.children) {
@@ -3151,6 +3199,21 @@ export class Game {
   }
 
   /** True-body AABB for a placed block (studs excluded, matches placement math). */
+  /** True if `child` is a wall-type brick that a door/window is allowed
+   *  to replace. Minifigs, dogs, and existing door/window blocks are
+   *  off-limits so the feature doesn't silently delete characters or
+   *  replace one door with another. Everything else (plate, brick, tile,
+   *  slope, arch, etc.) counts as wall material. */
+  private isDoorWindowReplaceable(child: THREE.Object3D): boolean {
+    if (child.userData.isMinifig) return false;
+    if (child.userData.isDog) return false;
+    const childType = (
+      child.userData.spec as { type?: BlockType } | undefined
+    )?.type;
+    if (childType === 'door' || childType === 'window') return false;
+    return true;
+  }
+
   private getBlockAABB(obj: THREE.Object3D): THREE.Box3 {
     const pos = obj.position;
     const spec = obj.userData.spec as
@@ -3870,6 +3933,43 @@ export class Game {
       }
     }
     obj.position.set(p.x, p.y, p.z);
+
+    // Door/window: carve out the wall bricks that the new block
+    // overlaps, so the opening replaces a contiguous chunk of wall
+    // instead of overlapping it visually. Uses the SAME overlap test as
+    // tryPlacementAt so what you previewed is what you get.
+    if (this.blockType === 'door' || this.blockType === 'window') {
+      const eff = this.effectiveSize();
+      const finalW = autoRotate ? eff.d : eff.w;
+      const finalD = autoRotate ? eff.w : eff.d;
+      const bw = finalW / 2;
+      const bd = finalD / 2;
+      const h = this.blockBodyHeight(this.blockType);
+      const XZ_EPS = 0.02;
+      const Y_EPS = 1e-4;
+      const toRemove: THREE.Object3D[] = [];
+      for (const child of this.brickGroup.children) {
+        if (!this.isDoorWindowReplaceable(child)) continue;
+        const box = this.getBlockAABB(child);
+        if (
+          box.max.x <= p.x - bw + XZ_EPS ||
+          box.min.x >= p.x + bw - XZ_EPS ||
+          box.max.z <= p.z - bd + XZ_EPS ||
+          box.min.z >= p.z + bd - XZ_EPS
+        )
+          continue;
+        if (box.max.y <= p.y + Y_EPS) continue;
+        if (box.min.y >= p.y + h - Y_EPS) continue;
+        toRemove.push(child);
+      }
+      for (const child of toRemove) {
+        this.brickGroup.remove(child);
+        if (!this.suppressBlockCallbacks) {
+          this.onBlockRemoved(child, /* local */ true);
+        }
+      }
+    }
+
     this.brickGroup.add(obj);
     // If this is a lamp, immediately apply the current night factor so the
     // bulb glow / point light reflect the live time-of-day rather than
