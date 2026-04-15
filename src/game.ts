@@ -3071,6 +3071,18 @@ export class Game {
       return { x, y: 0, z, autoRotate: false, invalid: true };
     }
 
+    // 4) Door/window fallback: same idea — show a red ghost at the
+    //    snapped position so the user can see WHERE the block would go
+    //    (and confirm their rotation) even when no wall is under it.
+    //    Clicking on an invalid placement is rejected in placeBlock().
+    if (isDoorWindow) {
+      const x = this.snapXZ(pt.x, eff.w);
+      const z = this.snapXZ(pt.z, eff.d);
+      const bottomY =
+        this.blockType === 'door' ? 0 : this.snapBottomY(pt.y);
+      return { x, y: bottomY, z, autoRotate: false, invalid: true };
+    }
+
     return null;
   }
 
