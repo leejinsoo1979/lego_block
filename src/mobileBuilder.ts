@@ -59,38 +59,34 @@ export function buildMobileBuilderUI(game: Game): void {
 // --------------------------------------------------------------------
 
 function wireDPad(game: Game): void {
-  // Map each direction to the key code the Game already listens for.
-  // Space places + starts line-streak; arrows then extend.
-  const mapping: Record<string, string> = {
-    up: 'ArrowUp',
-    down: 'ArrowDown',
-    left: 'ArrowLeft',
-    right: 'ArrowRight',
-    place: 'Space',
-  };
-
   document.querySelectorAll<HTMLButtonElement>('.mb-dpad-btn').forEach((btn) => {
-    const dir = btn.dataset.dir;
-    if (!dir || !mapping[dir]) return;
-    const code = mapping[dir];
+    const dir = btn.dataset.dir as
+      | 'up'
+      | 'down'
+      | 'left'
+      | 'right'
+      | 'place'
+      | undefined;
+    if (!dir) return;
 
-    // Tap = single press. Hold = repeat every 120ms (key-repeat feel).
+    // Tap = single action. Hold = repeat every 140ms for direction
+    // buttons (lets the user scrub the ghost across the board).
     let holdTimer: number | null = null;
     const fire = () => {
-      haptic(dir === 'place' ? 'place' : 'tap');
-      window.dispatchEvent(new KeyboardEvent('keydown', { code }));
-      // Release right after so the game registers a one-shot press
-      // (arrow handlers reset state on keyup).
-      window.dispatchEvent(new KeyboardEvent('keyup', { code }));
+      if (dir === 'place') {
+        haptic('place');
+        game.placeAtGhost();
+      } else {
+        const moved = game.nudgeGhost(dir);
+        haptic(moved ? 'tap' : 'error');
+      }
     };
 
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       fire();
-      // Start repeat for direction buttons only — place shouldn't
-      // spam blocks on long-press.
       if (dir !== 'place') {
-        holdTimer = window.setInterval(fire, 120);
+        holdTimer = window.setInterval(fire, 140);
       }
     });
     const stop = () => {

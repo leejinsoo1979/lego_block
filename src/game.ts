@@ -3877,6 +3877,98 @@ export class Game {
   }
 
   // ------------------------------------------------------------------
+  //  Public ghost-control API
+  //
+  //  Used by the mobile D-pad / virtual buttons to nudge the placement
+  //  ghost and place blocks without going through synthetic keyboard
+  //  events. Direct method calls bypass the entire keydown pipeline.
+  // ------------------------------------------------------------------
+
+  /** Move the placement ghost by one footprint step in the given
+   *  camera-relative direction. dir = 'up' / 'down' / 'left' / 'right'.
+   *  Returns true if the ghost actually moved (i.e. wasn't blocked by
+   *  the baseplate edge). */
+  nudgeGhost(dir: 'up' | 'down' | 'left' | 'right'): boolean {
+    if (this.isPlaying) return false;
+    const camDir = new THREE.Vector3();
+    this.camera.getWorldDirection(camDir);
+    camDir.y = 0;
+    if (camDir.lengthSq() < 0.001) camDir.set(0, 0, -1);
+    camDir.normalize();
+    const camRight = new THREE.Vector3()
+      .crossVectors(new THREE.Vector3(0, 1, 0), camDir)
+      .normalize();
+
+    let dx = 0;
+    let dz = 0;
+    switch (dir) {
+      case 'up':    dx = camDir.x;    dz = camDir.z;    break;
+      case 'down':  dx = -camDir.x;   dz = -camDir.z;   break;
+      case 'left':  dx = camRight.x;  dz = camRight.z;  break;
+      case 'right': dx = -camRight.x; dz = -camRight.z; break;
+    }
+    const useXAxis = Math.abs(dx) >= Math.abs(dz);
+    const sX = useXAxis ? Math.sign(dx) : 0;
+    const sZ = useXAxis ? 0 : Math.sign(dz);
+
+    const eff = this.effectiveSize();
+
+    // Initialize cursor from current ghost position if not active
+    if (!this.kbCursor.active) {
+      if (this.ghost.visible) {
+        this.kbCursor.x = this.ghost.position.x;
+        this.kbCursor.z = this.ghost.position.z;
+      } else {
+        this.kbCursor.x = 0;
+        this.kbCursor.z = 0;
+      }
+      this.kbCursor.active = true;
+      this.placementSuspended = false;
+    }
+    const prevX = this.kbCursor.x;
+    const prevZ = this.kbCursor.z;
+    this.kbCursor.x += sX * eff.w;
+    this.kbCursor.z += sZ * eff.d;
+    const snappedX = this.snapXZ(this.kbCursor.x, eff.w);
+    const snappedZ = this.snapXZ(this.kbCursor.z, eff.d);
+    if (!this.isFootprintOnBaseplate(snappedX, snappedZ, eff.w / 2, eff.d / 2)) {
+      this.kbCursor.x = prevX;
+      this.kbCursor.z = prevZ;
+      this.kbCursorLastMove = performance.now();
+      this.updatePreview();
+      return false;
+    }
+    this.kbCursorLastMove = performance.now();
+    this.updatePreview();
+    return true;
+  }
+
+  /** Place a block at the current ghost position. Returns true if
+   *  placement succeeded. Also activates line-streak mode so the
+   *  next nudgeGhost continues the row. */
+  placeAtGhost(): boolean {
+    if (this.isPlaying) return false;
+    if (this.placementSuspended) return false;
+    if (!this.ghost.visible) return false;
+    if (this.mode === 'remove') {
+      this.removeBlock();
+      return true;
+    }
+    const placed = this.placeBlock();
+    if (placed) {
+      this.lastPlacedPos = placed;
+      this.lineStreakActive = true;
+      this.kbCursor.x = placed.x;
+      this.kbCursor.z = placed.z;
+      this.kbCursor.active = true;
+      this.kbCursorLastMove = performance.now();
+      this.updatePreview();
+      return true;
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------------------
   //  Multiplayer remote application
   //
   //  These public methods let the multiplayer module apply block
