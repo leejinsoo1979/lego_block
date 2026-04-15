@@ -3055,8 +3055,11 @@ export class Game {
 
     // 2) Edge fallback: swap w/d (visual 90° rotation) and try again. Only
     //    meaningful when the dimensions actually differ — a square footprint
-    //    can't be un-stuck by swapping.
-    if (eff.w !== eff.d) {
+    //    can't be un-stuck by swapping. SKIPPED for door/window: the user
+    //    has explicitly chosen a rotation with R, and silently rotating
+    //    the door 90° when it can't find a wall in the current orientation
+    //    is surprising (it "spins" as you sweep across walls).
+    if (eff.w !== eff.d && !isDoorWindow) {
       const swapped = this.tryPlacementAt(pt, eff.d, eff.w);
       if (swapped) return { ...swapped, autoRotate: true, invalid: false };
     }
