@@ -2968,19 +2968,35 @@ export class Game {
       ];
       const hits = this.raycaster.intersectObjects(targets, true);
       const eff = this.effectiveSize();
-      if (hits.length === 0) {
-        // No surface — place at baseplate level if over the board
-        const pt = new THREE.Vector3(this.kbCursor.x, 0, this.kbCursor.z);
-        const primary = this.tryPlacementAt(pt, eff.w, eff.d);
-        if (primary) return { ...primary, autoRotate: false, invalid: false };
-        return null;
+      const kbIsDoorWindow =
+        this.blockType === 'door' || this.blockType === 'window';
+      const pt =
+        hits.length === 0
+          ? new THREE.Vector3(this.kbCursor.x, 0, this.kbCursor.z)
+          : hits[0].point.clone();
+      // Same Y-snap policy as the mouse path: door always grounds at
+      // y=0; window aligns its top to the hit surface (top-down keyboard
+      // ray always hits the top, so always subtract window height).
+      if (this.blockType === 'door') {
+        pt.y = 0;
+      } else if (this.blockType === 'window') {
+        pt.y = Math.max(0, pt.y - this.blockBodyHeight('window'));
       }
-      const pt = hits[0].point.clone();
       const primary = this.tryPlacementAt(pt, eff.w, eff.d);
       if (primary) return { ...primary, autoRotate: false, invalid: false };
-      if (eff.w !== eff.d) {
+      // Skip auto-rotate for door/window (same reasoning as the mouse path).
+      if (eff.w !== eff.d && !kbIsDoorWindow) {
         const swapped = this.tryPlacementAt(pt, eff.d, eff.w);
         if (swapped) return { ...swapped, autoRotate: true, invalid: false };
+      }
+      // Door/window: keep the ghost visible (red) so the arrow keys have
+      // something to nudge even when no wall is under the cursor.
+      if (kbIsDoorWindow) {
+        const x = this.snapXZ(pt.x, eff.w);
+        const z = this.snapXZ(pt.z, eff.d);
+        const bottomY =
+          this.blockType === 'door' ? 0 : this.snapBottomY(pt.y);
+        return { x, y: bottomY, z, autoRotate: false, invalid: true };
       }
       return null;
     }
