@@ -489,6 +489,11 @@ export class Game {
    *  drift snaps the ghost back to the cursor and the user can't
    *  see their keyboard edits. */
   private kbCursorLastMove = 0;
+  /** Last direction the user nudged the ghost. Used by placeAtGhost
+   *  so the ghost auto-advances to the next cell in that direction
+   *  after a placement — otherwise the ghost stacks on top of the
+   *  just-placed block and the user has to manually nudge every time. */
+  private kbCursorLastDir: 'up' | 'down' | 'left' | 'right' = 'up';
   /** Last placed block position + "line streak" mode. Space bar places
    *  a block and turns the streak ON. While the streak is on, arrow
    *  keys place NEW consecutive blocks in the pressed direction (one
@@ -3931,6 +3936,8 @@ export class Game {
    *  the baseplate edge). */
   nudgeGhost(dir: 'up' | 'down' | 'left' | 'right'): boolean {
     if (this.isPlaying) return false;
+    // Remember the last direction so placeAtGhost can auto-advance.
+    this.kbCursorLastDir = dir;
     const camDir = new THREE.Vector3();
     this.camera.getWorldDirection(camDir);
     camDir.y = 0;
@@ -4003,7 +4010,14 @@ export class Game {
       this.kbCursor.z = placed.z;
       this.kbCursor.active = true;
       this.kbCursorLastMove = performance.now();
-      this.updatePreview();
+      // Auto-advance the ghost one footprint in the last nudge
+      // direction so the next block sits BESIDE the one we just
+      // placed, not on top of it. If the advanced cell is outside
+      // the baseplate, fall back to staying in place.
+      if (!this.nudgeGhost(this.kbCursorLastDir)) {
+        // Couldn't advance (edge of board) — leave ghost at placed pos
+        this.updatePreview();
+      }
       return true;
     }
     return false;

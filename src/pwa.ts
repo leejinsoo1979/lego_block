@@ -11,6 +11,23 @@ export function initPWA(): void {
 
 function registerServiceWorker(): void {
   if (!('serviceWorker' in navigator)) return;
+  // In development the SW aggressively caches Vite's transformed
+  // responses (incl. GLB/HDR assets served with their native MIME
+  // type) and then replays them on later reloads as module scripts —
+  // causing "Failed to load module script: Expected JS but got
+  // model/gltf-binary". Skip SW registration entirely in dev, and
+  // proactively unregister any previously-installed SW so the
+  // browser stops intercepting fetches.
+  if (import.meta.env.DEV) {
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      for (const r of regs) r.unregister();
+    });
+    // Best-effort clear any stale caches from a prior prod install.
+    if ('caches' in window) {
+      caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
+    }
+    return;
+  }
   // Wait for load so SW registration doesn't compete with critical
   // asset downloads on first visit.
   window.addEventListener('load', () => {
