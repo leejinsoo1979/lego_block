@@ -83,12 +83,22 @@ function wireViewToggle(game: Game): void {
     });
   };
   document.querySelectorAll<HTMLButtonElement>('.mb-view-btn').forEach((b) => {
-    b.addEventListener('click', () => {
+    // Use pointerup instead of click — click can be swallowed on iOS
+    // when another zone (look-zone with touch-action: none) is
+    // overlapping the button's bounding box. pointerup fires as soon
+    // as the finger lifts, regardless of the look-zone's handling.
+    const fire = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
       const mode = (b.dataset.view || 'first') as 'first' | 'third';
       haptic('tap');
       game.setViewMode(mode);
       apply(mode);
-    });
+    };
+    b.addEventListener('pointerup', fire);
+    // Click as fallback for any edge cases where pointerup isn't fired
+    // (e.g. assistive tech / keyboard activation).
+    b.addEventListener('click', fire);
   });
   // Mirror state when changed elsewhere (e.g. the V key)
   const prev = game.onViewModeChange;
@@ -245,47 +255,53 @@ function wireActionButtons(game: Game): void {
   const sprint = document.getElementById('mb-sprint');
   const interact = document.getElementById('mb-interact');
 
-  // Jump — tap triggers a single jump; hold triggers repeated jumps
-  // (mirror desktop Space key-repeat).
-  if (jump) {
-    let interval: number | null = null;
-    const trigger = () => {
-      game.mobileJumpPressed = true;
+  // Jump & Sprint — press-and-hold pattern.
+  //
+  // CRITICAL: release is wired on WINDOW, not the button. Mobile
+  // browsers sometimes redirect `pointerup` to a different element
+  // (another zone's setPointerCapture hijacks the pointer, or the
+  // finger drifts off the button before lift-off). If we only listen
+  // on the button, pointerup is lost and moveKeys stays true — the
+  // avatar auto-sprints / auto-bounces forever. Listening on window
+  // catches the lift-off no matter where the finger ended up.
+  const bindHold = (
+    btn: HTMLElement,
+    set: (v: boolean) => void,
+    opts: { heldClass?: string } = {}
+  ) => {
+    let pressed = false;
+    const press = () => {
+      set(true);
+      pressed = true;
+      if (opts.heldClass) btn.classList.add(opts.heldClass);
       haptic('tap');
     };
-    jump.addEventListener('pointerdown', (e) => {
+    const release = () => {
+      if (!pressed) return;
+      set(false);
+      pressed = false;
+      if (opts.heldClass) btn.classList.remove(opts.heldClass);
+    };
+    btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      trigger();
-      interval = window.setInterval(trigger, 180);
+      press();
     });
-    const stop = () => {
-      if (interval != null) {
-        clearInterval(interval);
-        interval = null;
-      }
-    };
-    jump.addEventListener('pointerup', stop);
-    jump.addEventListener('pointercancel', stop);
-    jump.addEventListener('pointerleave', stop);
-  }
+    // Release on ANY pointer lift-off anywhere in the window. This
+    // catches the case where the browser redirects pointerup to
+    // another element (e.g. look-zone captured the pointer).
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    // Also reset if the window loses focus (backgrounded app, etc.)
+    // so the key doesn't stick after a context switch.
+    window.addEventListener('blur', release);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) release();
+    });
+  };
 
-  // Sprint — hold while pressed
-  if (sprint) {
-    const down = (e: Event) => {
-      e.preventDefault();
-      game.mobileRunning = true;
-      sprint.classList.add('is-held');
-      haptic('tap');
-    };
-    const up = () => {
-      game.mobileRunning = false;
-      sprint.classList.remove('is-held');
-    };
-    sprint.addEventListener('pointerdown', down);
-    sprint.addEventListener('pointerup', up);
-    sprint.addEventListener('pointercancel', up);
-    sprint.addEventListener('pointerleave', up);
-  }
+  if (jump) bindHold(jump, (v) => game.setMobileJump(v));
+  if (sprint)
+    bindHold(sprint, (v) => game.setMobileRun(v), { heldClass: 'is-held' });
 
   // Interact (E key) — tap fires a synthetic keydown/keyup
   if (interact) {

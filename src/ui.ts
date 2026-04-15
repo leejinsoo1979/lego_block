@@ -1117,16 +1117,30 @@ export function buildUI(game: Game) {
       // Start the render loop so orbit controls animate.
       editorOpen = true;
       editorRenderLoop();
-      // Force a resize pass on next frame so the canvas picks up
-      // its newly-visible container dimensions (the ResizeObserver
-      // may have recorded 0x0 while .hidden was applied on load).
-      requestAnimationFrame(() => {
+      // Force multiple resize passes — on mobile, the canvas is inside
+      // a flex column that was `display:none` a tick ago, so rAF may
+      // fire before layout settles and clientWidth/clientHeight return
+      // 0. Retry on the next several frames + a 100ms fallback so the
+      // WebGL drawing buffer eventually matches the CSS size (otherwise
+      // the preview stays black).
+      const resizePreview = () => {
         const w = editorPreviewCanvas.clientWidth;
         const h = editorPreviewCanvas.clientHeight;
         if (w > 0 && h > 0) {
           previewRenderer.setSize(w, h, false);
           previewCamera.aspect = w / h;
           previewCamera.updateProjectionMatrix();
+          return true;
+        }
+        return false;
+      };
+      requestAnimationFrame(() => {
+        if (!resizePreview()) {
+          requestAnimationFrame(() => {
+            if (!resizePreview()) {
+              setTimeout(resizePreview, 100);
+            }
+          });
         }
       });
     };

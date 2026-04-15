@@ -56,7 +56,23 @@ export function buildDashboardUI(game: Game) {
       (state.user?.email ? state.user.email.split('@')[0] : null);
     const welcomeEl = document.getElementById('dash-welcome-name');
     if (welcomeEl) {
-      welcomeEl.textContent = name ? `안녕하세요, ${name}님!` : '안녕하세요!';
+      welcomeEl.textContent = name || '사용자';
+    }
+    // Sync the sidebar avatar to the current user (falls back to a
+    // brand-colored gradient when the user has no avatar URL).
+    const sideAvatar = document.getElementById('dash-sidebar-avatar');
+    if (sideAvatar) {
+      const url =
+        state.profile?.avatar_url ||
+        state.user?.user_metadata?.avatar_url ||
+        null;
+      if (url) {
+        sideAvatar.style.backgroundImage = `url('${url}')`;
+        sideAvatar.style.backgroundSize = 'cover';
+        sideAvatar.style.backgroundPosition = 'center';
+      } else {
+        sideAvatar.style.backgroundImage = '';
+      }
     }
     renderAuthSlot(state);
   });
@@ -66,29 +82,40 @@ export function buildDashboardUI(game: Game) {
     showDashboard();
   });
 
-  // --- Top nav tabs (overview / maps / gallery / store / multiplayer) ---
-  document.querySelectorAll<HTMLButtonElement>('.dash-nav-item').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const v = (btn.dataset.view || 'overview') as ViewMode;
-      document
-        .querySelectorAll('.dash-nav-item')
-        .forEach((b) => b.classList.toggle('active', b === btn));
-      if (v === 'gallery') {
-        document.dispatchEvent(new CustomEvent('goto-gallery'));
-      } else if (v === 'store') {
-        document.dispatchEvent(new CustomEvent('goto-store'));
-      } else if (v === 'multiplayer') {
-        document.dispatchEvent(new CustomEvent('goto-multiplayer'));
-      } else if (v === 'maps') {
-        document.querySelector('.dash-section')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start',
-        });
-      } else {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
+  // --- Nav (top bar + sidebar share the same data-view attribute) ---
+  const navBtnSelectors =
+    '.dash-nav-item, .dash-topbar-link, .dash-side-link[data-view]';
+  const syncActiveNav = (view: ViewMode) => {
+    document.querySelectorAll(navBtnSelectors).forEach((b) => {
+      b.classList.toggle(
+        'active',
+        (b as HTMLElement).dataset.view === view
+      );
     });
-  });
+  };
+  document
+    .querySelectorAll<HTMLButtonElement>(navBtnSelectors)
+    .forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = (btn.dataset.view || 'overview') as ViewMode;
+        syncActiveNav(v);
+        if (v === 'gallery') {
+          document.dispatchEvent(new CustomEvent('goto-gallery'));
+        } else if (v === 'store') {
+          document.dispatchEvent(new CustomEvent('goto-store'));
+        } else if (v === 'multiplayer') {
+          document.dispatchEvent(new CustomEvent('goto-multiplayer'));
+        } else if (v === 'maps') {
+          document
+            .getElementById('dash-maps-grid')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          document
+            .querySelector('.dash-content')
+            ?.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    });
 
   // --- Filter buttons (all / public / private) ---
   document.querySelectorAll<HTMLButtonElement>('.dash-filter-btn').forEach((btn) => {
@@ -100,6 +127,17 @@ export function buildDashboardUI(game: Game) {
         .forEach((b) => b.classList.toggle('active', b === btn));
       renderMapsGrid();
     });
+  });
+
+  // --- Hero-banner CTA buttons (wire as secondary triggers for the
+  //     same actions as the sidebar links) ---
+  document.getElementById('dash-hero-start')?.addEventListener('click', () => {
+    game.clearAll();
+    clearCurrentMap();
+    hideDashboard();
+  });
+  document.getElementById('dash-hero-browse')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('goto-gallery'));
   });
 
   // --- Quick action buttons ---

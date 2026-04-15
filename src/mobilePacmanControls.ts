@@ -91,13 +91,14 @@ export function initMobilePacmanControls(game: Game): void {
   });
 
   // --- Show/hide based on isPacmanPlaying ---
-  // We poll via a simple onPacmanChange hook — but Game doesn't have
-  // one, so we use a MutationObserver on body's .pacman-playing class
-  // (set by ui.ts when startPacman/stopPacman fire). Cheaper: just
-  // add a class ourselves and toggle with a setInterval check.
-  const apply = () => {
-    document.body.classList.toggle('pacman-playing', game.isPacmanPlaying);
+  // Chain onto the existing handler (ui.ts sets one for the icon-bar
+  // active state) so both subscribers run. `body.pacman-playing` is the
+  // CSS hook that hides the builder chrome and shows these controls.
+  const prev = game.onPacmanPlayChange;
+  game.onPacmanPlayChange = (playing: boolean) => {
+    prev(playing);
+    document.body.classList.toggle('pacman-playing', playing);
+    syncView();
   };
-  setInterval(apply, 200);
-  apply();
+  document.body.classList.toggle('pacman-playing', game.isPacmanPlaying);
 }

@@ -3,7 +3,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 import { GRID, PLATE_HEIGHT, STUD_HEIGHT, STUD_RADIUS } from './config';
 import type { BlockType, FaceConfig, HairStyle, HatStyle, MinifigPreset } from './config';
-import characterModelUrl from './model/people.glb?url';
+// The GLB is served raw out of /public/people.glb so Vite's module-
+// transform pipeline is fully bypassed. In dev the `?url` import form
+// intermittently returns the binary with a model/gltf-binary MIME,
+// which the browser then rejects with "Failed to load module script".
+const characterModelUrl = '/people.glb';
 
 export interface BlockSpec {
   w: number;

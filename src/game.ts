@@ -2526,7 +2526,14 @@ export class Game {
       const eff = this.effectiveSize();
 
       // --- LINE STREAK: place a new block offset by one full footprint ---
+      // Only applies to boxy blocks (brick / plate / tile). For shaped
+      // fixed-size blocks like door (4×1), window (2×1), arch, fence —
+      // auto-placing at footprint intervals makes no sense (nobody
+      // places 4 doors in a row edge-to-edge), and it overrides the
+      // fine 1-stud nudge the user actually needs to position them.
+      const isBoxy = !this.isShapedBlock(this.blockType);
       if (
+        isBoxy &&
         this.lineStreakActive &&
         this.lastPlacedPos &&
         this.mode === 'place' &&
@@ -2567,13 +2574,15 @@ export class Game {
       }
       const prevX = this.kbCursor.x;
       const prevZ = this.kbCursor.z;
-      // Step by the block's footprint size along the chosen axis (one
-      // full block width for horizontal arrows, one full depth for
-      // vertical). For 1×1 blocks this equals 1 stud; for a 2×2 it's
-      // 2 studs; for a 4×2 rotated sideways it's 4 or 2 depending on
-      // which axis is dominant.
-      this.kbCursor.x += sX * eff.w;
-      this.kbCursor.z += sZ * eff.d;
+      // Always move the cursor by exactly ONE STUD — gives fine
+      // positional control for wide fixed-size blocks (doors = 4×1,
+      // windows = 2×1, arches, fences, etc.) where footprint-sized
+      // steps would make it impossible to nudge the block to an
+      // arbitrary wall position. Edge-to-edge consecutive placement
+      // is still available via the Space+arrow "line-paint streak"
+      // branch above, which steps by eff.w / eff.d.
+      this.kbCursor.x += sX;
+      this.kbCursor.z += sZ;
       const snappedX = this.snapXZ(this.kbCursor.x, eff.w);
       const snappedZ = this.snapXZ(this.kbCursor.z, eff.d);
       if (!this.isFootprintOnBaseplate(snappedX, snappedZ, eff.w / 2, eff.d / 2)) {
@@ -3968,10 +3977,10 @@ export class Game {
     this.updatePreview();
   }
 
-  /** Move the placement ghost by one footprint step in the given
-   *  camera-relative direction. dir = 'up' / 'down' / 'left' / 'right'.
-   *  Returns true if the ghost actually moved (i.e. wasn't blocked by
-   *  the baseplate edge). */
+  /** Move the placement ghost by ONE STUD in the given camera-relative
+   *  direction. dir = 'up' / 'down' / 'left' / 'right'. Returns true if
+   *  the ghost actually moved (i.e. wasn't blocked by the baseplate
+   *  edge). */
   nudgeGhost(dir: 'up' | 'down' | 'left' | 'right'): boolean {
     if (this.isPlaying) return false;
     // Remember the last direction so placeAtGhost can auto-advance.
@@ -4013,8 +4022,11 @@ export class Game {
     }
     const prevX = this.kbCursor.x;
     const prevZ = this.kbCursor.z;
-    this.kbCursor.x += sX * eff.w;
-    this.kbCursor.z += sZ * eff.d;
+    // Always step exactly ONE STUD — same policy as the keyboard arrow
+    // path so doors / windows / arches can be nudged precisely into
+    // place against adjacent bricks.
+    this.kbCursor.x += sX;
+    this.kbCursor.z += sZ;
     const snappedX = this.snapXZ(this.kbCursor.x, eff.w);
     const snappedZ = this.snapXZ(this.kbCursor.z, eff.d);
     if (!this.isFootprintOnBaseplate(snappedX, snappedZ, eff.w / 2, eff.d / 2)) {
@@ -4561,6 +4573,10 @@ export class Game {
   startPacman() {
     if (this.isPlaying || this.isPacmanPlaying) return;
     this.isPacmanPlaying = true;
+    // Fire early so mobile UI can hide the builder chrome before the
+    // maze/ghosts have finished spawning (otherwise the place FAB flashes
+    // on screen for a frame or two).
+    this.onPacmanPlayChange(true);
 
     // Save camera/controls state so the build view can be restored
     this.savedCam.position.copy(this.camera.position);
@@ -4623,8 +4639,6 @@ export class Game {
     this.updatePacmanHUD();
     if (this.pacmanOverlayEl) this.pacmanOverlayEl.classList.add('hidden');
 
-    this.onPacmanPlayChange(true);
-
     // Intro melody → siren after the melody
     const introDur = this.sound.playPacmanIntro();
     setTimeout(() => {
@@ -4637,6 +4651,8 @@ export class Game {
   stopPacman() {
     if (!this.isPacmanPlaying) return;
     this.isPacmanPlaying = false;
+    // Fire early so mobile UI restores the builder chrome immediately.
+    this.onPacmanPlayChange(false);
     this.sound.stopPacmanSiren();
 
     // Dispose maze group
@@ -4684,8 +4700,6 @@ export class Game {
     if (this.pacmanHUDEl) this.pacmanHUDEl.classList.add('hidden');
     if (this.pacmanOverlayEl) this.pacmanOverlayEl.classList.add('hidden');
     if (this.pacmanMinimapEl) this.pacmanMinimapEl.classList.add('hidden');
-
-    this.onPacmanPlayChange(false);
   }
 
   // ---- Maze geometry ----
