@@ -3226,6 +3226,160 @@ export class Game {
     return true;
   }
 
+  /** Subtract the door/window's cut volume from every wall brick it
+   *  overlaps. Rectangular wall bricks (brick / plate / tile) are SPLIT
+   *  — the original is removed and up to 6 smaller bricks are created
+   *  from the non-overlapping remainder (bottom slab, top slab, left
+   *  strip, right strip, front strip, back strip). Non-rectangular
+   *  shaped blocks (slopes, arches, etc.) can't be cleanly split, so
+   *  they're removed whole. */
+  private carveWallForDoor(
+    cx0: number,
+    cx1: number,
+    cy0: number,
+    cy1: number,
+    cz0: number,
+    cz1: number
+  ): void {
+    const XZ_EPS = 0.02;
+    const Y_EPS = 1e-4;
+    // Snapshot children — we'll be mutating brickGroup as we go.
+    const children = [...this.brickGroup.children];
+    for (const child of children) {
+      if (!this.isDoorWindowReplaceable(child)) continue;
+      const box = this.getBlockAABB(child);
+      // Strict overlap test matches tryPlacementAt so preview & result align.
+      if (
+        box.max.x <= cx0 + XZ_EPS ||
+        box.min.x >= cx1 - XZ_EPS ||
+        box.max.z <= cz0 + XZ_EPS ||
+        box.min.z >= cz1 - XZ_EPS
+      )
+        continue;
+      if (box.max.y <= cy0 + Y_EPS) continue;
+      if (box.min.y >= cy1 - Y_EPS) continue;
+
+      // Figure out if this is a rectangular box brick we can split.
+      const spec = child.userData.spec as
+        | { w: number; d: number; type: BlockType; colorHex: number }
+        | undefined;
+      const isBoxType =
+        spec &&
+        (spec.type === 'brick' ||
+          spec.type === 'plate' ||
+          spec.type === 'tile');
+
+      // Always remove the original.
+      this.brickGroup.remove(child);
+      if (!this.suppressBlockCallbacks) {
+        this.onBlockRemoved(child, /* local */ true);
+      }
+
+      if (!isBoxType || !spec) continue; // shaped blocks: no split
+
+      // Brick AABB from spec (not getBlockAABB, which uses bodyHeight for
+      // the stored `type` — we want the actual Y range).
+      const bw = spec.w / 2;
+      const bd = spec.d / 2;
+      const bx0 = child.position.x - bw;
+      const bx1 = child.position.x + bw;
+      const bz0 = child.position.z - bd;
+      const bz1 = child.position.z + bd;
+      const by0 = child.position.y;
+      const by1 = child.position.y + this.blockBodyHeight(spec.type);
+
+      // Remnant boxes in world coords. Up to 6: bottom slab, top slab,
+      // left strip, right strip, front strip, back strip.
+      type Part = {
+        x0: number;
+        x1: number;
+        y0: number;
+        y1: number;
+        z0: number;
+        z1: number;
+      };
+      const parts: Part[] = [];
+
+      if (by0 < cy0 - Y_EPS) {
+        parts.push({ x0: bx0, x1: bx1, y0: by0, y1: cy0, z0: bz0, z1: bz1 });
+      }
+      if (by1 > cy1 + Y_EPS) {
+        parts.push({ x0: bx0, x1: bx1, y0: cy1, y1: by1, z0: bz0, z1: bz1 });
+      }
+      const my0 = Math.max(by0, cy0);
+      const my1 = Math.min(by1, cy1);
+      if (my1 - my0 > Y_EPS) {
+        if (bx0 < cx0 - XZ_EPS) {
+          parts.push({ x0: bx0, x1: cx0, y0: my0, y1: my1, z0: bz0, z1: bz1 });
+        }
+        if (bx1 > cx1 + XZ_EPS) {
+          parts.push({ x0: cx1, x1: bx1, y0: my0, y1: my1, z0: bz0, z1: bz1 });
+        }
+        const mx0 = Math.max(bx0, cx0);
+        const mx1 = Math.min(bx1, cx1);
+        if (mx1 - mx0 > XZ_EPS) {
+          if (bz0 < cz0 - XZ_EPS) {
+            parts.push({
+              x0: mx0,
+              x1: mx1,
+              y0: my0,
+              y1: my1,
+              z0: bz0,
+              z1: cz0,
+            });
+          }
+          if (bz1 > cz1 + XZ_EPS) {
+            parts.push({
+              x0: mx0,
+              x1: mx1,
+              y0: my0,
+              y1: my1,
+              z0: cz1,
+              z1: bz1,
+            });
+          }
+        }
+      }
+
+      for (const part of parts) {
+        const rawW = part.x1 - part.x0;
+        const rawD = part.z1 - part.z0;
+        const rawH = part.y1 - part.y0;
+        // Round to grid: studs are 1-unit, plates are PLATE_HEIGHT.
+        const newW = Math.round(rawW);
+        const newD = Math.round(rawD);
+        const heightPlates = Math.round(rawH / PLATE_HEIGHT);
+        if (newW < 1 || newD < 1 || heightPlates < 1) continue;
+
+        // Choose a box type matching the remnant height. Vertical splits
+        // may produce a height different from the original's body (e.g.
+        // a 3-plate brick cut by a 2-plate window leaves a 1-plate
+        // remnant → 'plate'). Preserve 'tile' when the original was tile.
+        let newType: BlockType = spec.type;
+        const origPlates = spec.type === 'brick' ? 3 : 1;
+        if (heightPlates !== origPlates) {
+          newType = heightPlates >= 3 ? 'brick' : 'plate';
+        }
+
+        const newObj = createBrick({
+          w: newW,
+          d: newD,
+          colorHex: spec.colorHex,
+          type: newType,
+        });
+        newObj.position.set(
+          (part.x0 + part.x1) / 2,
+          part.y0,
+          (part.z0 + part.z1) / 2
+        );
+        this.brickGroup.add(newObj);
+        if (!this.suppressBlockCallbacks) {
+          this.onBlockPlaced(newObj, /* local */ true);
+        }
+      }
+    }
+  }
+
   private getBlockAABB(obj: THREE.Object3D): THREE.Box3 {
     const pos = obj.position;
     const spec = obj.userData.spec as
@@ -3771,6 +3925,22 @@ export class Game {
           }
         }
       });
+      // Door/window: the ghost is positioned INSIDE the wall we're about
+      // to cut, so by default the opaque wall faces in front of the
+      // ghost occlude it (depthTest rejects the farther ghost fragments).
+      // Disable depth testing + bump renderOrder so the ghost draws on
+      // top of the wall — the user needs to SEE the silhouette projected
+      // onto the wall to confirm what chunk will be cut out.
+      if (this.blockType === 'door' || this.blockType === 'window') {
+        this.ghost.renderOrder = 999;
+        this.ghost.traverse((c) => {
+          if (c instanceof THREE.Mesh) {
+            const mat = c.material as THREE.Material & { depthTest?: boolean };
+            mat.depthTest = false;
+            c.renderOrder = 999;
+          }
+        });
+      }
       this.scene.add(this.ghost);
     } else if (
       !isMinifig &&
@@ -3947,39 +4117,25 @@ export class Game {
     obj.position.set(p.x, p.y, p.z);
 
     // Door/window: carve out the wall bricks that the new block
-    // overlaps, so the opening replaces a contiguous chunk of wall
-    // instead of overlapping it visually. Uses the SAME overlap test as
-    // tryPlacementAt so what you previewed is what you get.
+    // overlaps, so the opening EXACTLY matches the door/window footprint
+    // (not just "remove any brick that happens to touch"). For each
+    // overlapping wall brick, we subtract the door's cut volume and
+    // re-create brick(s) for any leftover portion, so a 4×2 wall block
+    // that the door only half-covers becomes a 4×1 wall block after
+    // placement instead of disappearing entirely.
     if (this.blockType === 'door' || this.blockType === 'window') {
       const eff = this.effectiveSize();
       const finalW = autoRotate ? eff.d : eff.w;
       const finalD = autoRotate ? eff.w : eff.d;
-      const bw = finalW / 2;
-      const bd = finalD / 2;
       const h = this.blockBodyHeight(this.blockType);
-      const XZ_EPS = 0.02;
-      const Y_EPS = 1e-4;
-      const toRemove: THREE.Object3D[] = [];
-      for (const child of this.brickGroup.children) {
-        if (!this.isDoorWindowReplaceable(child)) continue;
-        const box = this.getBlockAABB(child);
-        if (
-          box.max.x <= p.x - bw + XZ_EPS ||
-          box.min.x >= p.x + bw - XZ_EPS ||
-          box.max.z <= p.z - bd + XZ_EPS ||
-          box.min.z >= p.z + bd - XZ_EPS
-        )
-          continue;
-        if (box.max.y <= p.y + Y_EPS) continue;
-        if (box.min.y >= p.y + h - Y_EPS) continue;
-        toRemove.push(child);
-      }
-      for (const child of toRemove) {
-        this.brickGroup.remove(child);
-        if (!this.suppressBlockCallbacks) {
-          this.onBlockRemoved(child, /* local */ true);
-        }
-      }
+      // Cut volume in world coordinates (door/window AABB).
+      const cx0 = p.x - finalW / 2;
+      const cx1 = p.x + finalW / 2;
+      const cz0 = p.z - finalD / 2;
+      const cz1 = p.z + finalD / 2;
+      const cy0 = p.y;
+      const cy1 = p.y + h;
+      this.carveWallForDoor(cx0, cx1, cy0, cy1, cz0, cz1);
     }
 
     this.brickGroup.add(obj);
