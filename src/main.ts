@@ -11,6 +11,7 @@ import { signInWithGoogle } from './auth';
 import { initMobile, isMobile } from './mobile';
 import { buildMobileBuilderUI } from './mobileBuilder';
 import { initMobilePlayControls } from './mobilePlayControls';
+import { initMobilePacmanControls } from './mobilePacmanControls';
 import { initGestures } from './gestures';
 import { initPWA } from './pwa';
 import { initA11y } from './a11y';
@@ -81,6 +82,7 @@ async function init() {
   if (isMobile()) {
     buildMobileBuilderUI(game);
     initMobilePlayControls(game);
+    initMobilePacmanControls(game);
     initGestures(game);
   }
 

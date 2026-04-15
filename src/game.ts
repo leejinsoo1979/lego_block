@@ -310,6 +310,27 @@ export class Game {
     right: false,
     run: false,
   };
+  /** Public mobile input for Pac-Man mode — sets/clears a direction
+   *  key from a D-pad button. In first-person mode left/right rotate
+   *  the facing; the top-down mode uses them as absolute axes. */
+  pacmanMobileInput(
+    dir: 'up' | 'down' | 'left' | 'right',
+    pressed: boolean
+  ): void {
+    if (!this.isPacmanPlaying) return;
+    const firstPerson = this.pacmanViewMode === 'first';
+    if (firstPerson && pressed) {
+      if (dir === 'left') {
+        this.rotatePacmanFacing(-1);
+        return;
+      }
+      if (dir === 'right') {
+        this.rotatePacmanFacing(1);
+        return;
+      }
+    }
+    this.pacmanKeys[dir] = pressed;
+  }
   /** Root group holding all auto-generated maze geometry for the Pac-Man
    *  game. Added to the scene on startPacman, fully disposed + removed
    *  on stopPacman so nothing leaks into the build-mode state. */
@@ -349,7 +370,8 @@ export class Game {
   /** Wall thickness — fills the cell. */
   private readonly PACMAN_WALL_W = 2.2;
   /** Which camera mode is active in Pac-Man game mode. */
-  private pacmanViewMode: 'top' | 'first' = 'top';
+  /** Public so the mobile Pac-Man HUD can reflect the current view. */
+  pacmanViewMode: 'top' | 'first' = 'top';
   /** Cardinal facing direction used by first-person "tank controls"
    *  (←/→ rotate 90°, ↑/↓ move forward/back). Always a unit cardinal
    *  vector. In top-down mode the player moves in absolute directions
@@ -425,10 +447,17 @@ export class Game {
    *  Values are analog (-1..1) and combined with keyboard state each
    *  frame. Setting to 0/0 clears the override. */
   public analogMove = { x: 0, y: 0 };
-  /** Set by the mobile jump button. One-shot — cleared after consumption. */
-  public mobileJumpPressed = false;
-  /** Held by the mobile sprint button. */
-  public mobileRunning = false;
+  /** Mobile action-button setters — write directly to moveKeys so the
+   *  hold/release semantics exactly mirror the desktop keyboard path
+   *  (Space / Shift). The buttons call these on pointerdown/pointerup
+   *  pairs; release reliably zeros the key so the avatar doesn't auto-
+   *  bounce or auto-sprint after the touch ends. */
+  setMobileJump(v: boolean) {
+    this.moveKeys.jump = v;
+  }
+  setMobileRun(v: boolean) {
+    this.moveKeys.run = v;
+  }
   private savedCam = {
     position: new THREE.Vector3(28, 28, 28),
     target: new THREE.Vector3(0, 2, 0),
@@ -5959,13 +5988,9 @@ export class Game {
       move.add(analog);
     }
     if (move.lengthSq() > 1) move.normalize();
-    // One-shot mobile jump button — consume the flag
-    if (this.mobileJumpPressed) {
-      this.moveKeys.jump = true;
-      this.mobileJumpPressed = false;
-    }
-    // Held sprint button
-    if (this.mobileRunning) this.moveKeys.run = true;
+    // Mobile jump / sprint now write directly to moveKeys (see
+    // mobilePlayControls.ts), same as the desktop keyboard path.
+    // The old latching flags have been removed — no consumer needed.
 
     this.playerVel.x = move.x * SPEED;
     this.playerVel.z = move.z * SPEED;

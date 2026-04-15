@@ -7059,3 +7059,141 @@ body.is-mobile .mb-cat-strip .mb-cat-action {
 body.is-mobile .mb-cat-strip .mb-cat-action:active {
   background: #ffd840 !important;
 }
+
+/* ====================================================================
+   MOBILE PAC-MAN CONTROLS — D-pad + exit + view toggle
+   ==================================================================== */
+
+.mb-pacman-controls { display: none; }
+body.is-mobile.pacman-playing .mb-pacman-controls { display: block; }
+
+/* When pacman is active, hide every other mobile HUD to keep the
+   screen clean. */
+body.is-mobile.pacman-playing .mb-host,
+body.is-mobile.pacman-playing .mb-play-controls {
+  display: none !important;
+}
+
+body.is-mobile .mb-pm-exit {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: calc(env(safe-area-inset-left, 0px) + 14px);
+  z-index: 200;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 8px 12px;
+  background: rgba(28, 29, 34, 0.88);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+body.is-mobile .mb-pm-exit svg { width: 16px; height: 16px; }
+
+body.is-mobile .mb-pm-view-toggle {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  z-index: 200;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(28, 29, 34, 0.88);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+body.is-mobile .mb-pm-view-btn {
+  padding: 7px 14px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 0;
+  min-height: 0;
+}
+body.is-mobile .mb-pm-view-btn.is-active {
+  background: #fff;
+  color: #1c1d22;
+}
+
+body.is-mobile .mb-pm-dpad {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+  z-index: 200;
+  display: grid;
+  grid-template-columns: repeat(3, 58px);
+  grid-template-rows: repeat(3, 58px);
+  gap: 6px;
+}
+body.is-mobile .mb-pm-btn {
+  background: rgba(255, 241, 118, 0.95);
+  color: #1c1d22;
+  border: 2px solid #c49d1c;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 0 #c49d1c, 0 6px 14px rgba(0, 0, 0, 0.25);
+  min-width: 0;
+  min-height: 0;
+}
+body.is-mobile .mb-pm-btn:active,
+body.is-mobile .mb-pm-btn.is-held {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #c49d1c, 0 3px 8px rgba(0, 0, 0, 0.15);
+  background: #ffd840;
+}
+body.is-mobile .mb-pm-up    { grid-column: 2; grid-row: 1; }
+body.is-mobile .mb-pm-left  { grid-column: 1; grid-row: 2; }
+body.is-mobile .mb-pm-right { grid-column: 3; grid-row: 2; }
+body.is-mobile .mb-pm-down  { grid-column: 2; grid-row: 3; }
+
+/* ====================================================================
+   CHARACTER EDITOR — mobile-friendly sizing
+   ==================================================================== */
+body.is-mobile .char-editor {
+  flex-direction: column;
+}
+body.is-mobile .char-editor-preview-area {
+  height: 40vh;
+  width: 100%;
+}
+body.is-mobile .char-editor-preview-area canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+}
+body.is-mobile .char-editor-controls {
+  width: 100%;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+}
+body.is-mobile .char-editor-header {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 5;
+}
+body.is-mobile .char-editor-actions {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
