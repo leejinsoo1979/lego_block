@@ -8,6 +8,12 @@ import { buildMultiplayerUI } from './multiplayer';
 import { initLandingRouting, wireLandingButtons, enterApp } from './landing';
 import { loadCharacterModel } from './blocks';
 import { signInWithGoogle } from './auth';
+import { initMobile } from './mobile';
+
+// Mobile detection + safe-area + viewport height must run FIRST so any
+// CSS that depends on body.is-mobile / --sai-* / --vh has the right
+// values from the very first paint.
+initMobile();
 
 // Expose landing button actions as global functions FIRST, so the inline
 // onclick handlers in index.html have something to call even if the rest
