@@ -209,10 +209,15 @@ function shellMarkup(): string {
     </button>
 
     <!-- ============================================================
-         Category strip — always-visible row of category icons above
-         the hotbar. Tap to open the bottom sheet at that category.
+         Category picker — collapsed by default (just a small button
+         at the left of the hotbar). Tap to expand into a horizontal
+         strip of category chips; tap away to collapse. Keeps the
+         canvas area uncluttered.
          ============================================================ -->
-    <nav class="mb-cat-strip" id="mb-cat-strip" role="tablist" aria-label="블록 카테고리"></nav>
+    <nav class="mb-cat-strip" id="mb-cat-strip" role="tablist" aria-label="블록 카테고리" data-open="false"></nav>
+    <button class="mb-cat-toggle" id="mb-cat-toggle" aria-label="카테고리" type="button">
+      <span id="mb-cat-toggle-icon">🧱</span>
+    </button>
 
     <!-- ============================================================
          BOTTOM: Hotbar with 9 block slots + bottom-sheet expand.
@@ -417,8 +422,62 @@ let activeHotbarCategory: BlockCategory | null = null;
 
 function wireCategoryStrip(game: Game): void {
   const strip = document.getElementById('mb-cat-strip');
-  if (!strip) return;
+  const toggle = document.getElementById('mb-cat-toggle');
+  const toggleIcon = document.getElementById('mb-cat-toggle-icon');
+  if (!strip || !toggle) return;
+
+  // --- Toggle button: opens / closes the strip ---
+  const setOpen = (open: boolean) => {
+    strip.dataset.open = String(open);
+  };
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    haptic('tap');
+    setOpen(strip.dataset.open !== 'true');
+  });
+  // Tap anywhere outside the strip closes it
+  document.addEventListener('pointerdown', (e) => {
+    if (strip.dataset.open !== 'true') return;
+    const t = e.target as HTMLElement | null;
+    if (!t) return;
+    if (t.closest('#mb-cat-strip') || t.closest('#mb-cat-toggle')) return;
+    setOpen(false);
+  });
+
   strip.innerHTML = '';
+
+  // --- Special action buttons (always at the start of the strip) ---
+  // Pac-Man play
+  const pmBtn = document.createElement('button');
+  pmBtn.className = 'mb-cat-btn mb-cat-action';
+  pmBtn.type = 'button';
+  pmBtn.setAttribute('aria-label', '팩맨 플레이');
+  pmBtn.innerHTML = `<span class="mb-cat-icon">👻</span><span class="mb-cat-label">팩맨</span>`;
+  pmBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    haptic('tap');
+    setOpen(false);
+    if (game.isPacmanPlaying) game.stopPacman();
+    else game.startPacman();
+  });
+  strip.appendChild(pmBtn);
+
+  // Character customization editor
+  const ceBtn = document.createElement('button');
+  ceBtn.className = 'mb-cat-btn mb-cat-action';
+  ceBtn.type = 'button';
+  ceBtn.setAttribute('aria-label', '캐릭터 꾸미기');
+  ceBtn.innerHTML = `<span class="mb-cat-icon">🎨</span><span class="mb-cat-label">꾸미기</span>`;
+  ceBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    haptic('tap');
+    setOpen(false);
+    // Open the existing character editor by toggling the hidden class
+    document.getElementById('char-editor')?.classList.remove('hidden');
+  });
+  strip.appendChild(ceBtn);
+
+  // --- Real category chips ---
   for (const cat of CATEGORIES) {
     const btn = document.createElement('button');
     btn.className = 'mb-cat-btn';
@@ -429,7 +488,8 @@ function wireCategoryStrip(game: Game): void {
       <span class="mb-cat-icon">${CATEGORY_ICONS[cat.id] || '◻'}</span>
       <span class="mb-cat-label">${cat.label}</span>
     `;
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       haptic('tap');
       // Toggle: re-tap the active chip → return to default hotbar
       if (activeHotbarCategory === cat.id) {
@@ -450,7 +510,12 @@ function wireCategoryStrip(game: Game): void {
       if (activeHotbarCategory) {
         sheetActiveCategory = activeHotbarCategory;
         rerenderSheet();
+        // Update toggle button to reflect new category
+        if (toggleIcon)
+          toggleIcon.textContent = CATEGORY_ICONS[cat.id] || '◻';
       }
+      // Auto-collapse strip after picking
+      setOpen(false);
     });
     strip.appendChild(btn);
   }
