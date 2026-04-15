@@ -472,8 +472,8 @@ function wireCategoryStrip(game: Game): void {
     e.stopPropagation();
     haptic('tap');
     setOpen(false);
-    // Open the existing character editor by toggling the hidden class
-    document.getElementById('char-editor')?.classList.remove('hidden');
+    // Dispatch to ui.ts which owns the editor state + render loop
+    document.dispatchEvent(new CustomEvent('open-char-editor'));
   });
   strip.appendChild(ceBtn);
 

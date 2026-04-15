@@ -1117,12 +1117,28 @@ export function buildUI(game: Game) {
       // Start the render loop so orbit controls animate.
       editorOpen = true;
       editorRenderLoop();
+      // Force a resize pass on next frame so the canvas picks up
+      // its newly-visible container dimensions (the ResizeObserver
+      // may have recorded 0x0 while .hidden was applied on load).
+      requestAnimationFrame(() => {
+        const w = editorPreviewCanvas.clientWidth;
+        const h = editorPreviewCanvas.clientHeight;
+        if (w > 0 && h > 0) {
+          previewRenderer.setSize(w, h, false);
+          previewCamera.aspect = w / h;
+          previewCamera.updateProjectionMatrix();
+        }
+      });
     };
 
     const closeEditor = () => {
       editorOpen = false;
       editorEl.classList.add('hidden');
     };
+
+    // Global event bridge — the mobile builder fires 'open-char-editor'
+    // to trigger the editor without duplicating the init logic.
+    document.addEventListener('open-char-editor', () => openEditor());
 
     // "커스터마이즈" button added to the character preset area
     // (We'll insert it dynamically after the character buttons)
