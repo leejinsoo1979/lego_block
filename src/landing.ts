@@ -199,48 +199,70 @@ export function stopHeroScene() {
 
 const GUEST_KEY = 'legoworld:entered-as-guest';
 
-/** Enter the builder directly (hide landing + dashboard). Used by guest flow. */
+/** Enter the builder directly (hide landing + dashboard + others). */
 export function enterApp() {
   document.body.classList.remove('show-landing');
   document.body.classList.remove('show-dashboard');
+  document.body.classList.remove('show-gallery');
+  document.body.classList.remove('show-store');
+  document.body.classList.remove('show-multiplayer');
+  // Force-hide the landing element in case CSS cascade gets confused.
+  const landingEl = document.getElementById('landing');
+  if (landingEl) landingEl.style.display = 'none';
   stopHeroScene();
 }
 
 /** Show the landing (hide app + dashboard). */
 export function showLanding() {
   document.body.classList.remove('show-dashboard');
+  document.body.classList.remove('show-gallery');
+  document.body.classList.remove('show-store');
+  document.body.classList.remove('show-multiplayer');
   document.body.classList.add('show-landing');
+  const landingEl = document.getElementById('landing');
+  if (landingEl) landingEl.style.display = '';
   startHeroScene();
 }
 
-/** Call once at boot. Decides whether to show the landing based on auth
- *  state + whether the user has explicitly chosen "둘러보기". */
-export function initLandingRouting() {
-  // Hero starts immediately so the first render looks good
-  startHeroScene();
+/** Wire the landing page's click handlers. Must run IMMEDIATELY at
+ *  boot — before init() starts awaiting heavy resources (the ~500KB
+ *  character GLB). If wiring was deferred until after `loadCharacterModel`
+ *  resolved, a user who clicked 둘러보기 during the load saw nothing
+ *  happen because the click had no handler yet. Idempotent — a module-
+ *  local flag prevents duplicate registration if called twice. */
+let landingButtonsWired = false;
+export function wireLandingButtons() {
+  if (landingButtonsWired) return;
+  landingButtonsWired = true;
 
-  // Wire landing buttons
-  const loginBtns = [
-    document.getElementById('landing-login'),
-    document.getElementById('landing-login-top'),
-    document.getElementById('landing-login-bottom'),
-  ];
-  loginBtns.forEach((btn) =>
-    btn?.addEventListener('click', () => {
+  // Document-level event delegation — works regardless of when the
+  // button elements are created or if they get replaced by other code.
+  // Use `closest()` so clicks on inner <svg>/<span> still register.
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    // Login buttons — any id matching the login pattern
+    const loginBtn = target.closest(
+      '#landing-login, #landing-login-top, #landing-login-bottom'
+    );
+    if (loginBtn) {
+      e.preventDefault();
       signInWithGoogle();
-    })
-  );
+      return;
+    }
 
-  const guestBtns = [
-    document.getElementById('landing-guest'),
-    document.getElementById('landing-guest-bottom'),
-  ];
-  guestBtns.forEach((btn) =>
-    btn?.addEventListener('click', () => {
+    // Guest "둘러보기" buttons
+    const guestBtn = target.closest(
+      '#landing-guest, #landing-guest-bottom'
+    );
+    if (guestBtn) {
+      e.preventDefault();
       sessionStorage.setItem(GUEST_KEY, '1');
       enterApp();
-    })
-  );
+      return;
+    }
+  });
 
   // Smooth scroll for nav links
   document.querySelectorAll<HTMLAnchorElement>('.landing-nav-links a').forEach((a) => {
@@ -254,6 +276,19 @@ export function initLandingRouting() {
       }
     });
   });
+}
+
+/** Call once AFTER the game + UIs are built. Starts the 3D hero scene
+ *  and installs auth-state routing (signed-in users → dashboard, guests
+ *  → builder). Button wiring lives in wireLandingButtons() and must
+ *  run earlier. */
+export function initLandingRouting() {
+  // Safety: if main.ts forgot to call wireLandingButtons() up top, do
+  // it here so the buttons still work (just with the late-bound risk).
+  wireLandingButtons();
+
+  // Hero starts immediately so the first render looks good
+  startHeroScene();
 
   // Auth-state driven routing.
   //   - Signed in (no prior dashboard exit) → dashboard

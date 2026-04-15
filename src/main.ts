@@ -5,8 +5,14 @@ import { buildDashboardUI } from './dashboard';
 import { buildGalleryUI } from './gallery';
 import { buildStoreUI } from './store';
 import { buildMultiplayerUI } from './multiplayer';
-import { initLandingRouting } from './landing';
+import { initLandingRouting, wireLandingButtons } from './landing';
 import { loadCharacterModel } from './blocks';
+
+// Wire landing buttons IMMEDIATELY at boot (before awaiting any heavy
+// resource). Otherwise the ~500KB character GLB load blocks init() and
+// a user who clicks "둘러보기" during that window finds nothing happens
+// because the click handler hasn't been attached yet.
+wireLandingButtons();
 
 async function init() {
   // The character GLB must be loaded before any minifig is created
@@ -23,8 +29,8 @@ async function init() {
   buildStoreUI(game);
   buildMultiplayerUI(game);
 
-  // Landing + routing comes LAST — it dispatches the initial auth state
-  // to dashboard / builder, so those must already be built.
+  // Auth-driven routing (dashboard / builder) — needs the UIs above to
+  // already be built since it may immediately call showDashboard().
   initLandingRouting();
 
   // Expose for debugging / automation
