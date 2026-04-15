@@ -282,12 +282,54 @@ export async function deleteMap(id: string): Promise<void> {
 //  Thumbnail capture — grabs a 400×300 PNG of the current viewer canvas
 // --------------------------------------------------------------------
 
-/** Captures the current viewer canvas into a PNG blob. Returns null if
- *  the canvas can't be read (e.g. tainted — shouldn't happen here). */
+/** Captures the current viewer canvas into a PNG blob, downscaled to
+ *  ~640×400 so stored thumbnails stay small (≤ 200 KB typical). The
+ *  WebGLRenderer is initialized with preserveDrawingBuffer: true so
+ *  the last rendered frame is readable when this function is called.
+ *  Returns null if the canvas can't be read. */
 export async function captureThumbnail(): Promise<Blob | null> {
-  const canvas = document.querySelector('#viewer canvas') as HTMLCanvasElement | null;
+  const canvas = document.querySelector(
+    '#viewer canvas'
+  ) as HTMLCanvasElement | null;
   if (!canvas) return null;
+
+  // Downscale to a fixed thumbnail size while preserving the source
+  // aspect ratio (letterbox if needed). Target 640×400 (16:10), which
+  // matches the card's aspect-ratio CSS so the thumbnail fits cleanly.
+  const targetW = 640;
+  const targetH = 400;
+  const srcAspect = canvas.width / canvas.height;
+  const dstAspect = targetW / targetH;
+  let drawW = targetW;
+  let drawH = targetH;
+  let offX = 0;
+  let offY = 0;
+  if (srcAspect > dstAspect) {
+    // Source is wider than 16:10 — fit by height, crop sides
+    drawH = targetH;
+    drawW = targetH * srcAspect;
+    offX = (targetW - drawW) / 2;
+  } else {
+    // Source is taller — fit by width, crop top/bottom
+    drawW = targetW;
+    drawH = targetW / srcAspect;
+    offY = (targetH - drawH) / 2;
+  }
+
+  const off = document.createElement('canvas');
+  off.width = targetW;
+  off.height = targetH;
+  const ctx = off.getContext('2d');
+  if (!ctx) return null;
+  ctx.fillStyle = '#eef0f3';
+  ctx.fillRect(0, 0, targetW, targetH);
+  try {
+    ctx.drawImage(canvas, offX, offY, drawW, drawH);
+  } catch (err) {
+    console.warn('[captureThumbnail] drawImage failed:', err);
+    return null;
+  }
   return new Promise((resolve) => {
-    canvas.toBlob((b) => resolve(b), 'image/png', 0.92);
+    off.toBlob((b) => resolve(b), 'image/jpeg', 0.85);
   });
 }

@@ -54,6 +54,12 @@ export function initMobilePlayControls(game: Game): void {
       </svg>
       나가기
     </button>
+
+    <!-- 1인칭 / 3인칭 view toggle — top-right, pill segmented control -->
+    <div class="mb-view-toggle safe-top" role="radiogroup" aria-label="시점">
+      <button class="mb-view-btn is-active" data-view="first" type="button" role="radio" aria-checked="true">1인칭</button>
+      <button class="mb-view-btn" data-view="third" type="button" role="radio" aria-checked="false">3인칭</button>
+    </div>
   `;
   document.body.appendChild(host);
 
@@ -61,6 +67,36 @@ export function initMobilePlayControls(game: Game): void {
   wireLookZone(game);
   wireActionButtons(game);
   wireExitButton(game);
+  wireViewToggle(game);
+}
+
+// --------------------------------------------------------------------
+//  1인칭 / 3인칭 view toggle
+// --------------------------------------------------------------------
+
+function wireViewToggle(game: Game): void {
+  const apply = (mode: 'first' | 'third') => {
+    document.querySelectorAll<HTMLButtonElement>('.mb-view-btn').forEach((b) => {
+      const on = b.dataset.view === mode;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  };
+  document.querySelectorAll<HTMLButtonElement>('.mb-view-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      const mode = (b.dataset.view || 'first') as 'first' | 'third';
+      haptic('tap');
+      game.setViewMode(mode);
+      apply(mode);
+    });
+  });
+  // Mirror state when changed elsewhere (e.g. the V key)
+  const prev = game.onViewModeChange;
+  game.onViewModeChange = (mode) => {
+    prev?.(mode);
+    apply(mode);
+  };
+  apply(game.viewMode);
 }
 
 // --------------------------------------------------------------------

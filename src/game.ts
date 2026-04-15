@@ -524,6 +524,11 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({
       antialias: !isMobileDevice,
       powerPreference: isMobileDevice ? 'low-power' : 'high-performance',
+      // REQUIRED for captureThumbnail() (mapStorage.ts) to return a
+      // non-empty PNG. Without this the drawing buffer is cleared
+      // after every swap, so canvas.toBlob() returns a black image
+      // and saved maps get blank thumbnails on the dashboard.
+      preserveDrawingBuffer: true,
     });
     this.renderer.setSize(width, height);
     // Mobile caps DPR at 1.5 — huge perf win on retina phones without
@@ -2178,6 +2183,17 @@ export class Game {
 
   private onPointerMove(e: PointerEvent) {
     if (this.isPlaying) return;
+    // On mobile, the D-pad is the ONLY way to move the ghost. Pointer
+    // moves only rotate the camera — never touch the ghost position.
+    // (Desktop keeps the existing hybrid flow.)
+    const isMobileHost = document.body.classList.contains('is-mobile');
+    if (isMobileHost) {
+      // Don't even call updatePointer's screen-center override — we
+      // still need OrbitControls to see the move event, so just track
+      // the NDC pointer from actual coords for camera drag.
+      this.setPointerFromClient(e.clientX, e.clientY);
+      return;
+    }
     // Don't deactivate the keyboard cursor on tiny hovers within 1500ms
     // of the last arrow-key press — otherwise a Bluetooth mouse's
     // micro-drift makes the ghost snap back to the cursor and the user
@@ -3883,6 +3899,21 @@ export class Game {
   //  ghost and place blocks without going through synthetic keyboard
   //  events. Direct method calls bypass the entire keydown pipeline.
   // ------------------------------------------------------------------
+
+  /** Activate the keyboard ghost at the board center if it isn't
+   *  already active. Used by the mobile builder so the ghost is
+   *  visible from the moment the user opens the app, without first
+   *  having to press an arrow. */
+  activateGhostAtCenter(): void {
+    if (this.kbCursor.active) return;
+    const eff = this.effectiveSize();
+    this.kbCursor.x = this.snapXZ(0, eff.w);
+    this.kbCursor.z = this.snapXZ(0, eff.d);
+    this.kbCursor.active = true;
+    this.placementSuspended = false;
+    this.kbCursorLastMove = performance.now();
+    this.updatePreview();
+  }
 
   /** Move the placement ghost by one footprint step in the given
    *  camera-relative direction. dir = 'up' / 'down' / 'left' / 'right'.

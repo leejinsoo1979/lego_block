@@ -2859,19 +2859,19 @@ body:not(.show-dashboard) #dashboard {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  background: #1b1c22;
-  color: #e7e8ea;
+  background: #f4f5f8;
+  color: #1c1d22;
   font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
   z-index: 900;
   display: flex;
   flex-direction: column;
 }
 
-/* Dark scrollbars inside the dashboard overlay */
+/* Light scrollbars inside the dashboard overlay */
 .dashboard ::-webkit-scrollbar { width: 10px; height: 10px; }
 .dashboard ::-webkit-scrollbar-track { background: transparent; }
-.dashboard ::-webkit-scrollbar-thumb { background: #2e3039; border-radius: 8px; }
-.dashboard ::-webkit-scrollbar-thumb:hover { background: #3b3e49; }
+.dashboard ::-webkit-scrollbar-thumb { background: #d0d3d9; border-radius: 8px; }
+.dashboard ::-webkit-scrollbar-thumb:hover { background: #b8bbc2; }
 
 /* ============================================================
    TOPBAR — brand / horizontal nav / search / user
@@ -3441,116 +3441,195 @@ body:not(.show-dashboard) #dashboard {
 }
 
 /* =====================================================================
-   DARK-THEME OVERRIDES — appear AFTER the legacy light dashboard rules
-   so cascade wins. Covers selectors dashboard.ts still writes at runtime
+   LIGHT-THEME OVERRIDES — appear AFTER the legacy rules so cascade
+   wins. Covers selectors dashboard.ts still writes at runtime
    (.dash-map-card, .dash-empty, .dash-insp-card, filter chips, stats).
    ===================================================================== */
+.dashboard {
+  background: #f4f5f8;
+  color: #1c1d22;
+}
+
+/* Topbar — white with hairline */
+.dash-topbar {
+  background: #ffffff;
+  border-bottom: 1px solid #e4e6ea;
+}
+.dash-topbar-brand .landing-logo-text { color: #1c1d22; }
+.dash-topbar-link { color: #6b7078; }
+.dash-topbar-link:hover { color: #1c1d22; background: #f0f2f5; }
+.dash-topbar-link.active { color: #1c1d22; background: #eef0f5; }
+.dash-topbar-search {
+  background: #f4f5f8;
+  border: 1px solid #e4e6ea;
+}
+.dash-topbar-search svg { color: #8a8e96; }
+.dash-topbar-search input { color: #1c1d22; }
+.dash-topbar-search input::placeholder { color: #8a8e96; }
+.dash-topbar-icon { color: #6b7078; }
+.dash-topbar-icon:hover { background: #f0f2f5; color: #1c1d22; }
+
+/* Sidebar — white with hairline */
+.dash-sidebar {
+  background: #ffffff;
+  border-right: 1px solid #e4e6ea;
+}
+.dash-sidebar-user { border-bottom: 1px solid #eef0f3; }
+.dash-sidebar-name { color: #1c1d22; }
+.dash-side-link { color: #6b7078; }
+.dash-side-link svg { color: #6b7078; }
+.dash-side-link:hover { background: #f4f5f8; color: #1c1d22; }
+.dash-side-link:hover svg { color: #1c1d22; }
+.dash-side-link.active { background: #eef0f5; color: #1c1d22; }
+.dash-side-link.active svg { color: #1c1d22; }
+.dash-sidebar-divider { background: #eef0f3; }
+
+/* Hero banner — soft gradient card on light bg */
+.dash-hero-banner {
+  background: linear-gradient(135deg, #fff6e9 0%, #e8f1fb 60%, #f0edfb 100%);
+  border: 1px solid #e4e6ea;
+}
+.dash-hero-banner::after {
+  background: radial-gradient(closest-side, rgba(245, 205, 48, 0.25), transparent);
+}
+.dash-hero-eyebrow {
+  color: #c4281c;
+  background: rgba(196, 40, 28, 0.08);
+}
+.dash-hero-title { color: #1c1d22; }
+.dash-hero-desc { color: #5c6068; }
+.dash-cta-secondary {
+  background: #ffffff;
+  border: 1px solid #d6d9df;
+  color: #1c1d22;
+}
+.dash-cta-secondary:hover { background: #f4f5f8; border-color: #b8bbc2; }
+.dash-stat-pill {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid #e4e6ea;
+  backdrop-filter: blur(4px);
+}
+
+/* Row headers */
+.dash-row-head h2 { color: #1c1d22; }
+.dash-row-head p { color: #6b7078; }
+
+/* Filter chips */
 .dashboard .dash-filter {
   display: flex; gap: 4px; padding: 4px;
-  background: #22232c; border: 1px solid #2e3039; border-radius: 10px;
+  background: #ffffff; border: 1px solid #e4e6ea; border-radius: 10px;
 }
 .dashboard .dash-filter-btn {
   padding: 6px 12px; background: transparent; border: none; border-radius: 6px;
   font-family: inherit; font-size: 12.5px; font-weight: 600;
-  color: #b6b9c2; cursor: pointer;
+  color: #6b7078; cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.dashboard .dash-filter-btn:hover { color: #fff; background: transparent; }
+.dashboard .dash-filter-btn:hover { color: #1c1d22; background: transparent; }
 .dashboard .dash-filter-btn.active { background: #c4281c; color: #fff; }
 
-.dashboard .dash-insp-card {
-  background: #22232c; border: 1px solid #2e3039; border-radius: 12px;
-  overflow: hidden; cursor: pointer;
-  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
-  display: flex; flex-direction: column;
-}
-.dashboard .dash-insp-card:hover {
-  transform: translateY(-3px); border-color: #3c3f4a;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-}
-.dashboard .dash-insp-thumb {
-  aspect-ratio: 16 / 10;
-  background: linear-gradient(135deg, #3c3f4a, #2a2c36);
-}
-.dashboard .dash-insp-card.featured .dash-insp-thumb { aspect-ratio: 4 / 3; }
-.dashboard .dash-insp-body { padding: 10px 12px 12px; background: #22232c; }
-.dashboard .dash-insp-title {
-  font-size: 13.5px; font-weight: 700; color: #fff; margin-bottom: 4px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.dashboard .dash-insp-meta {
-  display: flex; gap: 8px; font-size: 11.5px; color: #8a8d97;
-  font-variant-numeric: tabular-nums;
-}
-
+/* Cards (real map cards from dashboard.ts) */
 .dashboard .dash-map-card {
-  background: #22232c; border: 1px solid #2e3039; border-radius: 12px;
+  background: #ffffff; border: 1px solid #e4e6ea; border-radius: 12px;
   overflow: hidden; cursor: pointer;
   transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
   display: flex; flex-direction: column;
 }
 .dashboard .dash-map-card:hover {
-  transform: translateY(-3px); border-color: #3c3f4a;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  transform: translateY(-3px); border-color: #c8ccd4;
+  box-shadow: 0 10px 28px rgba(28, 29, 34, 0.10);
 }
 .dashboard .dash-map-thumb {
   aspect-ratio: 16 / 10;
-  background: linear-gradient(135deg, #3c3f4a, #2a2c36);
+  background-color: #eef0f3;
+  background-image: linear-gradient(135deg, #eef0f3, #d8dbe2);
   background-size: cover; background-position: center; position: relative;
 }
+/* When a real thumbnail URL is set inline, it wins over the gradient */
+.dashboard .dash-map-thumb[style*="url"] { background-image: var(--none); }
 .dashboard .dash-map-thumb.placeholder {
-  background: linear-gradient(135deg, #2e3039, #22232c);
+  background-image: linear-gradient(135deg, #eef0f3, #d8dbe2);
 }
 .dashboard .dash-map-badge {
   position: absolute; top: 8px; left: 8px;
-  padding: 3px 8px; background: rgba(0, 0, 0, 0.6);
-  color: #e7e8ea; font-size: 10.5px; font-weight: 600;
+  padding: 3px 8px; background: rgba(28, 29, 34, 0.7);
+  color: #ffffff; font-size: 10.5px; font-weight: 600;
   border-radius: 6px; backdrop-filter: blur(6px);
 }
-.dashboard .dash-map-badge.public { background: #c4281c; color: #fff; }
-.dashboard .dash-map-body { padding: 10px 12px 4px; background: #22232c; }
+.dashboard .dash-map-badge.public { background: #c4281c; }
+.dashboard .dash-map-body { padding: 10px 12px 4px; background: #ffffff; }
 .dashboard .dash-map-title {
-  font-size: 13.5px; font-weight: 700; color: #fff; margin-bottom: 4px;
+  font-size: 13.5px; font-weight: 700; color: #1c1d22; margin-bottom: 4px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .dashboard .dash-map-meta {
-  display: flex; gap: 8px; font-size: 11.5px; color: #8a8d97;
+  display: flex; gap: 8px; font-size: 11.5px; color: #8a8e96;
   font-variant-numeric: tabular-nums;
 }
 .dashboard .dash-map-actions {
-  display: flex; gap: 6px; padding: 8px 12px 12px; background: #22232c;
+  display: flex; gap: 6px; padding: 8px 12px 12px; background: #ffffff;
 }
 .dashboard .dash-map-actions button {
   flex: 1; padding: 6px 10px;
-  background: #2e3039; border: none; border-radius: 6px;
-  color: #e7e8ea; font-family: inherit; font-size: 12px; font-weight: 600;
+  background: #f4f5f8; border: 1px solid #e4e6ea; border-radius: 6px;
+  color: #1c1d22; font-family: inherit; font-size: 12px; font-weight: 600;
   cursor: pointer; transition: background 0.12s;
 }
-.dashboard .dash-map-actions button:hover { background: #3c3f4a; }
+.dashboard .dash-map-actions button:hover { background: #eef0f3; }
 .dashboard .dash-map-actions .danger {
-  background: transparent; border: 1px solid #4a2a2a; color: #e06a60;
+  background: transparent; border: 1px solid #f5c4bf; color: #c4281c;
 }
-.dashboard .dash-map-actions .danger:hover { background: rgba(196, 40, 28, 0.14); }
+.dashboard .dash-map-actions .danger:hover { background: rgba(196, 40, 28, 0.08); }
+
+/* Static inspiration/sample cards (demo rows in index.html) — kept
+   visually consistent with the real map cards but with the inline
+   gradient thumb as a placeholder. */
+.dashboard .dash-insp-card {
+  background: #ffffff; border: 1px solid #e4e6ea; border-radius: 12px;
+  overflow: hidden; cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  display: flex; flex-direction: column;
+}
+.dashboard .dash-insp-card:hover {
+  transform: translateY(-3px); border-color: #c8ccd4;
+  box-shadow: 0 10px 28px rgba(28, 29, 34, 0.10);
+}
+.dashboard .dash-insp-thumb {
+  aspect-ratio: 16 / 10;
+  background: linear-gradient(135deg, #eef0f3, #d8dbe2);
+}
+.dashboard .dash-insp-card.featured .dash-insp-thumb { aspect-ratio: 4 / 3; }
+.dashboard .dash-insp-body { padding: 10px 12px 12px; background: #ffffff; }
+.dashboard .dash-insp-title {
+  font-size: 13.5px; font-weight: 700; color: #1c1d22; margin-bottom: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dashboard .dash-insp-meta {
+  display: flex; gap: 8px; font-size: 11.5px; color: #8a8e96;
+  font-variant-numeric: tabular-nums;
+}
 
 .dashboard .dash-empty {
   grid-column: 1 / -1;
   padding: 32px 20px; text-align: center;
-  color: #8a8d97; font-size: 13px;
-  background: #22232c; border: 1px dashed #2e3039; border-radius: 12px;
+  color: #8a8e96; font-size: 13px;
+  background: #ffffff; border: 1px dashed #d6d9df; border-radius: 12px;
 }
 
 .dashboard .dash-stat-num {
-  font-size: 24px; font-weight: 800; color: #fff;
+  font-size: 24px; font-weight: 800; color: #1c1d22;
   letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-bottom: 2px;
 }
 .dashboard .dash-stat-label {
-  font-size: 11px; color: #8a8d97; font-weight: 500; letter-spacing: 0.02em;
+  font-size: 11px; color: #8a8e96; font-weight: 500; letter-spacing: 0.02em;
 }
+
+.insp-rating { color: #1f9b4f; font-weight: 700; }
 
 /* Auth slot avatar inside the topbar */
 .dashboard .auth-slot .avatar {
   width: 34px; height: 34px; border-radius: 50%;
-  border: 2px solid #2e3039; cursor: pointer;
+  border: 2px solid #e4e6ea; cursor: pointer;
   transition: border-color 0.15s;
 }
 .dashboard .auth-slot .avatar:hover { border-color: #c4281c; }
@@ -6300,3 +6379,74 @@ body.is-mobile .mb-mode-chips .mb-mode-chip {
 
 /* Old .mb-dpad-place style is now unused — remove if it leaks */
 .mb-dpad-place { display: none; }
+
+/* ====================================================================
+   PLACE BUTTON (big yellow FAB) + MOBILE VIEW TOGGLE (1인칭/3인칭)
+   ==================================================================== */
+
+/* Place button — largest FAB so the thumb can hit it without looking */
+.mb-fab-place {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: #f5cd30;
+  color: #1c1d22;
+  box-shadow: 0 6px 0 #c49d1c, 0 10px 24px rgba(28, 29, 34, 0.28);
+  border: 2px solid rgba(28, 29, 34, 0.12);
+  transition: transform 0.12s var(--ease-ios-default),
+              box-shadow 0.12s var(--ease-ios-default);
+}
+.mb-fab-place:active {
+  transform: translateY(3px);
+  box-shadow: 0 3px 0 #c49d1c, 0 6px 14px rgba(28, 29, 34, 0.2);
+}
+.mb-fab-place svg { width: 30px; height: 30px; }
+
+/* Ensure the other FAB buttons sit BELOW the prominent place button */
+.mb-fab-cluster .mb-fab-save,
+.mb-fab-cluster .mb-fab-play {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+}
+.mb-fab-cluster .mb-fab-save svg,
+.mb-fab-cluster .mb-fab-play svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Play-mode view toggle — top-right pill */
+.mb-view-toggle {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: 14px;
+  z-index: 150;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(28, 29, 34, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.mb-view-btn {
+  padding: 7px 14px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s var(--ease-ios-default);
+  min-width: 0;
+  min-height: 0;
+}
+.mb-view-btn.is-active {
+  background: #fff;
+  color: #1c1d22;
+}
+.mb-view-btn:active { transform: scale(0.96); }

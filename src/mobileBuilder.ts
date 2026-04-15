@@ -52,6 +52,13 @@ export function buildMobileBuilderUI(game: Game): void {
   wireQuickActions(game);
   wireDPad(game);
   syncFromGame(game);
+
+  // Activate the D-pad-controlled ghost at the board center so the
+  // user sees something to place from the first frame. Without this
+  // the ghost stays hidden until the user presses an arrow or moves
+  // the mouse — confusing on mobile where the desktop reticle flow
+  // has been removed.
+  game.activateGhostAtCenter();
 }
 
 // --------------------------------------------------------------------
@@ -180,8 +187,14 @@ function shellMarkup(): string {
       <button class="mb-dpad-btn mb-dpad-down" data-dir="down" aria-label="아래" type="button">▼</button>
     </div>
 
-    <!-- FAB cluster: save / play / (expanded) — bottom-right, safe-area -->
+    <!-- FAB cluster: PLACE (big yellow) + save + play — bottom-right -->
     <div class="mb-fab-cluster safe-bottom" role="toolbar" aria-label="주요 동작">
+      <button class="mb-fab mb-fab-place" id="mb-place" aria-label="블록 배치" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="4" y="4" width="16" height="16" rx="2"/>
+          <path d="M9 12l2 2 4-4"/>
+        </svg>
+      </button>
       <button class="mb-fab mb-fab-save" id="mb-save" aria-label="저장" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
@@ -276,8 +289,38 @@ function wireModeToggle(game: Game): void {
 // --------------------------------------------------------------------
 
 function wireFAB(game: Game): void {
+  const placeBtn = document.getElementById('mb-place');
   const saveBtn = document.getElementById('mb-save');
   const playBtn = document.getElementById('mb-play');
+
+  // Place button — tap to place a block at the current D-pad ghost
+  // position. Long-press repeats (line-paint streak).
+  if (placeBtn) {
+    let holdTimer: number | null = null;
+    const fire = () => {
+      haptic('place');
+      game.placeAtGhost();
+    };
+    placeBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      fire();
+      // After 500ms, start rapid-fire — useful for laying long rows
+      // by holding the button while nudging with D-pad.
+      holdTimer = window.setTimeout(() => {
+        holdTimer = window.setInterval(fire, 200);
+      }, 500);
+    });
+    const stop = () => {
+      if (holdTimer != null) {
+        clearTimeout(holdTimer);
+        clearInterval(holdTimer);
+        holdTimer = null;
+      }
+    };
+    placeBtn.addEventListener('pointerup', stop);
+    placeBtn.addEventListener('pointercancel', stop);
+    placeBtn.addEventListener('pointerleave', stop);
+  }
 
   saveBtn?.addEventListener('click', () => {
     haptic('tap');
