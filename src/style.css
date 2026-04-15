@@ -4392,3 +4392,82 @@ body:not(.show-multiplayer) #multiplayer {
     height: 420px;
   }
 }
+
+/* Multiplayer — invite actions, enter-builder button, in-builder pill */
+.mp-invite-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.mp-enter-builder-btn {
+  display: block;
+  width: 100%;
+  padding: 14px 18px;
+  margin-top: 14px;
+  background: linear-gradient(135deg, #f5cd30 0%, #ffb627 100%);
+  color: #1c1d22;
+  border: none;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 0 #c49d1c, 0 8px 20px rgba(28, 29, 34, 0.15);
+  transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.mp-enter-builder-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 0 #c49d1c, 0 12px 26px rgba(28, 29, 34, 0.2);
+}
+.mp-enter-builder-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 #c49d1c, 0 6px 14px rgba(28, 29, 34, 0.1);
+}
+
+/* Floating room indicator shown in the builder while a room is active */
+.room-pill {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 10px;
+  background: rgba(28, 29, 34, 0.92);
+  color: #fff;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(28, 29, 34, 0.25);
+  z-index: 80;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+body.in-room:not(.show-multiplayer):not(.show-landing):not(.show-dashboard):not(.show-gallery):not(.show-store)
+  .room-pill {
+  display: inline-flex;
+}
+.room-pill:hover {
+  transform: translateY(-1px);
+}
+.room-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4bd37d;
+  box-shadow: 0 0 8px #4bd37d;
+  animation: roomPulse 1.5s ease-in-out infinite;
+}
+.room-pill-count {
+  background: rgba(255, 255, 255, 0.18);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+@keyframes roomPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}

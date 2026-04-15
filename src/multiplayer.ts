@@ -6,6 +6,7 @@
 //  sync is a TODO; for now rooms are a shared lobby + chat.
 // ----------------------------------------------------------------------
 
+import * as THREE from 'three';
 import {
   createRoom,
   findRoomByCode,
@@ -17,6 +18,8 @@ import {
 import { onAuthChange, type AuthState } from './auth';
 import { listMyMaps } from './mapStorage';
 import { supabase, type Room, type RoomMessage, type SavedMap } from './supabase';
+import { createMinifigure } from './blocks';
+import { MINIFIG_PRESETS } from './config';
 import type { Game } from './game';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -33,7 +36,28 @@ let messages: RoomMessage[] = [];
 let presence: PresenceMeta[] = [];
 let messageChannel: RealtimeChannel | null = null;
 let presenceChannel: RealtimeChannel | null = null;
+let gameChannel: RealtimeChannel | null = null;
 let myRooms: Room[] = [];
+
+// Game + sync integration state
+let gameRef: Game | null = null;
+let blockPlacedHandler: ((obj: THREE.Object3D, local: boolean) => void) | null = null;
+let blockRemovedHandler: ((obj: THREE.Object3D, local: boolean) => void) | null = null;
+
+// Remote avatars — one per other user who's in the room. We render them
+// directly in the game's scene so collision/camera behaves naturally.
+interface RemoteAvatar {
+  group: THREE.Group;
+  label: THREE.Sprite;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  targetRotY: number;
+  lastUpdate: number;
+}
+const remoteAvatars = new Map<string, RemoteAvatar>();
+let positionBroadcastTimer: number | null = null;
+let remoteAnimHandle: number | null = null;
 
 // --------------------------------------------------------------------
 //  Public API
@@ -52,9 +76,20 @@ export function showRoomList() {
 
 export function enterRoom(room: Room) {
   currentRoom = room;
+  document.body.classList.add('in-room');
+  updateRoomPill();
   renderInRoomUI();
   wireRoomChannels(room);
   loadMessages(room);
+}
+
+/** Keep the floating pill text in sync with presence count. Called on
+ *  room entry and on each presence sync event. */
+function updateRoomPill() {
+  const name = document.getElementById('room-pill-name');
+  const count = document.getElementById('room-pill-count');
+  if (name) name.textContent = currentRoom?.name ?? '방';
+  if (count) count.textContent = String(Math.max(1, presence.length));
 }
 
 export function hideMultiplayer() {
@@ -62,12 +97,14 @@ export function hideMultiplayer() {
   teardownRoom();
 }
 
-// _game unused but accepted for future block-sync integration.
-export function buildMultiplayerUI(_game: Game) {
+export function buildMultiplayerUI(game: Game) {
+  gameRef = game;
   renderShell();
 
   onAuthChange((s) => {
     authState = s;
+    // If an invite code is in the URL and the user just signed in, auto-join
+    maybeAutoJoinFromUrl();
   });
 
   document.addEventListener('goto-multiplayer', () => {
@@ -82,6 +119,68 @@ export function buildMultiplayerUI(_game: Game) {
       document.dispatchEvent(new CustomEvent('goto-dashboard'));
     }
   });
+
+  // Floating room pill — click to pop back into the room lobby while
+  // keeping subscriptions alive. Only visible when in a room + in
+  // builder (CSS selector handles visibility).
+  document.getElementById('room-pill')?.addEventListener('click', () => {
+    if (!currentRoom) return;
+    document.body.classList.remove('show-landing');
+    document.body.classList.remove('show-dashboard');
+    document.body.classList.remove('show-gallery');
+    document.body.classList.remove('show-store');
+    document.body.classList.add('show-multiplayer');
+    document.getElementById('multiplayer')?.classList.remove('hidden');
+  });
+
+  // Check URL for ?room=CODE on initial load
+  maybeAutoJoinFromUrl();
+}
+
+/** If the URL has ?room=CODE (from an invite link), try to join the
+ *  matching room once the user is authenticated. */
+let autoJoinAttempted = false;
+async function maybeAutoJoinFromUrl() {
+  if (autoJoinAttempted) return;
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('room');
+  if (!code) return;
+  // Need to be signed in to join
+  if (!authState.user) return;
+  autoJoinAttempted = true;
+  try {
+    const room = await findRoomByCode(code.toUpperCase());
+    if (!room) {
+      alert('초대 코드와 일치하는 방을 찾을 수 없습니다.');
+      // Clean the URL so refresh doesn't retry
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+    await joinRoom(room.id);
+    // Switch into the multiplayer view and enter the room
+    document.body.classList.remove('show-landing');
+    document.body.classList.remove('show-dashboard');
+    document.body.classList.remove('show-gallery');
+    document.body.classList.remove('show-store');
+    document.body.classList.add('show-multiplayer');
+    document.getElementById('multiplayer')?.classList.remove('hidden');
+    enterRoom(room);
+    // Clean the URL (user already in the room now)
+    window.history.replaceState({}, '', window.location.pathname);
+  } catch (err) {
+    console.error('[multiplayer] auto-join failed:', err);
+    alert('방 참여 실패: ' + (err instanceof Error ? err.message : String(err)));
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+}
+
+/** Returns true if the local user is currently in a multiplayer room. */
+export function isInRoom(): boolean {
+  return currentRoom !== null;
+}
+
+export function getCurrentRoom(): Room | null {
+  return currentRoom;
 }
 
 // --------------------------------------------------------------------
@@ -308,13 +407,18 @@ function renderInRoomUI() {
 
   if (title) title.textContent = currentRoom.name;
 
+  const inviteUrl = `${window.location.origin}/?room=${currentRoom.invite_code}`;
+
   content.innerHTML = `
     <div class="mp-room-layout">
       <aside class="mp-room-aside">
         <div class="mp-room-info">
-          <div class="mp-room-label">초대 코드</div>
+          <div class="mp-room-label">초대 링크</div>
           <div class="mp-room-code">#${escapeHtml(currentRoom.invite_code)}</div>
-          <button id="mp-copy-code" class="mp-copy-btn">복사</button>
+          <div class="mp-invite-actions">
+            <button id="mp-copy-code" class="mp-copy-btn">코드 복사</button>
+            <button id="mp-copy-link" class="mp-copy-btn">링크 복사</button>
+          </div>
         </div>
 
         <div class="mp-room-members">
@@ -322,9 +426,12 @@ function renderInRoomUI() {
           <div id="mp-members" class="mp-member-list"></div>
         </div>
 
-        <div class="mp-room-note">
-          🚧 블록 동기화는 곧 추가됩니다. 지금은 채팅과 로비만 공유돼요.
-        </div>
+        <button id="mp-enter-builder" class="mp-enter-builder-btn">
+          🧱 함께 만들기 시작
+        </button>
+        <p class="mp-room-note">
+          빌더로 들어가면 다른 친구들이 놓는 블록과 캐릭터 위치가 실시간으로 보입니다.
+        </p>
 
         <button id="mp-leave-btn" class="mp-leave-btn">방 나가기</button>
       </aside>
@@ -346,6 +453,32 @@ function renderInRoomUI() {
       ?.writeText(currentRoom.invite_code)
       .then(() => showToast('초대 코드 복사 완료'))
       .catch(() => alert(`코드: ${currentRoom!.invite_code}`));
+  });
+
+  document.getElementById('mp-copy-link')?.addEventListener('click', () => {
+    navigator.clipboard
+      ?.writeText(inviteUrl)
+      .then(() => showToast('초대 링크 복사 완료'))
+      .catch(() => alert(inviteUrl));
+  });
+
+  document.getElementById('mp-enter-builder')?.addEventListener('click', async () => {
+    // If the room has an associated map, load it; otherwise stay on the
+    // current scene (or a fresh one). Either way, leave the multiplayer
+    // overlay and drop into the builder.
+    if (currentRoom?.map_id && gameRef) {
+      try {
+        const { loadMap } = await import('./mapStorage');
+        const { deserializeMap } = await import('./mapStorage');
+        const map = await loadMap(currentRoom.map_id);
+        deserializeMap(gameRef, map.data);
+      } catch (err) {
+        console.error('[multiplayer] failed to load room map:', err);
+      }
+    }
+    document.body.classList.remove('show-multiplayer');
+    // Keep the room subscriptions alive — they'll continue syncing in
+    // the background while the user builds.
   });
 
   document.getElementById('mp-leave-btn')?.addEventListener('click', () => {
@@ -440,6 +573,12 @@ function wireRoomChannels(room: Room) {
         .flat()
         .map((p) => p as PresenceMeta);
       renderPresence();
+      updateRoomPill();
+      // Clean up avatars for users who left the room
+      const activeIds = new Set(presence.map((p) => p.user_id));
+      for (const [uid] of remoteAvatars) {
+        if (!activeIds.has(uid)) removeRemoteAvatar(uid);
+      }
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED' && presenceChannel && authState.user) {
@@ -453,6 +592,274 @@ function wireRoomChannels(room: Room) {
         });
       }
     });
+
+  // --- Game sync channel (block place/remove + player position) ---
+  // Uses broadcast-only events (no persistence) for low-latency sync.
+  gameChannel = supabase.channel(`room-game-${room.id}`, {
+    config: { broadcast: { self: false } },
+  });
+
+  gameChannel
+    .on('broadcast', { event: 'block-placed' }, (payload) => {
+      if (!gameRef) return;
+      gameRef.applyRemoteBlockPlace(payload.payload as Parameters<Game['applyRemoteBlockPlace']>[0]);
+    })
+    .on('broadcast', { event: 'block-removed' }, (payload) => {
+      if (!gameRef) return;
+      gameRef.applyRemoteBlockRemove(payload.payload as { x: number; y: number; z: number });
+    })
+    .on('broadcast', { event: 'player-pose' }, (payload) => {
+      const p = payload.payload as {
+        user_id: string;
+        x: number;
+        y: number;
+        z: number;
+        rotY: number;
+        display_name: string;
+      };
+      if (authState.user && p.user_id === authState.user.id) return;
+      updateRemoteAvatar(p);
+    })
+    .subscribe();
+
+  // Hook local game events → broadcast to peers
+  wireLocalGameHooks();
+}
+
+/** Attach listeners to the local Game so its block events get broadcast
+ *  to other players in the room. Detaches on teardown. */
+function wireLocalGameHooks() {
+  if (!gameRef) return;
+  const g = gameRef;
+
+  // Snapshot any existing handlers so we don't clobber them
+  const prevPlaced = g.onBlockPlaced;
+  const prevRemoved = g.onBlockRemoved;
+
+  blockPlacedHandler = (obj, local) => {
+    prevPlaced(obj, local);
+    if (!local || !gameChannel) return;
+    const spec = obj.userData.spec as {
+      type?: string;
+      w?: number;
+      d?: number;
+      colorHex?: number;
+    } | undefined;
+    if (!spec?.type) return;
+    // Quarter-turn rotation step derived from world Y rotation
+    const rotSteps = Math.round(-obj.rotation.y / (Math.PI / 2));
+    const rotation = ((rotSteps % 4) + 4) % 4;
+    gameChannel.send({
+      type: 'broadcast',
+      event: 'block-placed',
+      payload: {
+        type: spec.type,
+        x: obj.position.x,
+        y: obj.position.y,
+        z: obj.position.z,
+        w: spec.w ?? 1,
+        d: spec.d ?? 1,
+        colorHex: spec.colorHex ?? 0xffffff,
+        rotation,
+        characterId: obj.userData.characterId,
+      },
+    });
+  };
+  blockRemovedHandler = (obj, local) => {
+    prevRemoved(obj, local);
+    if (!local || !gameChannel) return;
+    gameChannel.send({
+      type: 'broadcast',
+      event: 'block-removed',
+      payload: {
+        x: obj.position.x,
+        y: obj.position.y,
+        z: obj.position.z,
+      },
+    });
+  };
+  g.onBlockPlaced = blockPlacedHandler;
+  g.onBlockRemoved = blockRemovedHandler;
+
+  // Start broadcasting our own player position @ 10Hz
+  if (positionBroadcastTimer != null) clearInterval(positionBroadcastTimer);
+  positionBroadcastTimer = window.setInterval(() => {
+    if (!gameChannel || !authState.user) return;
+    const s = g.getPlayerState();
+    // Only broadcast when actually playing (not in build mode)
+    if (!s.isPlaying) return;
+    gameChannel.send({
+      type: 'broadcast',
+      event: 'player-pose',
+      payload: {
+        user_id: authState.user.id,
+        display_name:
+          authState.profile?.display_name ||
+          authState.user.email?.split('@')[0] ||
+          '익명',
+        x: s.x,
+        y: s.y,
+        z: s.z,
+        rotY: s.rotY,
+      },
+    });
+  }, 100);
+
+  // Smooth-interp remote avatars at 60fps toward their latest broadcast pose
+  const tickRemote = () => {
+    for (const a of remoteAvatars.values()) {
+      const g = a.group;
+      const t = 0.2; // lerp factor
+      g.position.x += (a.targetX - g.position.x) * t;
+      g.position.y += (a.targetY - g.position.y) * t;
+      g.position.z += (a.targetZ - g.position.z) * t;
+      let dr = a.targetRotY - g.rotation.y;
+      while (dr > Math.PI) dr -= Math.PI * 2;
+      while (dr < -Math.PI) dr += Math.PI * 2;
+      g.rotation.y += dr * t;
+    }
+    remoteAnimHandle = requestAnimationFrame(tickRemote);
+  };
+  if (remoteAnimHandle != null) cancelAnimationFrame(remoteAnimHandle);
+  remoteAnimHandle = requestAnimationFrame(tickRemote);
+}
+
+// --------------------------------------------------------------------
+//  Remote player avatars (rendered in the game scene)
+// --------------------------------------------------------------------
+
+function updateRemoteAvatar(p: {
+  user_id: string;
+  x: number;
+  y: number;
+  z: number;
+  rotY: number;
+  display_name: string;
+}) {
+  if (!gameRef) return;
+  let avatar = remoteAvatars.get(p.user_id);
+  if (!avatar) {
+    avatar = spawnRemoteAvatar(p.user_id, p.display_name);
+    remoteAvatars.set(p.user_id, avatar);
+  }
+  avatar.targetX = p.x;
+  avatar.targetY = p.y;
+  avatar.targetZ = p.z;
+  avatar.targetRotY = p.rotY;
+  avatar.lastUpdate = performance.now();
+}
+
+function spawnRemoteAvatar(userId: string, name: string): RemoteAvatar {
+  // Pick a deterministic preset based on the userId so each peer has a
+  // distinct but stable look across sessions.
+  const idx =
+    Array.from(userId).reduce((a, c) => a + c.charCodeAt(0), 0) %
+    MINIFIG_PRESETS.length;
+  const preset = MINIFIG_PRESETS[idx];
+  const fig = createMinifigure(preset);
+  // Don't participate in collision AABBs — this is a visual-only actor
+  fig.userData.isRemoteAvatar = true;
+
+  // Floating name label above the head
+  const label = makeNameLabel(name);
+  label.position.set(0, 5.5, 0);
+  fig.add(label);
+
+  gameRef!.getScene().add(fig);
+  return {
+    group: fig,
+    label,
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+    targetRotY: 0,
+    lastUpdate: performance.now(),
+  };
+}
+
+function removeRemoteAvatar(userId: string) {
+  const a = remoteAvatars.get(userId);
+  if (!a || !gameRef) return;
+  gameRef.getScene().remove(a.group);
+  a.group.traverse((c) => {
+    if (c instanceof THREE.Mesh) {
+      c.geometry?.dispose?.();
+      const mat = c.material as THREE.Material | THREE.Material[];
+      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+      else mat?.dispose?.();
+    }
+  });
+  (a.label.material as THREE.SpriteMaterial)?.map?.dispose?.();
+  (a.label.material as THREE.Material).dispose?.();
+  remoteAvatars.delete(userId);
+}
+
+/** Render a canvas-based text label as a THREE.Sprite so it always faces
+ *  the camera and stays readable regardless of yaw. */
+function makeNameLabel(name: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+  // Rounded pill background
+  ctx.fillStyle = 'rgba(28, 29, 34, 0.85)';
+  const r = 28;
+  ctx.beginPath();
+  ctx.moveTo(r, 4);
+  ctx.lineTo(canvas.width - r, 4);
+  ctx.quadraticCurveTo(canvas.width - 4, 4, canvas.width - 4, r);
+  ctx.lineTo(canvas.width - 4, canvas.height - r);
+  ctx.quadraticCurveTo(
+    canvas.width - 4,
+    canvas.height - 4,
+    canvas.width - r,
+    canvas.height - 4
+  );
+  ctx.lineTo(r, canvas.height - 4);
+  ctx.quadraticCurveTo(4, canvas.height - 4, 4, canvas.height - r);
+  ctx.lineTo(4, r);
+  ctx.quadraticCurveTo(4, 4, r, 4);
+  ctx.fill();
+  // Name text
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 26px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(name, canvas.width / 2, canvas.height / 2 + 1);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.anisotropy = 4;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(2.4, 0.6, 1);
+  return sprite;
+}
+
+function detachLocalGameHooks() {
+  if (!gameRef) return;
+  // Restore defaults (no-ops). We can't restore prev handlers because
+  // they were the no-op defaults before we replaced them; if the app
+  // later adds more listeners it should use an event-bus pattern.
+  gameRef.onBlockPlaced = () => {};
+  gameRef.onBlockRemoved = () => {};
+  blockPlacedHandler = null;
+  blockRemovedHandler = null;
+  if (positionBroadcastTimer != null) {
+    clearInterval(positionBroadcastTimer);
+    positionBroadcastTimer = null;
+  }
+  if (remoteAnimHandle != null) {
+    cancelAnimationFrame(remoteAnimHandle);
+    remoteAnimHandle = null;
+  }
+  // Remove all remote avatars from the scene
+  for (const uid of Array.from(remoteAvatars.keys())) {
+    removeRemoteAvatar(uid);
+  }
 }
 
 function renderPresence() {
@@ -486,9 +893,15 @@ function teardownRoom() {
     supabase.removeChannel(presenceChannel);
     presenceChannel = null;
   }
+  if (gameChannel) {
+    supabase.removeChannel(gameChannel);
+    gameChannel = null;
+  }
+  detachLocalGameHooks();
   currentRoom = null;
   messages = [];
   presence = [];
+  document.body.classList.remove('in-room');
 }
 
 // --------------------------------------------------------------------

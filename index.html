@@ -318,6 +318,14 @@
     <!-- ===== MULTIPLAYER ===== -->
     <div id="multiplayer" class="multiplayer hidden"></div>
 
+    <!-- Floating "in-room" pill — visible only while in a multiplayer
+         room AND in the builder. Click to return to the room lobby. -->
+    <button id="room-pill" class="room-pill" type="button">
+      <span class="room-pill-dot" aria-hidden="true"></span>
+      <span id="room-pill-name">방</span>
+      <span id="room-pill-count" class="room-pill-count">1</span>
+    </button>
+
     <!-- Vertical icon bar on the very left edge — quick navigation /
          tools strip. Visible on tablet+desktop, hidden on mobile (the
          bottom drawer covers everything there). -->
