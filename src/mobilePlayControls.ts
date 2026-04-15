@@ -189,6 +189,16 @@ function wireLookZone(game: Game): void {
   zone.addEventListener('pointerdown', (e) => {
     if (!game.isPlaying) return;
     if (pointerId !== null) return;
+    // Bail out when the gesture started on top of an overlaid HUD
+    // control (e.g. the view-toggle pill in the top-right). Without
+    // this guard the look-zone steals the tap and the toggle never
+    // receives its click.
+    const overlayHit = document.elementFromPoint(e.clientX, e.clientY);
+    if (overlayHit && overlayHit.closest(
+      '.mb-view-toggle, .mb-action-btn, .mb-play-exit'
+    )) {
+      return;
+    }
     pointerId = e.pointerId;
     zone.setPointerCapture(e.pointerId);
     lastX = e.clientX;

@@ -157,20 +157,11 @@ function shellMarkup(): string {
       </button>
     </header>
 
-    <!-- Quick action bar: rotate / undo — upper-left, above the D-pad -->
-    <nav class="mb-quick-actions safe-bottom" aria-label="빠른 동작">
-      <button class="mb-qa-btn" data-action="rotate" aria-label="회전" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
-        </svg>
-        <span id="mb-rot-label">0°</span>
-      </button>
-      <button class="mb-qa-btn" data-action="undo" aria-label="실행 취소" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/>
-        </svg>
-      </button>
-    </nav>
+    <!-- Rotation degree label only — appears above the D-pad rotate
+         button so the user can see the current rotation step. -->
+    <div class="mb-rot-readout safe-bottom" aria-live="polite">
+      <span id="mb-rot-label">0°</span>
+    </div>
 
     <!-- D-pad — nudges the placement ghost one footprint at a time.
          Center button ROTATES the ghost (tap-to-rotate shortcut; the
@@ -352,33 +343,17 @@ function wireFAB(game: Game): void {
 //  Quick actions — rotate, undo
 // --------------------------------------------------------------------
 
+/** Updates the small "0° / 90° / 180° / 270°" readout above the D-pad
+ *  rotate button. Rotation itself is handled by the D-pad. */
 function wireQuickActions(game: Game): void {
-  const rotateBtn = document.querySelector<HTMLButtonElement>(
-    '.mb-qa-btn[data-action="rotate"]'
-  );
   const rotLabel = document.getElementById('mb-rot-label');
-  const undoBtn = document.querySelector<HTMLButtonElement>(
-    '.mb-qa-btn[data-action="undo"]'
-  );
-
-  rotateBtn?.addEventListener('click', () => {
-    haptic('rotate');
-    game.rotateClockwise();
-  });
+  const rotReadout = document.querySelector<HTMLElement>('.mb-rot-readout');
   const prev = game.onRotationChange;
   game.onRotationChange = (step) => {
     prev?.(step);
     if (rotLabel) rotLabel.textContent = `${step * 90}°`;
-    rotateBtn?.classList.toggle('is-rotated', step !== 0);
+    rotReadout?.classList.toggle('is-rotated', step !== 0);
   };
-
-  // Undo — placeholder: triggers the existing desktop clear flow
-  undoBtn?.addEventListener('click', () => {
-    haptic('tap');
-    // TODO: wire to real undo stack. For now, dispatch a custom event
-    // that future history code will pick up.
-    document.dispatchEvent(new CustomEvent('mb-undo'));
-  });
 }
 
 // --------------------------------------------------------------------
