@@ -343,13 +343,11 @@ export class Game {
   /** If frightened > 0, ghosts are edible and fleeing. Counts down each
    *  frame; entered by eating a power pellet. */
   private pacmanFrightenedTime = 0;
-  /** Grid cell pitch — 1 world unit = 1 stud. Walls fill a single
-   *  cell (1 stud wide); corridors are TWO adjacent walkable cells
-   *  (2 studs wide) in the layout itself. Every maze position lands
-   *  on the standard Lego stud grid. */
-  private readonly PACMAN_CELL = 1.0;
+  /** Grid cell pitch in world units. Matches the "Image #4" reference
+   *  state the user had before any of my rework attempts. */
+  private readonly PACMAN_CELL = 2.2;
   /** Wall thickness — fills the cell. */
-  private readonly PACMAN_WALL_W = 1.0;
+  private readonly PACMAN_WALL_W = 2.2;
   /** Which camera mode is active in Pac-Man game mode. */
   private pacmanViewMode: 'top' | 'first' = 'top';
   /** Cardinal facing direction used by first-person "tank controls"
@@ -485,6 +483,12 @@ export class Game {
    *  When active, computePlacement uses a downward raycast from this
    *  world-space XZ instead of the pointer-based camera raycast. */
   private kbCursor = { x: 0, z: 0, active: false };
+  /** Timestamp of the last keyboard-driven ghost move. Used by
+   *  onPointerMove to ignore small mouse hovers for a short cooldown
+   *  after an arrow-key nudge — otherwise a Bluetooth mouse's micro-
+   *  drift snaps the ghost back to the cursor and the user can't
+   *  see their keyboard edits. */
+  private kbCursorLastMove = 0;
   /** Last placed block position + "line streak" mode. Space bar places
    *  a block and turns the streak ON. While the streak is on, arrow
    *  keys place NEW consecutive blocks in the pressed direction (one
@@ -2174,7 +2178,19 @@ export class Game {
 
   private onPointerMove(e: PointerEvent) {
     if (this.isPlaying) return;
-    this.kbCursor.active = false;
+    // Don't deactivate the keyboard cursor on tiny hovers within 1500ms
+    // of the last arrow-key press — otherwise a Bluetooth mouse's
+    // micro-drift makes the ghost snap back to the cursor and the user
+    // can't see their keyboard nudge.
+    const sinceKb = performance.now() - this.kbCursorLastMove;
+    // Only consider the pointer "intentional" if a button is held
+    // (drag) or the cooldown has expired AND the pointer actually
+    // moved a meaningful distance from the last frame.
+    const intentional =
+      e.buttons > 0 || sinceKb > 1500;
+    if (intentional) {
+      this.kbCursor.active = false;
+    }
     this.updatePointer(e);
     if (e.buttons > 0) {
       const dx = e.clientX - this.pointerDownPos.x;
@@ -2504,6 +2520,7 @@ export class Game {
         this.kbCursor.x = prevX;
         this.kbCursor.z = prevZ;
       }
+      this.kbCursorLastMove = performance.now();
       this.updatePreview();
       return;
     }
@@ -4398,6 +4415,7 @@ export class Game {
       this.playerAvatar.rotation.order = 'YXZ';
       this.scene.add(this.playerAvatar);
     }
+    this.playerAvatar.scale.set(1, 1, 1);
     this.playerAvatar.position.copy(this.playerPos);
     this.playerAvatar.rotation.set(0, 0, 0);
     this.playerAvatar.visible = true;
@@ -4498,24 +4516,24 @@ export class Game {
   // layout while keeping the AI simple.
 
   /** Shared middle band (rows 9–19) containing the ghost house and
-   *  tunnels. All mazes share this so the ghost-house exit AI has a
-   *  stable gate coordinate. Grid is 28 cols × 11 rows. */
+   *  tunnels. Gate opening is the two spaces in `###  ###` at row 12. */
   private static readonly PACMAN_CENTER: string[] = [
-    '#.########..####..########.#', // row 9  — wall above house
-    '#..........................#', // 10 — corridor directly above gate
-    '########..##    ##..########', // 11 — ghost-house top, 4-wide gate opening
-    '#.....##..##    ##..##.....#', // 12 — house shoulders
-    '#.....##.# GGGGGG #.##.....#', // 13 — G row 1
-    '_____..##.# GGGGGG #.##.____', // 14 — tunnel row, G row 2
-    '#.....##.# GGGGGG #.##.....#', // 15 — G row 3
-    '#.....##.##########.##.....#', // 16 — house bottom (sealed)
-    '########..##########..######', // 17 — corridor + wall under house
-    '#..........................#', // 18
-    '#.####..####..####..####..##', // 19 — wall row under house
+    '######.##### ## #####.######', // row 9
+    '     #.##### ## #####.#     ', // 10
+    '     #.##          ##.#     ', // 11
+    '     #.## ###  ### ##.#     ', // 12  (gate opening)
+    '######.## #GGGGGG# ##.######', // 13
+    '_________ #GGGGGG# _________', // 14  (tunnel row)
+    '######.## ######## ##.######', // 15
+    '     #.##          ##.#     ', // 16
+    '     #.## ######## ##.#     ', // 17
+    '     #.## ######## ##.#     ', // 18
+    '######.## ######## ##.######', // 19
   ];
 
-  /** Upper (rows 0–8) and lower (rows 20–28) halves. A single variant
-   *  for now; more can be added later to cycle per stage. */
+  /** Classic Pac-Man layout (original arcade dimensions). Corridors
+   *  are 1 cell wide — with PACMAN_CELL scaled up in world units the
+   *  visual corridor width matches the original. */
   private static readonly PACMAN_VARIANTS: Array<{
     upper: string[];
     lower: string[];
@@ -4523,24 +4541,24 @@ export class Game {
     {
       upper: [
         '############################',
-        '#o........................o#',
+        '#............##............#',
+        '#.####.#####.##.#####.####.#',
+        '#o####.#####.##.#####.####o#',
+        '#.####.#####.##.#####.####.#',
         '#..........................#',
-        '#..####..######..######..###',
-        '#..........................#',
-        '#..........................#',
-        '#.####..##..####..##..####.#',
-        '#..........................#',
-        '#..........................#',
+        '#.####.##.########.##.####.#',
+        '#.####.##.########.##.####.#',
+        '#......##....##....##......#',
       ],
       lower: [
-        '#..........................#',
-        '#..########..##..########..#',
-        '#..........................#',
-        '#..####..##..####..##..####.',
-        '#..........................#',
-        '#..........................#',
-        '#..########..##..########..#',
-        '#............P.............#',
+        '#............##............#',
+        '#.####.#####.##.#####.####.#',
+        '#o..##................##..o#',
+        '###.##.##.########.##.##.###',
+        '###.##.##.########.##.##.###',
+        '#......##....##....##......#',
+        '#.##########.##.##########.#',
+        '#..............P...........#',
         '############################',
       ],
     },
@@ -5283,11 +5301,11 @@ export class Game {
     // it closer to the gate, without the usual reverse-ban. Once
     // above the top row of the house it's free to chase normally.
     if (this.pacmanIsInGhostHouse(cell.c, cell.r)) {
-      // Gate opening is at row 11 (the 4-space window in the `##    ##`
-      // top wall of the ghost house). Targeting col 13 row 10 (directly
-      // above the gate, in the free corridor) guarantees an exit path.
+      // Gate opening is the two spaces in the `###  ###` pattern of
+      // row 12. Ghosts aim for (13, 12) — the gate cell — and bypass
+      // the usual no-reverse rule until they leave the house.
       const GATE_C = 13;
-      const GATE_R = 10;
+      const GATE_R = 12;
       const options = dirs.filter((d) =>
         this.pacmanIsWalkable(cell.c + d.x, cell.r + d.z)
       );
