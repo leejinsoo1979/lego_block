@@ -343,10 +343,13 @@ export class Game {
   /** If frightened > 0, ghosts are edible and fleeing. Counts down each
    *  frame; entered by eating a power pellet. */
   private pacmanFrightenedTime = 0;
-  /** Cell edge length in world units. Each grid cell is a PACMAN_CELL-
-   *  sized square. Bumping this makes corridors visibly wider for the
-   *  ~1-unit-wide minifig player. */
-  private readonly PACMAN_CELL = 2.2;
+  /** Grid cell pitch — 1 world unit = 1 stud. Walls fill a single
+   *  cell (1 stud wide); corridors are TWO adjacent walkable cells
+   *  (2 studs wide) in the layout itself. Every maze position lands
+   *  on the standard Lego stud grid. */
+  private readonly PACMAN_CELL = 1.0;
+  /** Wall thickness — fills the cell. */
+  private readonly PACMAN_WALL_W = 1.0;
   /** Which camera mode is active in Pac-Man game mode. */
   private pacmanViewMode: 'top' | 'first' = 'top';
   /** Cardinal facing direction used by first-person "tank controls"
@@ -473,6 +476,13 @@ export class Game {
    *  When active, computePlacement uses a downward raycast from this
    *  world-space XZ instead of the pointer-based camera raycast. */
   private kbCursor = { x: 0, z: 0, active: false };
+  /** Last placed block position + "line streak" mode. Space bar places
+   *  a block and turns the streak ON. While the streak is on, arrow
+   *  keys place NEW consecutive blocks in the pressed direction (one
+   *  footprint step per press, with key-repeat) instead of just moving
+   *  the ghost cursor. Escape / mode change / type change ends it. */
+  private lastPlacedPos: { x: number; y: number; z: number } | null = null;
+  private lineStreakActive: boolean = false;
   /** True while the player has active dogs following them — toggled by
    *  `whistleDogs()`. Only meaningful during play mode. */
   private dogsFollowing = false;
@@ -2383,13 +2393,67 @@ export class Game {
 
     if (inTextInput) return;
 
-    // Arrow keys: move ghost via keyboard cursor
+    // Arrow keys: move ghost via keyboard cursor, or — in line-streak
+    // mode (activated by Space-placing a block) — place a new block
+    // adjacent to the last placed one in the arrow's direction.
     if (e.code === 'ArrowUp' || e.code === 'ArrowDown' ||
         e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
       e.preventDefault();
+
+      // Compute camera-relative forward/right on the XZ plane so arrow
+      // keys map to the user's current viewpoint.
+      const camDir = new THREE.Vector3();
+      this.camera.getWorldDirection(camDir);
+      camDir.y = 0;
+      camDir.normalize();
+      if (camDir.lengthSq() < 0.001) { camDir.set(0, 0, -1); }
+      const camRight = new THREE.Vector3().crossVectors(
+        new THREE.Vector3(0, 1, 0), camDir
+      ).normalize();
+      let dx = 0, dz = 0;
+      switch (e.code) {
+        case 'ArrowUp':    dx = camDir.x;   dz = camDir.z;   break;
+        case 'ArrowDown':  dx = -camDir.x;  dz = -camDir.z;  break;
+        case 'ArrowLeft':  dx = camRight.x; dz = camRight.z; break;
+        case 'ArrowRight': dx = -camRight.x; dz = -camRight.z; break;
+      }
+      // Dominant-axis direction (+1 / -1 on either X or Z).
+      const useXAxis = Math.abs(dx) >= Math.abs(dz);
+      const sX = useXAxis ? Math.sign(dx) : 0;
+      const sZ = useXAxis ? 0 : Math.sign(dz);
+
+      const eff = this.effectiveSize();
+
+      // --- LINE STREAK: place a new block offset by one full footprint ---
+      if (
+        this.lineStreakActive &&
+        this.lastPlacedPos &&
+        this.mode === 'place' &&
+        !this.placementSuspended
+      ) {
+        const stepX = sX * eff.w;
+        const stepZ = sZ * eff.d;
+        const nextX = this.lastPlacedPos.x + stepX;
+        const nextZ = this.lastPlacedPos.z + stepZ;
+        // Bounds check: the full footprint must sit on a baseplate tile.
+        if (!this.isFootprintOnBaseplate(nextX, nextZ, eff.w / 2, eff.d / 2)) {
+          return;
+        }
+        // Place at the same Y as the last placed block (keep on-plane).
+        this.placeAtPosition({ x: nextX, y: this.lastPlacedPos.y, z: nextZ });
+        this.lastPlacedPos = { x: nextX, y: this.lastPlacedPos.y, z: nextZ };
+        // Keep the ghost / kbCursor in sync so the preview shows where
+        // the next block would go.
+        this.kbCursor.x = nextX;
+        this.kbCursor.z = nextZ;
+        this.kbCursor.active = true;
+        this.updatePreview();
+        return;
+      }
+
+      // --- CURSOR MOVE: step the ghost by ONE FULL FOOTPRINT so blocks
+      //     placed on successive arrow presses sit edge-to-edge. ---
       if (!this.kbCursor.active) {
-        // Initialize from the current ghost position so movement
-        // starts where the user is already looking.
         if (this.ghost.visible) {
           this.kbCursor.x = this.ghost.position.x;
           this.kbCursor.z = this.ghost.position.z;
@@ -2400,39 +2464,15 @@ export class Game {
         this.kbCursor.active = true;
         this.placementSuspended = false;
       }
-      // Compute camera-relative forward/right on the XZ plane so arrow
-      // keys move the ghost relative to the user's current viewpoint.
-      const camDir = new THREE.Vector3();
-      this.camera.getWorldDirection(camDir);
-      camDir.y = 0;
-      camDir.normalize();
-      // If camera looks straight down, fall back to -Z as forward.
-      if (camDir.lengthSq() < 0.001) { camDir.set(0, 0, -1); }
-      const camRight = new THREE.Vector3().crossVectors(
-        new THREE.Vector3(0, 1, 0), camDir
-      ).normalize();
-
-      // Map arrow to a camera-relative direction, then snap to the
-      // dominant world axis so movement stays on the stud grid.
-      let dx = 0, dz = 0;
-      switch (e.code) {
-        case 'ArrowUp':    dx = camDir.x;   dz = camDir.z;   break;
-        case 'ArrowDown':  dx = -camDir.x;  dz = -camDir.z;  break;
-        case 'ArrowLeft':  dx = camRight.x; dz = camRight.z; break;
-        case 'ArrowRight': dx = -camRight.x; dz = -camRight.z; break;
-      }
-      // Snap to dominant axis: move exactly 1 stud along whichever
-      // world axis (X or Z) the camera-relative direction most aligns with.
       const prevX = this.kbCursor.x;
       const prevZ = this.kbCursor.z;
-      if (Math.abs(dx) >= Math.abs(dz)) {
-        this.kbCursor.x += Math.sign(dx);
-      } else {
-        this.kbCursor.z += Math.sign(dz);
-      }
-      // Clamp: revert if the new position would push the footprint off
-      // all baseplates (keeps the ghost visible at the edge).
-      const eff = this.effectiveSize();
+      // Step by the block's footprint size along the chosen axis (one
+      // full block width for horizontal arrows, one full depth for
+      // vertical). For 1×1 blocks this equals 1 stud; for a 2×2 it's
+      // 2 studs; for a 4×2 rotated sideways it's 4 or 2 depending on
+      // which axis is dominant.
+      this.kbCursor.x += sX * eff.w;
+      this.kbCursor.z += sZ * eff.d;
       const snappedX = this.snapXZ(this.kbCursor.x, eff.w);
       const snappedZ = this.snapXZ(this.kbCursor.z, eff.d);
       if (!this.isFootprintOnBaseplate(snappedX, snappedZ, eff.w / 2, eff.d / 2)) {
@@ -2451,8 +2491,17 @@ export class Game {
     } else if (e.code === 'Space' && !e.repeat) {
       e.preventDefault();
       if (!this.placementSuspended && this.ghost.visible) {
-        if (this.mode === 'remove') this.removeBlock();
-        else this.placeBlock();
+        if (this.mode === 'remove') {
+          this.removeBlock();
+        } else {
+          const placed = this.placeBlock();
+          // Space activates the line-paint streak so arrow keys can
+          // place consecutive blocks in the pressed direction.
+          if (placed) {
+            this.lastPlacedPos = placed;
+            this.lineStreakActive = true;
+          }
+        }
       }
     } else if (e.key === 'Escape') {
       // Esc cancels add-baseplate mode first; otherwise clears the
@@ -2461,6 +2510,9 @@ export class Game {
         this.setAddBaseplateMode(false);
         return;
       }
+      // End the line-paint streak if active.
+      this.lineStreakActive = false;
+      this.lastPlacedPos = null;
       this.placementSuspended = true;
       this.ghost.visible = false;
       this.hoverBox.visible = false;
@@ -2587,6 +2639,10 @@ export class Game {
   setBlockType(type: BlockType) {
     this.blockType = type;
     this.placementSuspended = false;
+    // Different block → different footprint, so the in-flight line-paint
+    // streak no longer makes sense. End it.
+    this.lineStreakActive = false;
+    this.lastPlacedPos = null;
     this.onBlockTypeChange(type);
     this.updatePreview();
   }
@@ -2613,6 +2669,10 @@ export class Game {
   setMode(mode: Mode) {
     this.mode = mode;
     this.placementSuspended = false;
+    // End the line-paint streak on mode change (remove mode has no
+    // meaningful "next position" to continue from).
+    this.lineStreakActive = false;
+    this.lastPlacedPos = null;
     this.onModeChange(mode);
     this.renderer.domElement.style.cursor =
       mode === 'remove' ? 'not-allowed' : 'crosshair';
@@ -3617,14 +3677,15 @@ export class Game {
   //  Place / remove
   // ------------------------------------------------------------------
 
-  private placeBlock() {
+  /** @returns the placement position when a block was actually placed,
+   *  or null if the ghost was invalid / no hit. The caller can use the
+   *  returned position to start a line-paint streak (see Space handler). */
+  private placeBlock(): { x: number; y: number; z: number } | null {
     const placement = this.computePlacement();
-    if (!placement) return;
-    // Bridge previews can return a "raw" snapped position with invalid=true
-    // so the user can see where it would go in red. We must NOT actually
-    // place anything in that case.
-    if (placement.invalid) return;
+    if (!placement) return null;
+    if (placement.invalid) return null;
     this.placeAtPosition(placement, placement.autoRotate);
+    return { x: placement.x, y: placement.y, z: placement.z };
   }
 
   /** Places a block at the given (already-snapped and validated) position.
@@ -4601,16 +4662,12 @@ export class Game {
     mazeGroup.add(floorStuds);
 
     // ---- Walls / pellets / spawns ----
-    // Each wall cell is a proper Lego-style brick: a colored box body
-    // plus a cylindrical stud on top (reference: real Lego bricks have
-    // one stud per stud-pitch on top). We share geometries + materials
-    // across every wall cell so placing hundreds of them stays cheap.
-    const WALL_BODY_H = 1.4;
-    const WALL_STUD_H = 0.3;
-    const WALL_STUD_R = S * 0.22; // ~22% of cell width, like a real stud
-    // Body fills the cell horizontally so adjacent walls visually merge
-    // into one continuous wall, matching the reference images.
-    const wallGeom = new THREE.BoxGeometry(S, WALL_BODY_H, S);
+    // Each wall = one 1×1×1-stud Lego brick with a single stud on top.
+    // Adjacent wall cells merge visually into continuous wall lines.
+    // 2-stud-wide corridors come from the MAZE LAYOUT itself (every
+    // corridor is two adjacent walkable cells in the grid).
+    const WALL_BODY_H = 1.2;
+    const WALL_STUD_H = 0.2;
     const wallMat = new THREE.MeshStandardMaterial({
       color: 0x1e3aff,
       emissive: 0x0820b0,
@@ -4618,10 +4675,11 @@ export class Game {
       roughness: 0.4,
       metalness: 0.05,
     });
-    const studGeom = new THREE.CylinderGeometry(WALL_STUD_R, WALL_STUD_R, WALL_STUD_H, 16);
-    const pelletGeom = new THREE.SphereGeometry(0.26, 10, 8);
+    const wallGeom = new THREE.BoxGeometry(S, WALL_BODY_H, S);
+    const studGeom = new THREE.CylinderGeometry(S * 0.24, S * 0.24, WALL_STUD_H, 14);
+    const pelletGeom = new THREE.SphereGeometry(0.14, 10, 8);
     const pelletMat = new THREE.MeshBasicMaterial({ color: 0xffe04a });
-    const powerGeom = new THREE.SphereGeometry(0.62, 14, 10);
+    const powerGeom = new THREE.SphereGeometry(0.3, 14, 10);
     const powerMat = new THREE.MeshBasicMaterial({ color: 0xfff08a });
 
     let pelletCount = 0;
@@ -4634,28 +4692,25 @@ export class Game {
         const z = this.pacmanGridOriginZ + r * S;
 
         if (ch === '#') {
-          // Brick body
           const wall = new THREE.Mesh(wallGeom, wallMat);
           wall.position.set(x, WALL_BODY_H / 2, z);
           wall.castShadow = true;
           wall.receiveShadow = true;
           mazeGroup.add(wall);
-          // Stud on top (one stud per cell — correct Lego 1×1 geometry,
-          // scaled to match the cell size so adjacent studs don't overlap).
           const stud = new THREE.Mesh(studGeom, wallMat);
           stud.position.set(x, WALL_BODY_H + WALL_STUD_H / 2, z);
           stud.castShadow = true;
           mazeGroup.add(stud);
         } else if (ch === '.') {
           const pellet = new THREE.Mesh(pelletGeom, pelletMat);
-          pellet.position.set(x, 0.4, z);
+          pellet.position.set(x, 0.3, z);
           pellet.userData.isPacmanPellet = true;
           pellet.userData.pelletScore = 10;
           mazeGroup.add(pellet);
           pelletCount++;
         } else if (ch === 'o') {
           const power = new THREE.Mesh(powerGeom, powerMat);
-          power.position.set(x, 0.6, z);
+          power.position.set(x, 0.45, z);
           power.userData.isPacmanPellet = true;
           power.userData.isPacmanPower = true;
           power.userData.pelletScore = 50;
@@ -4663,9 +4718,6 @@ export class Game {
           pelletCount++;
         } else if (ch === 'G') {
           ghostSpawns.push(new THREE.Vector3(x, 0, z));
-          // Remember grid cell too — ghosts use this to know they're
-          // still "inside" the ghost house and must exit upward.
-          // (c, r) with cell = 'G'. Stashed via spawn's userData.
         } else if (ch === 'P') {
           this.pacmanPlayerSpawn.set(x, 0, z);
         }
@@ -5163,12 +5215,10 @@ export class Game {
     }
   }
 
-  /** Single-point walkability test at the player's center. Classic
-   *  Pac-Man feel: as long as the center is in a walkable cell the
-   *  player moves freely; the snap-to-cell-center logic on collision
-   *  keeps them aligned so they never visually overlap a wall. Using
-   *  a 4-corner bounding-box check was causing the minifig to catch
-   *  on wall corners when turning into a corridor. */
+  /** Simple cell-based walkability test. With PACMAN_CELL = 1.0 and
+   *  walls filling a full cell, the player's center cell determines
+   *  walkability — corridors are 2-cell-wide in the layout so the
+   *  player can slide freely inside them. */
   private pacmanCanMoveFrom(x: number, z: number): boolean {
     const cell = this.pacmanWorldToCell(x, z);
     return this.pacmanIsWalkable(cell.c, cell.r);
