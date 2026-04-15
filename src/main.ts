@@ -10,6 +10,7 @@ import { loadCharacterModel } from './blocks';
 import { signInWithGoogle } from './auth';
 import { initMobile, isMobile } from './mobile';
 import { buildMobileBuilderUI } from './mobileBuilder';
+import { initMobilePlayControls } from './mobilePlayControls';
 import { initGestures } from './gestures';
 
 // Mobile detection + safe-area + viewport height must run FIRST so any
@@ -63,6 +64,7 @@ async function init() {
   // replaces the desktop sidebar flow. Desktop UI stays hidden by CSS.
   if (isMobile()) {
     buildMobileBuilderUI(game);
+    initMobilePlayControls(game);
     initGestures(game);
   }
 

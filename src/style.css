@@ -4999,3 +4999,153 @@ body.is-mobile #icon-bar { display: none !important; }
 /* In builder mode on mobile, hide the mobile drawer handle + sidebar —
    we use our own bottom sheet. */
 body.is-mobile #sidebar { display: none !important; }
+
+/* ====================================================================
+   PHASE 4 — MOBILE PLAY CONTROLS (joystick + camera swipe + buttons)
+   ==================================================================== */
+
+.mb-play-controls { display: none; }
+body.is-mobile.playing .mb-play-controls { display: block; }
+
+/* Left-side joystick hot zone (invisible touch catcher) */
+.mb-joystick-hotzone {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 50%;
+  height: 60%;
+  z-index: 140;
+  touch-action: none;
+}
+
+/* Actual visible joystick — shown on touch */
+.mb-joystick {
+  position: fixed;
+  width: 120px;
+  height: 120px;
+  z-index: 141;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s var(--ease-ios-default);
+}
+.mb-joystick.is-active {
+  opacity: 1;
+}
+.mb-joystick-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(28, 29, 34, 0.32);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+.mb-joystick-thumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #fff 0%, #d6d9de 100%);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35), inset 0 -2px 4px rgba(0, 0, 0, 0.15);
+  will-change: transform;
+  transition: transform 0.04s linear;
+}
+
+/* Right-side camera swipe zone */
+.mb-look-zone {
+  position: fixed;
+  right: 0;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  z-index: 140;
+  touch-action: none;
+}
+
+/* Action buttons cluster — right bottom */
+.mb-action-cluster {
+  position: fixed;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+  z-index: 150;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 14px;
+  align-items: flex-end;
+}
+.mb-action-btn {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: none;
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.12s var(--ease-ios-default),
+              background 0.12s var(--ease-ios-default);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+.mb-action-btn:active { transform: scale(0.9); }
+.mb-action-jump {
+  background: radial-gradient(circle at 30% 30%, #4bd37d 0%, #2ea85e 100%);
+}
+.mb-action-sprint {
+  background: radial-gradient(circle at 30% 30%, #f5cd30 0%, #c49d1c 100%);
+  width: 60px;
+  height: 60px;
+}
+.mb-action-sprint.is-held {
+  background: radial-gradient(circle at 30% 30%, #ff8844 0%, #c4281c 100%);
+  transform: scale(0.95);
+}
+.mb-action-interact {
+  background: radial-gradient(circle at 30% 30%, #5fb2ff 0%, #0d69ac 100%);
+  width: 60px;
+  height: 60px;
+}
+.mb-action-label { font-size: 13px; }
+.mb-action-letter { font-size: 22px; font-weight: 800; }
+
+/* Exit button — top-left */
+.mb-play-exit {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 14px;
+  z-index: 150;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 8px 12px;
+  background: rgba(28, 29, 34, 0.78);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.mb-play-exit svg { width: 16px; height: 16px; }
+
+/* Hide desktop HUD items that overlap with mobile controls */
+body.is-mobile.playing #play-overlay .play-hint { display: none; }
+body.is-mobile.playing #play-overlay .view-toggle { display: none; }
+body.is-mobile.playing #play-overlay .dog-whistle {
+  right: 16px;
+  top: calc(env(safe-area-inset-top, 0px) + 68px);
+}

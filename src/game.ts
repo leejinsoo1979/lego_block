@@ -422,6 +422,15 @@ export class Game {
     jump: false,
     run: false,
   };
+  /** External override for movement input — used by the mobile virtual
+   *  joystick to drive the player without going through keyboard events.
+   *  Values are analog (-1..1) and combined with keyboard state each
+   *  frame. Setting to 0/0 clears the override. */
+  public analogMove = { x: 0, y: 0 };
+  /** Set by the mobile jump button. One-shot — cleared after consumption. */
+  public mobileJumpPressed = false;
+  /** Held by the mobile sprint button. */
+  public mobileRunning = false;
   private savedCam = {
     position: new THREE.Vector3(28, 28, 28),
     target: new THREE.Vector3(0, 2, 0),
@@ -5800,7 +5809,23 @@ export class Game {
     if (this.moveKeys.back) move.sub(forward);
     if (this.moveKeys.right) move.add(right);
     if (this.moveKeys.left) move.sub(right);
-    if (move.lengthSq() > 0) move.normalize();
+    // Analog joystick input (mobile virtual stick). y>0 = forward,
+    // x>0 = right, magnitude 0..1. We add before normalize so an
+    // analog half-push gives proportionally slower movement while
+    // keyboard input still behaves digitally.
+    if (this.analogMove.x !== 0 || this.analogMove.y !== 0) {
+      const analog = forward.clone().multiplyScalar(this.analogMove.y);
+      analog.add(right.clone().multiplyScalar(this.analogMove.x));
+      move.add(analog);
+    }
+    if (move.lengthSq() > 1) move.normalize();
+    // One-shot mobile jump button — consume the flag
+    if (this.mobileJumpPressed) {
+      this.moveKeys.jump = true;
+      this.mobileJumpPressed = false;
+    }
+    // Held sprint button
+    if (this.mobileRunning) this.moveKeys.run = true;
 
     this.playerVel.x = move.x * SPEED;
     this.playerVel.z = move.z * SPEED;
