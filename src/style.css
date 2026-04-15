@@ -5517,3 +5517,109 @@ body.is-mobile #toast-host {
 
 /* Desktop: no banner needed */
 body:not(.is-mobile) .pwa-install-banner { display: none; }
+
+/* ====================================================================
+   PHASE 9 — ACCESSIBILITY
+   prefers-reduced-motion, dynamic type, colorblind outlines, focus rings
+   ==================================================================== */
+
+/* Reduced motion — disable non-essential animations for vestibular users. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .dash-blob,
+  .landing-title-accent {
+    animation: none !important;
+  }
+}
+
+/* iOS Dynamic Type — scale base font using prefers-reduced-data +
+   user-set text size. -apple-system-body at 100% maps to user's
+   preferred reading size. */
+@supports (font: -apple-system-body) {
+  body.is-mobile .landing-subtitle,
+  body.is-mobile .dash-hero-sub,
+  body.is-mobile .mb-sheet-item span,
+  body.is-mobile .mp-chat-bubble,
+  body.is-mobile .dash-map-title {
+    font: -apple-system-body;
+    font-weight: 500;
+  }
+}
+
+/* Colorblind-friendly mode — activated via body.cb-mode class. Adds a
+   crisp outline to every colored brick + color swatch so hue alone
+   isn't the only differentiator. Also boosts contrast between the
+   LEGO primary colors. */
+body.cb-mode .color-btn,
+body.cb-mode .mb-color-swatch {
+  border: 2px solid #1c1d22 !important;
+  position: relative;
+}
+body.cb-mode .color-btn.active::after,
+body.cb-mode .mb-color-swatch.is-active::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 900;
+  text-shadow:
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000,
+    1px 1px 0 #000;
+}
+
+/* Higher-contrast focus rings for keyboard users — iOS + Android +
+   desktop all benefit. */
+*:focus-visible {
+  outline: 3px solid #0d69ac;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Screen-reader-only text for labels that are icon-only visually */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Ensure the floating joystick visually indicates active state for
+   colorblind users via motion — pulse the ring on first activation. */
+@media (prefers-reduced-motion: no-preference) {
+  .mb-joystick.is-active .mb-joystick-ring {
+    animation: mbJoystickActivate 0.3s var(--ease-out-expo);
+  }
+}
+@keyframes mbJoystickActivate {
+  from { transform: scale(0.8); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* Preserve focus outlines on mobile too — our earlier "*:focus-visible"
+   rule only ran for body.is-mobile. This makes it unconditional. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid #0d69ac;
+  outline-offset: 2px;
+}

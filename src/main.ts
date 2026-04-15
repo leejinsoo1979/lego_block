@@ -13,6 +13,7 @@ import { buildMobileBuilderUI } from './mobileBuilder';
 import { initMobilePlayControls } from './mobilePlayControls';
 import { initGestures } from './gestures';
 import { initPWA } from './pwa';
+import { initA11y } from './a11y';
 
 // Mobile detection + safe-area + viewport height must run FIRST so any
 // CSS that depends on body.is-mobile / --sai-* / --vh has the right
@@ -23,6 +24,10 @@ initMobile();
 // starts caching assets as soon as possible; the install banner only
 // surfaces after the browser fires beforeinstallprompt.
 initPWA();
+
+// Accessibility — live region for screen-reader announcements,
+// reduced-motion class, colorblind-mode toggle, ARIA enhancement.
+initA11y();
 
 // Expose landing button actions as global functions FIRST, so the inline
 // onclick handlers in index.html have something to call even if the rest
