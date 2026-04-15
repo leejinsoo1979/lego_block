@@ -5689,3 +5689,69 @@ select:focus-visible {
   color: #1c1d22;
 }
 .autosave-banner-restore:active { transform: scale(0.95); }
+
+/* ====================================================================
+   PHASE 10 — FINAL POLISH
+   Small fixes found during end-to-end mobile QA.
+   ==================================================================== */
+
+/* Safari-only: disable tap-highlight on our mobile buttons (some still
+   flash blue via WebKit defaults). */
+.mb-fab,
+.mb-action-btn,
+.mb-top-btn,
+.mb-qa-btn,
+.mb-hot-slot,
+.mb-hotbar-expand,
+.mb-sheet-tab,
+.mb-sheet-item,
+.mb-color-swatch,
+.mb-size-chip,
+.mb-mode-chip,
+.pwa-banner-install,
+.pwa-banner-dismiss,
+.autosave-banner-restore,
+.autosave-banner-dismiss,
+.mb-play-exit {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* iOS Safari address-bar collapse glitch — if the viewer height uses
+   100vh during a route transition, content briefly peeks under the
+   bottom chrome. Using min-height with --vh defeats this. */
+body.is-mobile #viewer {
+  min-height: calc(var(--vh, 1vh) * 100);
+}
+
+/* When both the hotbar and a bottom sheet are open, ensure the sheet
+   sits above the hotbar rather than competing with it for bottom space. */
+body.is-mobile #mb-sheet[data-state='open'] ~ .mb-hotbar,
+body.is-mobile #mb-sheet[data-state='peek'] ~ .mb-hotbar {
+  pointer-events: none;
+  opacity: 0.4;
+  transition: opacity 0.2s var(--ease-ios-default);
+}
+
+/* Prevent accidental text selection when dragging the bottom-sheet handle */
+.mb-sheet-handle * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Modal dialog heights — when a form is small, don't force a tall
+   modal that hides behind the mobile keyboard. */
+body.is-mobile .modal-body {
+  max-height: calc(var(--vh, 1vh) * 70);
+}
+
+/* Print styles — if anyone hits print (desktop bug), show a friendly msg */
+@media print {
+  body > *:not(#viewer) { display: none !important; }
+  body::after {
+    content: '🧱 LEGO World — 인쇄는 지원되지 않습니다. 맵을 저장 후 캡처해주세요.';
+    display: block;
+    font-family: sans-serif;
+    padding: 20px;
+    font-size: 14px;
+  }
+}
