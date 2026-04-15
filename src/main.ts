@@ -14,6 +14,7 @@ import { initMobilePlayControls } from './mobilePlayControls';
 import { initGestures } from './gestures';
 import { initPWA } from './pwa';
 import { initA11y } from './a11y';
+import { initAutosave } from './autosave';
 
 // Mobile detection + safe-area + viewport height must run FIRST so any
 // CSS that depends on body.is-mobile / --sai-* / --vh has the right
@@ -69,6 +70,10 @@ async function init() {
   buildGalleryUI(game);
   buildStoreUI(game);
   buildMultiplayerUI(game);
+
+  // Autosave to localStorage every 30s + on tab hide/close. Offers
+  // restore on boot if a previous session snapshot exists.
+  initAutosave(game);
 
   // Mobile builder UI — only activates when body has .is-mobile.
   // Appends a separate top bar + bottom sheet + hotbar + FAB that

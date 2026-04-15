@@ -5623,3 +5623,69 @@ select:focus-visible {
   outline: 3px solid #0d69ac;
   outline-offset: 2px;
 }
+
+/* ====================================================================
+   PHASE 7 — AUTOSAVE RESTORE BANNER
+   ==================================================================== */
+
+.autosave-banner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px 10px 12px;
+  background: #1c1d22;
+  color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  animation: autosaveSlide 0.3s var(--ease-out-expo);
+  max-width: calc(100vw - 32px);
+}
+@keyframes autosaveSlide {
+  from { opacity: 0; transform: translate(-50%, -20px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.autosave-banner-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.autosave-banner-icon { font-size: 24px; line-height: 1; }
+.autosave-banner-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.autosave-banner-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+}
+.autosave-banner-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: 4px;
+}
+.autosave-banner-dismiss,
+.autosave-banner-restore {
+  padding: 7px 12px;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.autosave-banner-dismiss {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.78);
+}
+.autosave-banner-restore {
+  background: #f5cd30;
+  color: #1c1d22;
+}
+.autosave-banner-restore:active { transform: scale(0.95); }
