@@ -2852,6 +2852,15 @@ export class Game {
     }
     this.hoverBox.visible = false;
     this.onCountChange(0);
+    // End any in-flight line-streak so the ghost doesn't think it has
+    // a neighbor to extend. On mobile we re-seed the D-pad ghost at
+    // the board centre so there's always something visible to place.
+    this.lineStreakActive = false;
+    this.lastPlacedPos = null;
+    if (document.body.classList.contains('is-mobile')) {
+      this.kbCursor.active = false;
+      this.activateGhostAtCenter();
+    }
   }
 
   // ------------------------------------------------------------------
