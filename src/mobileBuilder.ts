@@ -408,6 +408,7 @@ const CATEGORY_ICONS: Partial<Record<BlockCategory, string>> = {
   prop: '🌳',
   road: '🛣️',
   character: '🤖',
+  pacman: '👻',
 };
 
 function wireCategoryStrip(game: Game): void {

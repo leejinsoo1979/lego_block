@@ -164,9 +164,9 @@
 
     <!-- ===== DASHBOARD ===== -->
     <div id="dashboard" class="dashboard hidden">
-      <!-- Top navigation -->
-      <header class="dash-nav">
-        <div class="dash-nav-left">
+      <!-- ===== Top bar ===== -->
+      <header class="dash-topbar">
+        <div class="dash-topbar-brand">
           <div class="landing-logo">
             <span class="landing-logo-brick" style="background: #c4281c"></span>
             <span class="landing-logo-brick" style="background: #f5cd30"></span>
@@ -174,144 +174,204 @@
             <span class="landing-logo-text">LEGO WORLD</span>
           </div>
         </div>
-        <nav class="dash-nav-center">
-          <button class="dash-nav-item active" data-view="overview">개요</button>
-          <button class="dash-nav-item" data-view="maps">내 맵</button>
-          <button class="dash-nav-item" data-view="gallery">갤러리</button>
-          <button class="dash-nav-item" data-view="store">스토어</button>
-          <button class="dash-nav-item" data-view="multiplayer">친구</button>
+        <nav class="dash-topbar-nav">
+          <button class="dash-topbar-link active" data-view="overview">홈</button>
+          <button class="dash-topbar-link" data-view="gallery">갤러리</button>
+          <button class="dash-topbar-link" data-view="store">스토어</button>
+          <button class="dash-topbar-link" data-view="multiplayer">친구</button>
         </nav>
-        <div class="dash-nav-right">
+        <div class="dash-topbar-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="search" placeholder="맵, 크리에이터 검색" aria-label="검색" />
+        </div>
+        <div class="dash-topbar-right">
+          <button class="dash-topbar-icon" title="알림" aria-label="알림">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </button>
           <div id="dash-auth-slot" class="auth-slot"></div>
         </div>
       </header>
 
-      <main class="dash-main">
-        <!-- ===== Welcome hero ===== -->
-        <section class="dash-hero">
-          <div class="dash-hero-text">
-            <h1 id="dash-welcome-name">안녕하세요</h1>
-            <p class="dash-hero-sub">
-              상상한 세계를 만들고, 저장하고, 세상과 나누세요.
-            </p>
+      <div class="dash-body">
+        <!-- ===== Left sidebar ===== -->
+        <aside class="dash-sidebar">
+          <div class="dash-sidebar-user">
+            <div class="dash-sidebar-avatar" id="dash-sidebar-avatar"></div>
+            <div class="dash-sidebar-name" id="dash-welcome-name">사용자</div>
           </div>
-          <div class="dash-stats">
-            <div class="dash-stat-card">
-              <div class="dash-stat-label">만든 맵</div>
-              <div class="dash-stat-num" id="stat-maps">0</div>
-            </div>
-            <div class="dash-stat-card">
-              <div class="dash-stat-label">쌓은 블록</div>
-              <div class="dash-stat-num" id="stat-blocks">0</div>
-            </div>
-            <div class="dash-stat-card">
-              <div class="dash-stat-label">공개 맵</div>
-              <div class="dash-stat-num" id="stat-public">0</div>
-            </div>
-            <div class="dash-stat-card">
-              <div class="dash-stat-label">받은 좋아요</div>
-              <div class="dash-stat-num" id="stat-likes">0</div>
-            </div>
-          </div>
-        </section>
+          <nav class="dash-sidebar-nav">
+            <button class="dash-side-link active" data-view="overview">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 9v11h14V9"/></svg>
+              <span>홈</span>
+            </button>
+            <button class="dash-side-link" data-view="maps">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              <span>내 맵</span>
+            </button>
+            <button class="dash-side-link" data-view="gallery">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg>
+              <span>갤러리</span>
+            </button>
+            <button class="dash-side-link" data-view="multiplayer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="10" r="3"/><path d="M14 20a6 6 0 0 1 8 0"/></svg>
+              <span>친구</span>
+            </button>
+            <button class="dash-side-link" data-view="store">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h2l3 12h10l3-9H7"/><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/></svg>
+              <span>스토어</span>
+            </button>
+            <div class="dash-sidebar-divider"></div>
+            <button class="dash-side-link" id="dash-new-map">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>새 맵 만들기</span>
+            </button>
+            <button class="dash-side-link" id="dash-continue">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+              <span id="dash-continue-label">이어서 편집</span>
+            </button>
+            <button class="dash-side-link" id="dash-browse">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span>탐험하기</span>
+            </button>
+          </nav>
+          <button class="dash-sidebar-premium">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+            <span>프리미엄 가입</span>
+          </button>
+        </aside>
 
-        <!-- ===== Quick actions ===== -->
-        <section class="dash-actions">
-          <button class="dash-action-card dash-action-primary" id="dash-new-map">
-            <svg class="dash-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-            <div class="dash-action-body">
-              <h3>새 맵 만들기</h3>
-              <p>빈 베이스플레이트에서 새로운 세계를 시작하세요</p>
+        <!-- ===== Main content ===== -->
+        <main class="dash-content">
+          <!-- Hero banner: welcome / stats -->
+          <section class="dash-hero-banner">
+            <div class="dash-hero-banner-left">
+              <div class="dash-hero-eyebrow">오늘의 빌드</div>
+              <h1 class="dash-hero-title">상상한 세계를<br/>블록으로 만들어보세요</h1>
+              <p class="dash-hero-desc">
+                무한한 베이스플레이트 위에 레고 블록을 쌓고, 도로를 깔고,
+                캐릭터와 차량으로 플레이하세요. 저장한 맵은 갤러리에 공유할
+                수 있어요.
+              </p>
+              <div class="dash-hero-cta">
+                <button class="dash-cta-primary" id="dash-hero-start">＋ 새 맵 만들기</button>
+                <button class="dash-cta-secondary" id="dash-hero-browse">갤러리 둘러보기</button>
+              </div>
             </div>
-          </button>
-          <button class="dash-action-card" id="dash-continue">
-            <svg class="dash-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
-            <div class="dash-action-body">
-              <h3>이어서 편집</h3>
-              <p id="dash-continue-label">최근 작업한 맵을 이어서 만드세요</p>
+            <div class="dash-hero-banner-stats">
+              <div class="dash-stat-pill">
+                <div class="dash-stat-num" id="stat-maps">0</div>
+                <div class="dash-stat-label">만든 맵</div>
+              </div>
+              <div class="dash-stat-pill">
+                <div class="dash-stat-num" id="stat-blocks">0</div>
+                <div class="dash-stat-label">쌓은 블록</div>
+              </div>
+              <div class="dash-stat-pill">
+                <div class="dash-stat-num" id="stat-public">0</div>
+                <div class="dash-stat-label">공개 맵</div>
+              </div>
+              <div class="dash-stat-pill">
+                <div class="dash-stat-num" id="stat-likes">0</div>
+                <div class="dash-stat-label">좋아요</div>
+              </div>
             </div>
-          </button>
-          <button class="dash-action-card" id="dash-browse">
-            <svg class="dash-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-            <div class="dash-action-body">
-              <h3>갤러리 탐험</h3>
-              <p>전 세계 창작자들의 맵을 둘러보세요</p>
-            </div>
-          </button>
-          <button class="dash-action-card" id="dash-store">
-            <svg class="dash-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h2l3 12h10l3-9H7"/><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/></svg>
-            <div class="dash-action-body">
-              <h3>에셋 스토어</h3>
-              <p>새로운 블록 팩과 프리미엄 에셋을 만나보세요</p>
-            </div>
-          </button>
-          <button class="dash-action-card" id="dash-multiplayer">
-            <svg class="dash-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="10" r="3"/><path d="M14 20a6 6 0 0 1 8 0"/></svg>
-            <div class="dash-action-body">
-              <h3>친구와 놀기</h3>
-              <p>방을 만들고 친구를 초대해 같이 플레이하세요</p>
-            </div>
-          </button>
-        </section>
+          </section>
 
-        <!-- ===== My Maps ===== -->
-        <section class="dash-section">
-          <div class="dash-section-head">
-            <div>
+          <!-- Row: 주목할 맵 -->
+          <section class="dash-row">
+            <div class="dash-row-head">
+              <h2>주목할 맵</h2>
+              <p>이번 주 커뮤니티가 사랑한 크리에이션</p>
+            </div>
+            <div class="dash-row-grid dash-row-grid-hero">
+              <div class="dash-insp-card featured">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body">
+                  <div class="dash-insp-title">네온 도시 2077</div>
+                  <div class="dash-insp-meta"><span class="insp-rating">★ 94%</span><span>2,341 블록</span></div>
+                </div>
+              </div>
+              <div class="dash-insp-card featured">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body">
+                  <div class="dash-insp-title">하늘성의 전설</div>
+                  <div class="dash-insp-meta"><span class="insp-rating">★ 91%</span><span>5,128 블록</span></div>
+                </div>
+              </div>
+              <div class="dash-insp-card featured">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body">
+                  <div class="dash-insp-title">비밀의 숲 놀이터</div>
+                  <div class="dash-insp-meta"><span class="insp-rating">★ 88%</span><span>1,889 블록</span></div>
+                </div>
+              </div>
+              <div class="dash-insp-card featured">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body">
+                  <div class="dash-insp-title">황금 해변 마을</div>
+                  <div class="dash-insp-meta"><span class="insp-rating">★ 92%</span><span>3,052 블록</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Row: 내 맵 -->
+          <section class="dash-row">
+            <div class="dash-row-head">
               <h2>내 맵</h2>
-              <p>클릭해서 이어서 편집하세요</p>
+              <div class="dash-filter">
+                <button class="dash-filter-btn active" data-filter="all">전체</button>
+                <button class="dash-filter-btn" data-filter="public">공개</button>
+                <button class="dash-filter-btn" data-filter="private">비공개</button>
+              </div>
             </div>
-            <div class="dash-filter">
-              <button class="dash-filter-btn active" data-filter="all">전체</button>
-              <button class="dash-filter-btn" data-filter="public">공개</button>
-              <button class="dash-filter-btn" data-filter="private">비공개</button>
+            <div id="dash-maps-grid" class="dash-row-grid">
+              <div class="dash-empty">불러오는 중...</div>
             </div>
-          </div>
-          <div id="dash-maps-grid" class="dash-maps-grid">
-            <div class="dash-empty">불러오는 중...</div>
-          </div>
-        </section>
+          </section>
 
-        <!-- ===== Inspiration ===== -->
-        <section class="dash-section">
-          <div class="dash-section-head">
-            <div>
-              <h2>오늘의 영감</h2>
-              <p>인기 있는 공개 맵을 둘러보세요 (곧 공개)</p>
+          <!-- Row: 추천 -->
+          <section class="dash-row">
+            <div class="dash-row-head">
+              <h2>이런 건 어떠세요</h2>
+              <p>오늘의 추천 맵</p>
             </div>
-          </div>
-          <div class="dash-inspiration">
-            <div class="dash-insp-card">
-              <div class="dash-insp-thumb"></div>
-              <div class="dash-insp-body">
-                <div class="dash-insp-title">네온 도시 2077</div>
-                <div class="dash-insp-meta">2,341 블록 · 234 likes</div>
+            <div class="dash-row-grid">
+              <div class="dash-insp-card">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body"><div class="dash-insp-title">판타지 성</div><div class="dash-insp-meta"><span class="insp-rating">★ 86%</span></div></div>
+              </div>
+              <div class="dash-insp-card">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body"><div class="dash-insp-title">레이싱 서킷</div><div class="dash-insp-meta"><span class="insp-rating">★ 82%</span></div></div>
+              </div>
+              <div class="dash-insp-card">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body"><div class="dash-insp-title">해저 탐험</div><div class="dash-insp-meta"><span class="insp-rating">★ 89%</span></div></div>
+              </div>
+              <div class="dash-insp-card">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body"><div class="dash-insp-title">사막 요새</div><div class="dash-insp-meta"><span class="insp-rating">★ 78%</span></div></div>
+              </div>
+              <div class="dash-insp-card">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body"><div class="dash-insp-title">농장 일기</div><div class="dash-insp-meta"><span class="insp-rating">★ 85%</span></div></div>
+              </div>
+              <div class="dash-insp-card">
+                <div class="dash-insp-thumb"></div>
+                <div class="dash-insp-body"><div class="dash-insp-title">우주 정거장</div><div class="dash-insp-meta"><span class="insp-rating">★ 90%</span></div></div>
               </div>
             </div>
-            <div class="dash-insp-card">
-              <div class="dash-insp-thumb"></div>
-              <div class="dash-insp-body">
-                <div class="dash-insp-title">하늘성의 전설</div>
-                <div class="dash-insp-meta">5,128 블록 · 892 likes</div>
-              </div>
-            </div>
-            <div class="dash-insp-card">
-              <div class="dash-insp-thumb"></div>
-              <div class="dash-insp-body">
-                <div class="dash-insp-title">비밀의 숲 놀이터</div>
-                <div class="dash-insp-meta">1,889 블록 · 412 likes</div>
-              </div>
-            </div>
-            <div class="dash-insp-card">
-              <div class="dash-insp-thumb"></div>
-              <div class="dash-insp-body">
-                <div class="dash-insp-title">황금 해변 마을</div>
-                <div class="dash-insp-meta">3,052 블록 · 567 likes</div>
-              </div>
-            </div>
-          </div>
-        </section>
-      </main>
+          </section>
+        </main>
+      </div>
+
+      <!-- Legacy hidden shims so existing dashboard.ts listeners still resolve -->
+      <button id="dash-store" hidden></button>
+      <button id="dash-multiplayer" hidden></button>
     </div>
 
     <!-- ===== GALLERY ===== -->
@@ -411,6 +471,15 @@
         </svg>
       </button>
 
+      <!-- 팩맨 (pacman) — ghost -->
+      <button class="icon-bar-btn" title="팩맨" data-panel="pacman">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 12a8 8 0 0 1 16 0v9l-2.5-2-2.5 2-2.5-2-2.5 2-2.5-2L4 21z"/>
+          <circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none"/>
+          <circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+
       <div class="icon-bar-divider"></div>
 
       <!-- 환경 (environment) — sunrise (FiSunrise) -->
@@ -485,23 +554,21 @@
       </div>
 
       <header class="sidebar-header">
-        <div class="brand">
-          <div class="brand-text">
-            <h1 id="panel-title">블록</h1>
-            <p class="brand-sub">Block Studio</p>
+        <!-- Row 1: title on left, account avatar/login on right. -->
+        <div class="sidebar-header-top">
+          <h1 id="panel-title">블록</h1>
+          <!-- Auth: avatar when signed in; small login icon when out.
+               Populated by src/authUi.ts. -->
+          <div id="auth-slot" class="auth-slot"></div>
+        </div>
+        <!-- Row 2: mode toggle + play / help action buttons. -->
+        <div class="sidebar-header-actions">
+          <div class="row mode-row">
+            <button id="mode-place" class="mode-btn">설치</button>
+            <button id="mode-remove" class="mode-btn">제거</button>
           </div>
-          <div class="header-actions">
-            <div class="row mode-row">
-              <button id="mode-place" class="mode-btn">설치</button>
-              <button id="mode-remove" class="mode-btn">제거</button>
-            </div>
-            <button id="play" class="play-btn-compact" title="플레이">▶</button>
-            <button id="help-toggle" class="icon-btn" title="도움말">?</button>
-            <!-- Auth: shows a "Google 로그인" button when signed out,
-                 and an avatar dropdown when signed in. Populated by
-                 src/authUi.ts. -->
-            <div id="auth-slot" class="auth-slot"></div>
-          </div>
+          <button id="play" class="play-btn-compact" title="플레이">▶</button>
+          <button id="help-toggle" class="icon-btn" title="도움말">?</button>
         </div>
       </header>
 

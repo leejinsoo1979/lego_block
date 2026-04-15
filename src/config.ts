@@ -229,7 +229,9 @@ export const CATEGORIES: CategoryDef[] = [
   { id: 'playground', label: '놀이터' },
   { id: 'furniture', label: '가구' },
   { id: 'prop', label: '소품' },
+  { id: 'road', label: '도로' },
   { id: 'character', label: '캐릭터' },
+  { id: 'pacman', label: '팩맨' },
 ];
 
 export interface BlockTypeDef {
