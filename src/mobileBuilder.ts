@@ -444,6 +444,13 @@ function wireCategoryStrip(game: Game): void {
         )
       );
       rerenderHotbar(game);
+      // Keep the bottom sheet in sync with the strip selection so
+      // expanding the sheet shows the SAME category the user is
+      // currently filtering the hotbar by.
+      if (activeHotbarCategory) {
+        sheetActiveCategory = activeHotbarCategory;
+        rerenderSheet();
+      }
     });
     strip.appendChild(btn);
   }
@@ -470,6 +477,21 @@ function wireCategoryStrip(game: Game): void {
 /** Re-renders the hotbar. Called both when the user pins slots and
  *  when the category strip toggles activeHotbarCategory. */
 let rerenderHotbar: (game: Game) => void = () => {};
+let rerenderSheet: () => void = () => {};
+/** Updates which chip in the always-visible category strip is
+ *  highlighted. Uses the current `activeHotbarCategory` state so the
+ *  same function works whether the strip or the sheet triggered the
+ *  change. */
+function syncStripHighlight(): void {
+  const strip = document.getElementById('mb-cat-strip');
+  if (!strip) return;
+  strip.querySelectorAll<HTMLButtonElement>('.mb-cat-btn').forEach((b) => {
+    b.classList.toggle(
+      'is-active',
+      activeHotbarCategory !== null && b.dataset.category === activeHotbarCategory
+    );
+  });
+}
 
 function wireHotbar(game: Game): void {
   const track = document.getElementById('mb-hotbar-track');
@@ -669,6 +691,11 @@ function wireBottomSheet(game: Game): void {
       b.addEventListener('click', () => {
         haptic('tap');
         sheetActiveCategory = cat.id;
+        // Mirror into the hotbar-filter state + strip highlight so the
+        // two surfaces never disagree.
+        activeHotbarCategory = cat.id;
+        syncStripHighlight();
+        rerenderHotbar(game);
         renderTabs();
         renderGrid();
       });
@@ -676,6 +703,12 @@ function wireBottomSheet(game: Game): void {
     }
   };
   renderTabs();
+  // Expose for the category strip so it can force a re-render when
+  // strip selection changes.
+  rerenderSheet = () => {
+    renderTabs();
+    renderGrid();
+  };
 
   // --- Block grid ---
   const renderGrid = () => {
