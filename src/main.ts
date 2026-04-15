@@ -5,8 +5,29 @@ import { buildDashboardUI } from './dashboard';
 import { buildGalleryUI } from './gallery';
 import { buildStoreUI } from './store';
 import { buildMultiplayerUI } from './multiplayer';
-import { initLandingRouting, wireLandingButtons } from './landing';
+import { initLandingRouting, wireLandingButtons, enterApp } from './landing';
 import { loadCharacterModel } from './blocks';
+import { signInWithGoogle } from './auth';
+
+// Expose landing button actions as global functions FIRST, so the inline
+// onclick handlers in index.html have something to call even if the rest
+// of init() throws or is still loading. This is a bulletproof fallback
+// on top of the delegated document-level click listener.
+(window as unknown as { __legoLandingLogin: () => void }).__legoLandingLogin =
+  () => {
+    try {
+      signInWithGoogle();
+    } catch (err) {
+      console.error('[landing] Google login failed:', err);
+    }
+  };
+(window as unknown as { __legoLandingGuest: () => void }).__legoLandingGuest =
+  () => {
+    try {
+      sessionStorage.setItem('legoworld:entered-as-guest', '1');
+    } catch {}
+    enterApp();
+  };
 
 // Wire landing buttons IMMEDIATELY at boot (before awaiting any heavy
 // resource). Otherwise the ~500KB character GLB load blocks init() and
